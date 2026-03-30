@@ -1,44 +1,53 @@
 import {
-  IsString, IsNotEmpty, IsNumber, IsOptional,
-  IsEnum, Min, IsObject,
+  IsNumber,
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsUUID,
+  Min,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export enum PayoutType {
-  WIRE = 'wire',
-  CRYPTO = 'crypto',
-  SEPA = 'sepa',
-}
-
 export class CreatePayoutRequestDto {
-  @ApiProperty({ example: 'wallet-uuid' })
-  @IsString()
-  @IsNotEmpty()
+  @ApiProperty({ description: 'Wallet fuente' })
+  @IsUUID()
   wallet_id: string;
 
-  @ApiProperty({ enum: PayoutType })
-  @IsEnum(PayoutType)
-  payout_type: PayoutType;
+  @ApiPropertyOptional({ description: 'External account destino (Bridge)' })
+  @IsOptional()
+  @IsUUID()
+  bridge_external_account_id?: string;
 
-  @ApiProperty({ example: 1500.00 })
+  @ApiPropertyOptional({ description: 'Supplier destino (alternativo)' })
+  @IsOptional()
+  @IsUUID()
+  supplier_id?: string;
+
+  @ApiProperty({ example: 'wire', enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'crypto'] })
+  @IsString()
+  @IsNotEmpty()
+  payment_rail: string;
+
+  @ApiProperty({ example: 2000.0 })
   @IsNumber()
-  @Min(1)
-  amount_usd: number;
+  @Min(0.01)
+  amount: number;
 
-  @ApiProperty({ example: 'USD' })
+  @ApiProperty({ example: 'usd' })
   @IsString()
-  source_currency: string;
+  @IsNotEmpty()
+  currency: string;
 
-  @ApiProperty({ example: 'MXN' })
+  @ApiProperty({ example: 'Pago a proveedor — Factura #2026-001' })
   @IsString()
-  destination_currency: string;
+  @IsNotEmpty()
+  @MaxLength(500)
+  business_purpose: string;
 
-  @ApiProperty({ description: 'Datos de destino (cuenta bancaria o dirección crypto)' })
-  @IsObject()
-  destination_details: Record<string, unknown>;
-
-  @ApiPropertyOptional({ example: 'Pago a proveedor Guangzhou Electronics' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  description?: string;
+  @MaxLength(1000)
+  notes?: string;
 }

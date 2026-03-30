@@ -48,6 +48,9 @@ El flujo termina cuando el Staff aprueba el expediente y el sistema registra al 
 
 ### Post-Aprobación (llamado por Worker / Admin)
 - [ ] F2.22 — `registerCustomerInBridge(userId)` — servicio interno: crea customer en Bridge API
+  - Incluir TODOS los campos requeridos por Bridge: identidad, contacto, dirección completa, KYC docs (ver [GAP 3 FIX] más abajo)
+  - Manejar explícitamente errores de Bridge: 400 (datos insóficientes), 409 (ya existe), 422 (validación)
+  - Loguear la respuesta completa de Bridge en `activity_logs` para auditoría
 - [ ] F2.23 — Al recibir `bridge_customer_id` → actualizar `profiles`
 - [ ] F2.24 — Inicializar wallets y balances del cliente aprobado
 
@@ -182,40 +185,143 @@ const { data: url } = await this.supabase.storage
 
 Cuando el Staff aprueba el expediente KYC/KYB en la fase de compliance:
 
+> ⚠️ **[GAP 3 FIX]** Bridge puede rechazar el customer si faltan campos requeridos por tu account configuration.
+> Asegúrate de enviar todos los campos y manejar errores explícitamente.
+
 ```typescript
 async registerCustomerInBridge(userId: string): Promise<string> {
-  // 1. Obtener datos del perfil y person/business
-  const { data: person } = await this.supabase
-    .from('people')
-    .select('*')
-    .eq('user_id', userId)
+  // 1. Obtener perfil y datos completos del usuario
+  const { data: profile } = await this.supabase
+    .from('profiles')
+    .select('*, people(*), businesses(*)')
+    .eq('id', userId)
     .single();
 
-  // 2. Crear customer en Bridge API
-  const response = await fetch(`${this.bridgeBaseUrl}/v0/customers`, {
-    method: 'POST',
-    headers: this.bridgeHeaders,
-    body: JSON.stringify({
+  if (profile.bridge_customer_id) {
+    // Ya registrado — idempotente
+    return profile.bridge_customer_id;
+  }
+
+  // 2. Construir payload según tipo de cliente
+  let customerPayload: Record<string, unknown>;
+
+  if (profile.account_type === 'individual' || profile.people) {
+    // KYC — Persona Natural
+    const person = profile.people;
+    customerPayload = {
       type: 'individual',
       first_name: person.first_name,
       last_name: person.last_name,
-      email: person.email,
-      date_of_birth: person.date_of_birth,
-      // ... demás campos
-    }),
-  });
+      email: person.email ?? profile.email,
+      date_of_birth: person.date_of_birth,                  // formato: 'YYYY-MM-DD'
+      nationality: person.nationality,                       // ISO 3166-1 alpha-2
+      // Dirección completa — Bridge requiere estos campos:
+      address: {
+        street: person.address1,
+        city: person.city,
+        state: person.state,
+        postal_code: person.postal_code,
+        country: person.country,                             // ISO 3166-1 alpha-2
+      },
+      // Documento de identidad
+      government_id: {
+        type: person.id_type,                                // 'passport' | 'drivers_license' | 'national_id'
+        number: person.id_number,
+        expiry_date: person.id_expiry_date,
+      },
+      // AML fields
+      is_pep: person.is_pep,
+      source_of_funds: person.source_of_funds,
+      account_purpose: person.account_purpose,
+    };
+  } else {
+    // KYB — Empresa
+    const biz = profile.businesses;
+    customerPayload = {
+      type: 'business',
+      name: biz.legal_name,
+      email: biz.email ?? profile.email,
+      tax_id: biz.tax_id,
+      entity_type: biz.entity_type,
+      incorporation_date: biz.incorporation_date,
+      country_of_incorporation: biz.country_of_incorporation,
+      website: biz.website,
+      // Dirección de negocio
+      address: {
+        street: biz.address1,
+        city: biz.city,
+        state: biz.state,
+        postal_code: biz.postal_code,
+        country: biz.country,
+      },
+      // AML fields
+      description: biz.business_description,
+      source_of_funds: biz.source_of_funds,
+      conducts_money_services: biz.conducts_money_services,
+    };
+  }
 
-  const bridgeCustomer = await response.json();
+  // 3. Llamar Bridge API con manejo explícito de errores
+  let bridgeCustomer: Record<string, unknown>;
+  try {
+    const response = await fetch(`${this.bridgeBaseUrl}/v0/customers`, {
+      method: 'POST',
+      headers: {
+        ...this.bridgeHeaders,
+        'Idempotency-Key': `register-customer-${userId}`,
+      },
+      body: JSON.stringify(customerPayload),
+    });
 
-  // 3. Guardar bridge_customer_id en profiles
+    if (!response.ok) {
+      const errorBody = await response.text();
+      // Loguear el error detallado para debugging
+      await this.supabase.from('activity_logs').insert({
+        user_id: userId,
+        action: 'BRIDGE_CUSTOMER_REGISTRATION_FAILED',
+        description: `Bridge rechazó el registro: HTTP ${response.status} — ${errorBody}`,
+      });
+      throw new Error(
+        `Bridge API rechazó customer: [${response.status}] ${errorBody}`
+      );
+    }
+
+    bridgeCustomer = await response.json();
+  } catch (err) {
+    // Si es un error de red, no borrar el estado del usuario
+    throw new BadGatewayException(`Error conectando con Bridge API: ${err.message}`);
+  }
+
+  // Manejar caso especial 409: customer ya existe en Bridge (idempotencia)
+  // Bridge devolverá el customer existente en el body del 409
+  const customerId = bridgeCustomer.id as string;
+  if (!customerId) {
+    throw new Error('Bridge no retornó un customer_id válido');
+  }
+
+  // 4. Guardar bridge_customer_id en profiles
   await this.supabase
     .from('profiles')
-    .update({ bridge_customer_id: bridgeCustomer.id })
+    .update({
+      bridge_customer_id: customerId,
+      onboarding_status: 'bridge_registered',
+    })
     .eq('id', userId);
 
-  return bridgeCustomer.id;
+  // 5. Log de éxito
+  await this.supabase.from('activity_logs').insert({
+    user_id: userId,
+    action: 'BRIDGE_CUSTOMER_REGISTERED',
+    description: `Customer registrado en Bridge: ${customerId}`,
+  });
+
+  return customerId;
 }
 ```
+
+> **Campos Bridge por configuración de cuenta:** Bridge puede requerir campos adicionales
+> según tu configuración (`ssn_last_4` para US persons, `phone_number`, etc.).
+> Siempre revisar la respuesta 400 de Bridge — incluye un array `errors` con los campos faltantes.
 
 ---
 

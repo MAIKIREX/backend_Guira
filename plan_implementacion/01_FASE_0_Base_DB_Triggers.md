@@ -18,7 +18,7 @@ Esta fase establece la base sobre la que todo lo demás opera.
 ## 📋 CHECKLIST DE ESTA FASE
 
 - [ ] T0.1 — Trigger: auto-crear `profiles` al registrar usuario en auth.users
-- [ ] T0.2 — Trigger: actualizar `balances` al insertar en `ledger_entries`
+- [ ] T0.2 — Trigger: actualizar `balances` al insertar en `ledger_entries` (solo status='settled')
 - [ ] T0.3 — Trigger: crear `compliance_review` al cambiar KYC/KYB a 'SUBMITTED'
 - [ ] T0.4 — Trigger: escribir `audit_logs` en mutaciones de tablas sensibles
 - [ ] T0.5 — Trigger: bloquear UPDATE/DELETE en `compliance_review_events` (inmutabilidad)
@@ -26,11 +26,13 @@ Esta fase establece la base sobre la que todo lo demás opera.
 - [ ] T0.7 — RLS: verificar todas las policies en tablas de `profiles` (lectura propia)
 - [ ] T0.8 — RLS: policies para `compliance_reviews` (solo Staff/Admin puede ver todo)
 - [ ] T0.9 — Seed: insertar `fees_config` defaults
-- [ ] T0.10 — Seed: insertar `app_settings` defaults
+- [ ] T0.10 — Seed: insertar `app_settings` defaults (incluyendo `SUPPORTED_WALLET_CONFIGS`)
 - [ ] T0.11 — Seed: insertar `payin_routes` defaults
 - [ ] T0.12 — Verificar que las políticas RLS de `ledger_entries` permiten INSERT desde service_role
 - [ ] T0.13 — Crear función PostgreSQL `get_user_balance(user_id, currency)` helper
-- [ ] T0.14 — Test de integración básico: crear usuario → perfil creado → balance inicializado
+- [ ] T0.14 — [GAP 5 FIX] Crear función PostgreSQL `calculate_balance_from_ledger(wallet_id)` — requerida por ReconciliationService
+- [ ] T0.15 — [GAP 7 FIX] Crear función PostgreSQL `release_reserved_balance(user_id, currency, amount)` — requerida por Fase 4 y Fase 5
+- [ ] T0.16 — Test de integración básico: crear usuario → perfil creado → balance inicializado
 
 ---
 
@@ -66,6 +68,11 @@ CREATE TRIGGER on_auth_user_created
 
 ### T0.2 — Trigger: Actualizar Balances desde Ledger
 
+> ⚠️ **IMPORTANTE [GAP 1 FIX]:** El trigger SOLO debe actualizar balances cuando `NEW.status = 'settled'`.
+> Los entries con `status = 'pending'` NO deben alterar los balances — el saldo reservado ya fue
+> aplicado manualmente al crear el `payout_request`. Si el trigger actualizaba también para 'pending',
+> esto provocaría un doble descuento del saldo.
+
 ```sql
 -- Migration: 20260328_02_trigger_balance_update.sql
 CREATE OR REPLACE FUNCTION public.update_balance_from_ledger()
@@ -84,7 +91,7 @@ BEGIN
   -- Calcular delta (credit = positivo, debit = negativo)
   v_delta := CASE WHEN NEW.type = 'credit' THEN NEW.amount ELSE -NEW.amount END;
 
-  -- Solo si el entry está 'settled'
+  -- Solo si el entry está 'settled' (NO para 'pending' ni 'failed')
   IF NEW.status = 'settled' THEN
     INSERT INTO public.balances (user_id, currency, amount, available_amount)
     VALUES (v_user_id, NEW.currency, v_delta, v_delta)
@@ -95,12 +102,30 @@ BEGIN
       updated_at       = NOW();
   END IF;
 
+  -- Manejar transición de 'pending' a 'settled' en UPDATE (para payouts completados)
+  -- Cuando el handler de webhook llama UPDATE SET status='settled' en un entry pendiente:
+  IF TG_OP = 'UPDATE' AND OLD.status = 'pending' AND NEW.status = 'settled' THEN
+    -- Para débitos completados: descontar del amount Y liberar el reserved_amount
+    IF NEW.type = 'debit' THEN
+      UPDATE public.balances SET
+        amount           = balances.amount           + v_delta, -- v_delta es negativo
+        reserved_amount  = GREATEST(0, reserved_amount - NEW.amount),
+        updated_at       = NOW()
+      WHERE user_id = v_user_id AND currency = NEW.currency;
+    END IF;
+  END IF;
+
   RETURN NEW;
 END;
 $$;
 
 CREATE TRIGGER after_ledger_entry_insert
   AFTER INSERT ON public.ledger_entries
+  FOR EACH ROW EXECUTE FUNCTION public.update_balance_from_ledger();
+
+-- Trigger adicional para el UPDATE (transición pending → settled)
+CREATE TRIGGER after_ledger_entry_update
+  AFTER UPDATE OF status ON public.ledger_entries
   FOR EACH ROW EXECUTE FUNCTION public.update_balance_from_ledger();
 ```
 
@@ -220,7 +245,9 @@ VALUES
   ('MAINTENANCE_MODE',            'false',       'boolean', 'Bloquea nuevas transacciones', true),
   ('BRIDGE_ENVIRONMENT',          'production',  'string',  'Entorno Bridge API', false),
   ('DEFAULT_DEVELOPER_FEE_PCT',   '1.0',         'number',  'Fee por defecto en Virtual Accounts', false),
-  ('SUPPORTED_CURRENCIES',        '["USD","USDC","EUR"]', 'json', 'Divisas activas', true);
+  ('SUPPORTED_CURRENCIES',        '["USD","USDC","EUR"]', 'json', 'Divisas activas', true),
+  -- [GAP 4 FIX] Configuración de wallets — define qué wallets crear para cada cliente nuevo
+  ('SUPPORTED_WALLET_CONFIGS',    '[{"currency":"usdc","network":"ethereum"}]', 'json', 'Wallets a crear por defecto para clientes aprobados. Formato: [{currency, network}]', false);
 ```
 
 ### payin_routes (Rutas de entrada)
@@ -260,12 +287,69 @@ CREATE POLICY "staff_read_all" ON profiles
 
 1. Al crear un usuario vía Supabase Auth → se crea automáticamente un registro en `profiles`
 2. Al insertar un `ledger_entry` con `status = 'settled'` → el balance del usuario se actualiza
-3. Al cambiar `kyc_applications.status = 'SUBMITTED'` → se crea un `compliance_review`
-4. Intentar UPDATE en `audit_logs` → lanza excepción
-5. Los seeds están insertados y consultables vía API
+3. Al actualizar un `ledger_entry` de `'pending'` a `'settled'` → el balance también se actualiza (trigger cubre UPDATE)
+4. Al insertar un `ledger_entry` con `status = 'pending'` → el balance NO cambia (solo el reserved_amount fue aplicado antes)
+5. Al cambiar `kyc_applications.status = 'SUBMITTED'` → se crea un `compliance_review`
+6. Intentar UPDATE en `audit_logs` → lanza excepción
+7. Los seeds están insertados y consultables vía API (incluyendo `SUPPORTED_WALLET_CONFIGS`)
+8. **[GAP 5]** `calculate_balance_from_ledger(wallet_id)` retorna la suma correcta de ledger entries settled
+9. **[GAP 7]** `release_reserved_balance(user_id, currency, amount)` libera el saldo reservado correctamente sin ir a negativo
 
 ---
 
 ## 🔗 SIGUIENTE FASE
 
 Con los triggers y seeds listos → **[FASE 1: Auth e Identidad](./02_FASE_1_Auth_e_Identidad.md)**
+
+---
+
+## 🛠️ FUNCIONES POSTGRESQL AUXILIARES (Requeridas por otras fases)
+
+### [GAP 5 FIX] calculate_balance_from_ledger — para ReconciliationService
+
+```sql
+-- Migration: 20260328_06_fn_calculate_balance.sql
+CREATE OR REPLACE FUNCTION public.calculate_balance_from_ledger(
+  p_wallet_id uuid
+) RETURNS TABLE(total numeric, currency text)
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+  SELECT
+    COALESCE(SUM(
+      CASE WHEN type = 'credit' THEN amount
+           ELSE -amount
+      END
+    ), 0) AS total,
+    currency
+  FROM public.ledger_entries
+  WHERE wallet_id = p_wallet_id
+    AND status = 'settled'
+  GROUP BY currency;
+$$;
+```
+
+### [GAP 7 FIX] release_reserved_balance — para Fase 4 y Fase 5
+
+```sql
+-- Migration: 20260328_07_fn_release_reserved.sql
+CREATE OR REPLACE FUNCTION public.release_reserved_balance(
+  p_user_id  uuid,
+  p_currency text,
+  p_amount   numeric
+) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+BEGIN
+  UPDATE public.balances
+  SET
+    reserved_amount  = GREATEST(0, reserved_amount - p_amount),
+    available_amount = available_amount + p_amount,
+    updated_at       = NOW()
+  WHERE user_id = p_user_id AND currency = p_currency;
+
+  IF NOT FOUND THEN
+    RAISE WARNING 'release_reserved_balance: no balance found for user % currency %', p_user_id, p_currency;
+  END IF;
+END;
+$$;
+```

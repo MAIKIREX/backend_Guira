@@ -1,0 +1,45 @@
+{
+  "documento": "Guía de Alta de Cuenta en Guira",
+  "version": "1.0.0",
+  "generado_desde": "backend_Guira (NestJS + Supabase)",
+  "fecha": "2026-03-29",
+  "base_url": "https://api.guira.app/v1",
+  "descripcion": "Esta documentación describe paso a paso el flujo completo para dar de alta una cuenta en la plataforma Guira, desde el registro inicial hasta la activación de la wallet con acceso al sistema de pagos internacionales.",
+  "flujos_disponibles": [
+    {
+      "id": "KYC",
+      "nombre": "Alta Persona Natural (KYC)",
+      "descripcion": "Para usuarios individuales que desean operar en Guira por cuenta propia.",
+      "archivo": "01_FLUJO_KYC_PERSONA_NATURAL.json"
+    },
+    {
+      "id": "KYB",
+      "nombre": "Alta Empresa (KYB)",
+      "descripcion": "Para empresas o negocios que operarán en la plataforma. Incluye directores y beneficiarios finales (UBOs).",
+      "archivo": "02_FLUJO_KYB_EMPRESA.json"
+    }
+  ],
+  "estados_de_onboarding": {
+    "descripcion": "El campo `onboarding_status` en el perfil del usuario refleja la etapa en que se encuentra.",
+    "valores": [
+      { "estado": "pending",      "descripcion": "Cuenta creada, aún no ha iniciado el proceso de verificación." },
+      { "estado": "kyc_started",  "descripcion": "El usuario inició el proceso KYC (aplicación creada)." },
+      { "estado": "kyb_started",  "descripcion": "La empresa inició el proceso KYB (aplicación creada)." },
+      { "estado": "in_review",    "descripcion": "El expediente fue enviado y está siendo revisado por el equipo de compliance." },
+      { "estado": "approved",     "descripcion": "Cuenta aprobada. Se generó el bridge_customer_id y la wallet está activa." },
+      { "estado": "rejected",     "descripcion": "El expediente fue rechazado. El usuario recibirá notificación con la razón." },
+      { "estado": "needs_review", "descripcion": "El equipo de compliance solicitó correcciones en el expediente." }
+    ]
+  },
+  "autenticacion": {
+    "tipo": "Bearer Token (JWT Supabase)",
+    "header": "Authorization: Bearer <access_token>",
+    "nota": "Todos los endpoints (excepto /auth/register y /auth/refresh) requieren el token de acceso."
+  },
+  "precondiciones_globales": [
+    "El usuario debe tener 18 años o más.",
+    "Los documentos de identidad deben ser en formato PDF, JPG o PNG.",
+    "El tamaño máximo por documento es 10 MB.",
+    "El email no puede estar previamente registrado en la plataforma."
+  ]
+}

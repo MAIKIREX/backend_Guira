@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiExcludeEndpoint } from '@nestjs/swagger';
 import type { Request } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../core/guards/supabase-auth.guard';
 import { WebhooksService } from './webhooks.service';
 
@@ -25,6 +26,7 @@ export class WebhooksController {
    * El procesamiento real lo hace el CRON worker.
    */
   @Public()
+  @Throttle({ default: { limit: 1000, ttl: 60000 } }) // Permite ráfagas del proveedor (1000 / minuto)
   @Post('bridge')
   @HttpCode(200)
   @ApiOperation({ summary: 'Receptor de webhooks Bridge (Webhook Sink)' })

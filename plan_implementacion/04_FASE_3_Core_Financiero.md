@@ -23,6 +23,9 @@ Este es el corazón financiero. Sin ledger funcional, ningún depósito ni retir
 - [ ] F3.1 — `GET /wallets` — lista wallets activas del usuario (address, network, currency)
 - [ ] F3.2 — `GET /wallets/:id` — detalle de una wallet específica
 - [ ] F3.3 — Servicio interno: `initializeClientWallets(userId, bridgeCustomerId)` — crea wallets via Bridge API
+  - [GAP 4 FIX] La red y currency NO están hardcodeadas. Se leen desde `app_settings.SUPPORTED_WALLET_CONFIGS`
+  - Por defecto: USDC en Ethereum. Configurable desde el admin panel para añadir Polygon, Base, Solana, etc.
+  - Si un cliente ya tiene wallet activa de una currency/network, no crear duplicada
 - [ ] F3.4 — Guardar wallet response de Bridge en `wallets` table (bridge_wallet_id, address, network)
 
 ### Balances
@@ -110,28 +113,77 @@ interface Wallet {
 
 ### Inicialización de Cliente Aprobado
 
+> ⚠️ **[GAP 4 FIX]** La red (`network`) y currency de la wallet NO deben estar hardcodeadas.
+> Deben leerse desde `app_settings` para ser configurables sin deploy.
+
 ```typescript
 async onClientApproved(userId: string, bridgeCustomerId: string): Promise<void> {
-  // 1. Crear wallet USDC en red Ethereum via Bridge
-  const walletRes = await this.createBridgeWallet(bridgeCustomerId, 'usdc', 'ethereum');
+  // [GAP 4 FIX] Leer configuración de wallets desde app_settings
+  // SUPPORTED_WALLET_CONFIGS define qué wallets crear por defecto para cada cliente nuevo
+  // Ejemplo de valor en app_settings:
+  // key: 'SUPPORTED_WALLET_CONFIGS'
+  // value: '[{"currency":"usdc","network":"ethereum"},{"currency":"usdc","network":"polygon"}]'
+  const { data: setting } = await this.supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'SUPPORTED_WALLET_CONFIGS')
+    .single();
 
-  // 2. Guardar wallet en DB
-  await this.supabase.from('wallets').insert({
+  const walletConfigs: Array<{ currency: string; network: string }> =
+    JSON.parse(setting?.value ?? '[{"currency":"usdc","network":"ethereum"}]');
+
+  // Crear wallets para cada configuración activa
+  for (const config of walletConfigs) {
+    // Verificar que no existe ya una wallet activa con esa currency/network
+    const { data: existing } = await this.supabase
+      .from('wallets')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('currency', config.currency.toUpperCase())
+      .eq('network', config.network)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (existing) continue; // Ya tiene esa wallet — saltar
+
+    // Crear wallet en Bridge API
+    const walletRes = await this.createBridgeWallet(
+      bridgeCustomerId, config.currency, config.network
+    );
+
+    // Guardar en DB
+    await this.supabase.from('wallets').insert({
+      user_id: userId,
+      currency: config.currency.toUpperCase(),
+      address: walletRes.address,
+      network: config.network,
+      provider_key: 'bridge',
+      provider_wallet_id: walletRes.id,
+      is_active: true,
+    });
+  }
+
+  // Inicializar balances según las divisas de las wallets creadas
+  // Por defecto: USD (fiat) y USDC (crypto)
+  const currencies = [...new Set(walletConfigs.map(c => c.currency.toUpperCase())), 'USD'];
+  const balanceRows = currencies.map(currency => ({
     user_id: userId,
-    currency: 'USDC',
-    address: walletRes.address,
-    network: 'ethereum',
-    provider_key: 'bridge',
-    provider_wallet_id: walletRes.id,
-  });
+    currency,
+    amount: 0,
+    available_amount: 0,
+    reserved_amount: 0,
+  }));
 
-  // 3. Inicializar balances en USD y USDC
-  await this.supabase.from('balances').insert([
-    { user_id: userId, currency: 'USD',  amount: 0, available_amount: 0 },
-    { user_id: userId, currency: 'USDC', amount: 0, available_amount: 0 },
-  ]);
+  await this.supabase.from('balances').upsert(balanceRows, {
+    onConflict: 'user_id,currency',
+    ignoreDuplicates: true,
+  });
 }
-```
+
+// Configuración recomendada en app_settings (seed en Fase 0):
+// key: 'SUPPORTED_WALLET_CONFIGS'
+// value: '[{"currency":"usdc","network":"ethereum"}]'
+// Para añadir Polygon: '[{"currency":"usdc","network":"ethereum"},{"currency":"usdc","network":"polygon"}]'
 
 ### Servicio de Cálculo de Fee
 

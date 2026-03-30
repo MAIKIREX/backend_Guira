@@ -1,10 +1,15 @@
-import { Module } from '@nestjs/common';
-import { ComplianceController } from './compliance.controller';
+import { Module, forwardRef } from '@nestjs/common';
+import { ComplianceController, AdminComplianceController, AdminUserController } from './compliance.controller';
 import { ComplianceService } from './compliance.service';
+import { ComplianceActionsService } from './compliance-actions.service';
+import { BridgeModule } from '../bridge/bridge.module';
+import { OnboardingModule } from '../onboarding/onboarding.module';
 
 @Module({
-  controllers: [ComplianceController],
-  providers: [ComplianceService],
-  exports: [ComplianceService],
+  imports: [forwardRef(() => BridgeModule), forwardRef(() => OnboardingModule)],
+  controllers: [ComplianceController, AdminComplianceController, AdminUserController],
+  providers: [ComplianceService, ComplianceActionsService],
+  exports: [ComplianceService, ComplianceActionsService],
 })
 export class ComplianceModule {}
+

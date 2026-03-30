@@ -13,10 +13,12 @@ Corregir y completar el sistema de Webhook Sink que ya existe en el código pero
 
 1. `handleFundsReceived()` → Busca por `.eq('va_id', vaId)` pero la columna real es `bridge_virtual_account_id`
 2. `handleFundsReceived()` → Inserta en `ledger_entries` con campos incorrectos (`user_id` no existe — debe usar `wallet_id`)
-3. `handleKycApproved()` → Busca por `kyc_link_id` pero la columna real es `bridge_kyc_link_id`
-4. `handleKybApproved()` → Busca por `bridge_customer_id` en `kyb_applications` pero esa columna no existe ahí
-5. `handleLiquidationPayment()` → Busca por `bridge_address_id` pero la columna real es `bridge_liquidation_address_id`
-6. Los ledger entries no incluyen `bridge_transfer_id` cuando aplica
+3. `handleFundsReceived()` → [GAP 6 FIX] No inserta en `bridge_virtual_account_events` — es obligatorio como log de eventos del VA
+4. `handleKycApproved()` → Busca por `kyc_link_id` pero la columna real es `bridge_kyc_link_id`
+5. `handleKybApproved()` → [GAP 2 FIX] Bridge NO envía un evento `kyb_link.approved` separado. El evento es siempre `kyc_link.approved`. La distinción KYC vs KYB se determina por el campo `customer.type` en el payload (`'individual'` = KYC, `'business'` = KYB). El handler debe leer `payload.data.customer.type` para saber qué tabla actualizar.
+6. `handleLiquidationPayment()` → Busca por `bridge_address_id` pero la columna real es `bridge_liquidation_address_id`
+7. Los ledger entries no incluyen `bridge_transfer_id` cuando aplica
+8. [GAP 1 FIX] El handler `handleTransferComplete()` debe actualizar el ledger_entry existente de `pending` a `settled` (trigger actualiza balances). NO debe crear un ledger_entry nuevo.
 
 ---
 
@@ -38,18 +40,22 @@ Corregir y completar el sistema de Webhook Sink que ya existe en el código pero
 
 - [ ] F5.9 — `handleFundsReceived()` — corregir columnas y flujo completo:
   - Buscar VA por `bridge_virtual_account_id`
+  - [GAP 6 FIX] INSERT `bridge_virtual_account_events` como primer paso (log del evento en el VA)
   - Calcular fee via `FeesService`
   - INSERT `payment_orders`
   - INSERT `ledger_entries` (wallet_id, type='credit', status='settled')
   - Trigger actualiza `balances`
   - INSERT `notifications` al cliente
   - UPDATE `webhook_events.status = 'processed'`
+  - [GAP 7 FIX] Toda la operación debe ser atómica vía `supabase.rpc('process_funds_received_tx', {...})` o transacción manual. Si falla en cualquier punto, NO marcar el webhook como 'processed'
 
 - [ ] F5.10 — `handleTransferPaymentProcessed()` — actualizar `bridge_transfers.bridge_state`
 
 - [ ] F5.11 — `handleTransferComplete()` — flujo completo:
   - UPDATE `bridge_transfers.status = 'completed'`
   - UPDATE `payout_requests.status = 'completed'`
+  - [GAP 1 FIX] UPDATE `ledger_entries SET status = 'settled'` WHERE `bridge_transfer_id = X` AND `status = 'pending'` — NO crear entry nuevo
+  - El trigger de DB detecta el cambio a 'settled' y actualiza `balances` (descuenta amount + libera reserved_amount)
   - INSERT `certificates` (PDF del comprobante)
   - INSERT `notifications` al cliente
   - INSERT `activity_logs`
@@ -57,28 +63,26 @@ Corregir y completar el sistema de Webhook Sink que ya existe en el código pero
 - [ ] F5.12 — `handleTransferFailed()` — flujo completo:
   - UPDATE `bridge_transfers.status = 'failed'`
   - UPDATE `payout_requests.status = 'failed'`
-  - INSERT `ledger_entries` (type='reversal', amount=+amount) — devuelve el dinero
-  - UPDATE `balances` via trigger
+  - UPDATE `ledger_entries SET status = 'failed'` WHERE `bridge_transfer_id = X` AND `status = 'pending'` (cancela el entry pendiente)
+  - Llamar `release_reserved_balance(user_id, currency, amount)` — libera el saldo reservado
   - INSERT `notifications` al cliente informando fallo + devolución
 
 - [ ] F5.13 — `handleKycApproved()` — corregir y completar:
   - Buscar por `bridge_kyc_links.bridge_kyc_link_id`
-  - UPDATE `kyc_applications.status = 'approved'`
+  - [GAP 2 FIX] Leer `payload.data.customer.type`: si es `'individual'` → actualizar `kyc_applications`; si es `'business'` → actualizar `kyb_applications`
+  - UPDATE aplicación correspondiente: `status = 'approved'`
   - UPDATE `profiles.onboarding_status = 'approved'`
   - Llamar `registerCustomerInBridge()` si aún no tiene `bridge_customer_id`
   - Inicializar `wallets` y `balances`
   - INSERT `notifications`
 
-- [ ] F5.14 — `handleKybApproved()` — corregir:
-  - Buscar por `profiles.bridge_customer_id` (es en profiles donde se guarda)
-  - UPDATE `kyb_applications.status = 'approved'`
-  - UPDATE `profiles.onboarding_status = 'approved'`
-  - Inicializar wallets y balances
-  - INSERT `notifications`
+- [ ] F5.14 — `handleKybApproved()` — ELIMINAR como handler separado:
+  - [GAP 2 FIX] Bridge no envía `kyb_link.approved`. Este caso ya es manejado por `handleKycApproved()` según `customer.type = 'business'`. Si existiera un handler separado, solo era por confusión del schema anterior.
 
 - [ ] F5.15 — `handleLiquidationPayment()` — corregir columnas:
   - Buscar por `bridge_liquidation_addresses.bridge_liquidation_address_id`
-  - INSERT `ledger_entries` (wallet_id del usuario, type='credit')
+  - INSERT `ledger_entries` (wallet_id del usuario, type='credit', status='settled')
+  - Trigger actualiza `balances`
   - INSERT `notifications`
 
 ---
@@ -151,7 +155,18 @@ async handleFundsReceived(payload: BridgePayload): Promise<void> {
 
   if (!va) throw new Error(`Virtual account no encontrada: ${vaId}`);
 
-  // 2. Obtener wallet del usuario
+  // [GAP 6 FIX] 2. Insertar en bridge_virtual_account_events (log del evento del VA)
+  await this.supabase.from('bridge_virtual_account_events').insert({
+    bridge_virtual_account_id: vaId,
+    bridge_event_id: payload.id as string,
+    event_type: 'virtual_account.funds_received',
+    amount,
+    currency: (data.currency as string) ?? va.source_currency,
+    sender_name: senderName,
+    raw_payload: payload,
+  });
+
+  // 3. Obtener wallet del usuario
   const { data: wallet } = await this.supabase
     .from('wallets')
     .select('id, currency')
@@ -161,12 +176,12 @@ async handleFundsReceived(payload: BridgePayload): Promise<void> {
 
   if (!wallet) throw new Error(`Wallet no encontrada para user ${va.user_id}`);
 
-  // 3. Calcular fee
+  // 4. Calcular fee
   const developerFeePercent = va.developer_fee_percent ?? 1.0;
   const feeAmount = parseFloat((amount * developerFeePercent / 100).toFixed(2));
   const netAmount = parseFloat((amount - feeAmount).toFixed(2));
 
-  // 4. INSERT payment_order
+  // 5. INSERT payment_order
   const { data: order } = await this.supabase.from('payment_orders').insert({
     user_id: va.user_id,
     wallet_id: wallet.id,
@@ -177,10 +192,13 @@ async handleFundsReceived(payload: BridgePayload): Promise<void> {
     net_amount: netAmount,
     currency: va.source_currency ?? 'usd',
     sender_name: senderName,
+    bridge_event_id: payload.id as string,
     status: 'completed',
   }).select('id').single();
 
-  // 5. INSERT ledger_entry — trigger actualiza balances
+  // 6. INSERT ledger_entry — trigger actualiza balances
+  // Para depósitos (pay-in), el ledger se crea directamente como 'settled'
+  // porque Bridge ya confirmó que los fondos fueron recibidos y convertidos.
   await this.supabase.from('ledger_entries').insert({
     wallet_id: wallet.id,  // ← usar wallet_id, no user_id
     type: 'credit',
@@ -192,7 +210,7 @@ async handleFundsReceived(payload: BridgePayload): Promise<void> {
     description: `Depósito Wire recibido — ${senderName}`,
   });
 
-  // 6. Notificar al cliente
+  // 7. Notificar al cliente
   await this.supabase.from('notifications').insert({
     user_id: va.user_id,
     type: 'financial',
@@ -202,12 +220,19 @@ async handleFundsReceived(payload: BridgePayload): Promise<void> {
     reference_id: order.id,
   });
 
-  // 7. Activity log
+  // 8. Activity log
   await this.supabase.from('activity_logs').insert({
     user_id: va.user_id,
     action: 'DEPOSIT_RECEIVED',
     description: `Depósito de $${amount} recibido via Virtual Account`,
   });
+
+  // [GAP 7 FIX] NOTA DE ATOMICIDAD:
+  // Este handler tiene múltiples writes. Si falla entre steps, el webhook
+  // NO se marca como 'processed' (esto lo hace el CRON después de que handler termine sin error).
+  // El CRON incrementa retry_count, lo que permite reintentar.
+  // Sin embargo, para produccion se recomienda envolver steps 5-6 en una función
+  // PostgreSQL transaccional: supabase.rpc('process_deposit_tx', { p_wallet_id, p_amount, ... })
 }
 ```
 
@@ -217,13 +242,16 @@ async handleFundsReceived(payload: BridgePayload): Promise<void> {
 
 | event_type | Handler | Tablas afectadas |
 |---|---|---|
-| `virtual_account.funds_received` | handleFundsReceived | payment_orders, ledger_entries, balances, notifications |
+| `virtual_account.funds_received` | handleFundsReceived | **bridge_virtual_account_events** (nuevo), payment_orders, ledger_entries, balances, notifications |
 | `transfer.payment_processed` | handleTransferPaymentProcessed | bridge_transfers |
-| `transfer.complete` | handleTransferComplete | bridge_transfers, payout_requests, certificates, notifications |
-| `transfer.failed` | handleTransferFailed | bridge_transfers, payout_requests, ledger_entries (reversal), balances, notifications |
-| `kyc_link.approved` | handleKycApproved | kyc_applications, profiles, wallets, balances, notifications |
-| `kyb_link.approved` | handleKybApproved | kyb_applications, profiles, wallets, balances, notifications |
+| `transfer.complete` | handleTransferComplete | bridge_transfers, payout_requests, **ledger_entries UPDATE settled** (trigger actualiza balances), certificates, notifications |
+| `transfer.failed` | handleTransferFailed | bridge_transfers, payout_requests, **ledger_entries UPDATE failed**, release_reserved_balance(), notifications |
+| `kyc_link.approved` | handleKycApproved | Determina KYC vs KYB según `customer.type`. Ambos casos: kyc/kyb_applications, profiles, wallets, balances, notifications |
 | `liquidation_address.payment_completed` | handleLiquidationPayment | ledger_entries, balances, notifications |
+
+> ⚠️ **[GAP 2 FIX]** Bridge **NO** envía un evento `kyb_link.approved` separado.
+> El evento es siempre `kyc_link.approved`. Para distinguir KYC de KYB, leer
+> `payload.data.customer.type`: `'individual'` = KYC | `'business'` = KYB.
 
 ---
 
@@ -235,6 +263,9 @@ async handleFundsReceived(payload: BridgePayload): Promise<void> {
 4. Handler de `transfer.failed` → libera `reserved_amount` y notifica al cliente
 5. Handler de `kyc_link.approved` → perfil queda con `onboarding_status = 'approved'` y `wallets` creadas
 6. Evento con firma inválida en producción → marcado como `ignored`, no procesado
+7. **[GAP 2]** Un `kyc_link.approved` con `customer.type = 'business'` actualiza `kyb_applications`, no `kyc_applications`
+8. **[GAP 6]** `handleFundsReceived()` inserta en `bridge_virtual_account_events` antes de crear el payment_order
+9. **[GAP 1]** `handleTransferComplete()` actualiza el ledger_entry existente a 'settled' (NO crea uno nuevo)
 
 ---
 

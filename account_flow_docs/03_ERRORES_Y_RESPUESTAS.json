@@ -1,0 +1,113 @@
+{
+  "documento": "Referencia de Errores y Respuestas HTTP — Guira Backend",
+  "version": "1.0.0",
+  "descripcion": "Catálogo de todos los errores que puede retornar la API de Guira durante el proceso de alta de cuenta.",
+
+  "codigos_http_generales": [
+    {
+      "codigo": 201,
+      "significado": "Created",
+      "descripcion": "El recurso fue creado exitosamente."
+    },
+    {
+      "codigo": 200,
+      "significado": "OK",
+      "descripcion": "Operación exitosa."
+    },
+    {
+      "codigo": 400,
+      "significado": "Bad Request",
+      "descripcion": "Los datos enviados no son válidos o faltan campos requeridos."
+    },
+    {
+      "codigo": 401,
+      "significado": "Unauthorized",
+      "descripcion": "No hay token de autenticación o el token es inválido/expirado."
+    },
+    {
+      "codigo": 403,
+      "significado": "Forbidden",
+      "descripcion": "El usuario autenticado no tiene los permisos necesarios para este endpoint."
+    },
+    {
+      "codigo": 404,
+      "significado": "Not Found",
+      "descripcion": "El recurso solicitado no existe."
+    },
+    {
+      "codigo": 409,
+      "significado": "Conflict",
+      "descripcion": "El recurso ya existe (por ejemplo, email duplicado)."
+    },
+    {
+      "codigo": 429,
+      "significado": "Too Many Requests",
+      "descripcion": "Se excedió el límite de intentos. Esperar antes de reintentar."
+    },
+    {
+      "codigo": 502,
+      "significado": "Bad Gateway",
+      "descripcion": "Error al conectar con Bridge API (proveedor externo)."
+    }
+  ],
+
+  "errores_por_endpoint": {
+    "POST /auth/register": [
+      { "error": "Ya existe una cuenta con este email", "causa": "El email ya está registrado.", "solucion": "Usar un email diferente o recuperar la contraseña." },
+      { "error": "Debe ser un email válido", "causa": "Formato de email incorrecto.", "solucion": "Verificar el formato: usuario@dominio.com" },
+      { "error": "La contraseña debe tener al menos 8 caracteres", "causa": "Password muy corto.", "solucion": "Usar una contraseña de 8+ caracteres." }
+    ],
+    "POST /onboarding/kyc/person": [
+      { "error": "El solicitante debe ser mayor de 18 años", "causa": "date_of_birth indica que la persona tiene menos de 18 años.", "solucion": "Solo personas mayores de 18 años pueden registrarse." },
+      { "error": "id_type must be one of...", "causa": "Valor de id_type inválido.", "solucion": "Usar: passport, drivers_license, o national_id." },
+      { "error": "date_of_birth must be a valid ISO 8601", "causa": "Formato de fecha incorrecto.", "solucion": "Usar formato YYYY-MM-DD." }
+    ],
+    "POST /onboarding/kyc/application": [
+      { "error": "Primero debes completar tus datos personales", "causa": "No existe registro en la tabla `people` para el usuario.", "solucion": "Llamar primero a POST /onboarding/kyc/person." }
+    ],
+    "PATCH /onboarding/kyc/application/submit": [
+      { "error": "Debes adjuntar al menos un documento de identidad antes de enviar", "causa": "No hay documentos con subject_type=person.", "solucion": "Subir documentos con POST /onboarding/documents/upload." },
+      { "error": "Debes aceptar los Terms of Service antes de enviar", "causa": "No se aceptó el ToS.", "solucion": "Llamar a POST /onboarding/kyc/tos-accept." }
+    ],
+    "POST /onboarding/documents/upload": [
+      { "error": "Tipo de archivo no permitido: {mime_type}", "causa": "El archivo no es PDF, JPG o PNG.", "solucion": "Convertir el documento a PDF, JPG o PNG." },
+      { "error": "El archivo excede el límite de 10 MB", "causa": "El archivo es mayor de 10 MB.", "solucion": "Comprimir el archivo antes de subir." }
+    ],
+    "PATCH /onboarding/kyb/application/submit": [
+      { "error": "Debes agregar al menos un director antes de enviar", "causa": "No hay directores registrados.", "solucion": "Llamar a POST /onboarding/kyb/business/directors." },
+      { "error": "Debes adjuntar al menos un documento de la empresa", "causa": "No hay documentos con subject_type=business.", "solucion": "Subir documentos corporativos con POST /onboarding/documents/upload." },
+      { "error": "Debes aceptar los Terms of Service", "causa": "No se aceptó el ToS KYB.", "solucion": "Llamar a POST /onboarding/kyb/tos-accept." }
+    ]
+  },
+
+  "formato_respuesta_error_estandar": {
+    "descripcion": "NestJS retorna errores en este formato estándar.",
+    "ejemplo": {
+      "statusCode": 400,
+      "message": ["El solicitante debe ser mayor de 18 años"],
+      "error": "Bad Request"
+    }
+  },
+
+  "refresh_de_token": {
+    "descripcion": "Si el access_token expira (cada 3600 segundos por defecto), renovarlo así.",
+    "metodo": "POST",
+    "endpoint": "/auth/refresh",
+    "autenticacion_requerida": false,
+    "body": {
+      "refresh_token": "el-refresh-token-obtenido-al-hacer-login"
+    },
+    "respuesta_exitosa": {
+      "http_status": 200,
+      "body": {
+        "access_token": "nuevo-access-token",
+        "refresh_token": "nuevo-refresh-token",
+        "expires_in": 3600
+      }
+    },
+    "error_posible": {
+      "http_status": 401,
+      "descripcion": "Refresh token inválido o expirado. El usuario debe hacer login de nuevo."
+    }
+  }
+}

@@ -1,0 +1,204 @@
+{
+  "documento": "Estados del Sistema y Máquina de Estados — Guira",
+  "version": "1.0.0",
+  "descripcion": "Describe todos los estados posibles de los recursos durante el proceso de alta de cuenta, las transiciones permitidas y qué endpoint las dispara.",
+
+  "maquina_de_estados_profiles": {
+    "tabla": "profiles",
+    "campo": "onboarding_status",
+    "descripcion": "Estado del proceso de verificación del usuario.",
+    "estados": [
+      "pending",
+      "kyc_started",
+      "kyb_started",
+      "in_review",
+      "approved",
+      "rejected",
+      "needs_review"
+    ],
+    "transiciones": [
+      {
+        "de": "pending",
+        "a": "kyc_started",
+        "disparador": "POST /onboarding/kyc/application (éxito)",
+        "descripcion": "El usuario inició el proceso KYC creando la aplicación."
+      },
+      {
+        "de": "pending",
+        "a": "kyb_started",
+        "disparador": "POST /onboarding/kyb/application (éxito)",
+        "descripcion": "La empresa inició el proceso KYB."
+      },
+      {
+        "de": "kyc_started",
+        "a": "in_review",
+        "disparador": "PATCH /onboarding/kyc/application/submit (éxito)",
+        "descripcion": "El expediente KYC fue enviado al equipo de compliance."
+      },
+      {
+        "de": "kyb_started",
+        "a": "in_review",
+        "disparador": "PATCH /onboarding/kyb/application/submit (éxito)",
+        "descripcion": "El expediente KYB fue enviado al equipo de compliance."
+      },
+      {
+        "de": "in_review",
+        "a": "approved",
+        "disparador": "POST /admin/compliance/reviews/{id}/approve (staff/admin)",
+        "descripcion": "El equipo aprobó el expediente. Se activa la cuenta y se crea la wallet."
+      },
+      {
+        "de": "in_review",
+        "a": "rejected",
+        "disparador": "POST /admin/compliance/reviews/{id}/reject (staff/admin)",
+        "descripcion": "El expediente fue rechazado."
+      },
+      {
+        "de": "in_review",
+        "a": "needs_review",
+        "disparador": "POST /admin/compliance/reviews/{id}/request-changes (staff/admin)",
+        "descripcion": "El equipo solicita correcciones. El expediente permanece abierto."
+      },
+      {
+        "de": "needs_review",
+        "a": "in_review",
+        "disparador": "PATCH /onboarding/kyc/application/submit o PATCH /onboarding/kyb/application/submit",
+        "descripcion": "El usuario re-envía el expediente corregido."
+      }
+    ]
+  },
+
+  "maquina_de_estados_kyc_applications": {
+    "tabla": "kyc_applications",
+    "campo": "status",
+    "estados": [
+      "pending",
+      "SUBMITTED",
+      "in_review",
+      "needs_review",
+      "approved",
+      "rejected"
+    ],
+    "transiciones": [
+      { "de": "pending",    "a": "SUBMITTED",    "disparador": "PATCH /onboarding/kyc/application/submit" },
+      { "de": "SUBMITTED",  "a": "in_review",    "disparador": "Proceso interno de compliance" },
+      { "de": "in_review",  "a": "approved",     "disparador": "Admin: approveReview()" },
+      { "de": "in_review",  "a": "rejected",     "disparador": "Admin: rejectReview()" },
+      { "de": "in_review",  "a": "needs_review", "disparador": "Admin: requestChanges()" },
+      { "de": "needs_review","a": "SUBMITTED",   "disparador": "PATCH /onboarding/kyc/application/submit (re-envío)" }
+    ]
+  },
+
+  "maquina_de_estados_kyb_applications": {
+    "tabla": "kyb_applications",
+    "campo": "status",
+    "estados": [
+      "pending",
+      "SUBMITTED",
+      "in_review",
+      "needs_review",
+      "approved",
+      "rejected"
+    ],
+    "transiciones": [
+      { "de": "pending",    "a": "SUBMITTED",    "disparador": "PATCH /onboarding/kyb/application/submit" },
+      { "de": "SUBMITTED",  "a": "in_review",    "disparador": "Proceso interno de compliance" },
+      { "de": "in_review",  "a": "approved",     "disparador": "Admin: approveReview()" },
+      { "de": "in_review",  "a": "rejected",     "disparador": "Admin: rejectReview()" },
+      { "de": "in_review",  "a": "needs_review", "disparador": "Admin: requestChanges()" },
+      { "de": "needs_review","a": "SUBMITTED",   "disparador": "PATCH /onboarding/kyb/application/submit (re-envío)" }
+    ]
+  },
+
+  "maquina_de_estados_documents": {
+    "tabla": "documents",
+    "campo": "status",
+    "estados": [
+      "pending",
+      "approved",
+      "rejected"
+    ],
+    "descripcion": "Los documentos son revisados individualmente por el equipo de compliance."
+  },
+
+  "activaciones_automaticas_tras_aprobacion": {
+    "descripcion": "Cuando el admin aprueba un compliance_review con subject_type=kyc_applications o kyb_applications, el sistema realiza automáticamente las siguientes operaciones:",
+    "secuencia": [
+      {
+        "orden": 1,
+        "accion": "Actualizar kyc/kyb_applications.status → approved"
+      },
+      {
+        "orden": 2,
+        "accion": "Actualizar profiles.onboarding_status → approved"
+      },
+      {
+        "orden": 3,
+        "accion": "Llamar a BridgeCustomerService.registerCustomerInBridge(userId)",
+        "detalle": "Construye el payload para Bridge API (individuo o empresa) y llama a POST /v0/customers en Bridge."
+      },
+      {
+        "orden": 4,
+        "accion": "Guardar bridge_customer_id en profiles.bridge_customer_id"
+      },
+      {
+        "orden": 5,
+        "accion": "Crear wallet USD en la tabla `wallets` (label=Principal, currency=usd, status=active)"
+      },
+      {
+        "orden": 6,
+        "accion": "Crear balance inicial en `balances` (amount=0, available_amount=0, reserved_amount=0)"
+      },
+      {
+        "orden": 7,
+        "accion": "Registrar en `activity_logs` el evento BRIDGE_CUSTOMER_REGISTERED"
+      }
+    ]
+  },
+
+  "payload_bridge_individual": {
+    "descripcion": "Payload que Guira envía a Bridge API para registrar un cliente individual.",
+    "endpoint_bridge": "POST https://api.bridge.xyz/v0/customers",
+    "header_especial": "Idempotency-Key: register-customer-{userId}",
+    "body": {
+      "type": "individual",
+      "first_name": "[de people.first_name]",
+      "last_name": "[de people.last_name]",
+      "email": "[de people.email o profiles.email]",
+      "date_of_birth": "[de people.date_of_birth]",
+      "address": {
+        "street": "[de people.address1]",
+        "city": "[de people.city]",
+        "state": "[de people.state]",
+        "postal_code": "[de people.postal_code]",
+        "country": "[de people.country]"
+      }
+    }
+  },
+
+  "payload_bridge_empresa": {
+    "descripcion": "Payload que Guira envía a Bridge API para registrar un cliente empresa.",
+    "endpoint_bridge": "POST https://api.bridge.xyz/v0/customers",
+    "header_especial": "Idempotency-Key: register-customer-{userId}",
+    "body": {
+      "type": "business",
+      "name": "[de businesses.legal_name]",
+      "email": "[de businesses.email o profiles.email]",
+      "tax_identification_number": "[de businesses.tax_id]",
+      "address": {
+        "street": "[de businesses.address1]",
+        "city": "[de businesses.city]",
+        "state": "[de businesses.state]",
+        "postal_code": "[de businesses.postal_code]",
+        "country": "[de businesses.country]"
+      },
+      "representatives": [
+        {
+          "first_name": "[de business_directors.first_name]",
+          "last_name": "[de business_directors.last_name]",
+          "title": "[de business_directors.position]"
+        }
+      ]
+    }
+  }
+}

@@ -1,8 +1,30 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
-import type { User } from '@supabase/supabase-js';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  ParseUUIDPipe,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { WalletsService } from './wallets.service';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
+import { RolesGuard } from '../../core/guards/roles.guard';
+import { Roles } from '../../core/decorators/roles.decorator';
+import { ManualAdjustmentDto } from './dto/manual-adjustment.dto';
+
+// ─────────────────────────────────────────────────
+//  Rutas de usuario: /wallets/...
+// ─────────────────────────────────────────────────
 
 @ApiTags('Wallets')
 @ApiBearerAuth('supabase-jwt')
@@ -11,38 +33,68 @@ export class WalletsController {
   constructor(private readonly walletsService: WalletsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Listar wallets del usuario' })
-  findAll(@CurrentUser() user: User) {
+  @ApiOperation({ summary: 'Listar wallets activas del usuario' })
+  findAll(@CurrentUser() user: AuthenticatedUser) {
     return this.walletsService.findAllByUser(user.id);
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Obtener wallet por ID' })
-  findOne(@Param('id') id: string, @CurrentUser() user: User) {
-    return this.walletsService.findOne(id, user.id);
-  }
-
-  @Get('me/balances')
-  @ApiOperation({ summary: 'Balances actuales del usuario (todas las monedas)' })
-  getBalances(@CurrentUser() user: User) {
+  @Get('balances')
+  @ApiOperation({ summary: 'Balances del usuario (todas las monedas)' })
+  getBalances(@CurrentUser() user: AuthenticatedUser) {
     return this.walletsService.getBalances(user.id);
   }
 
-  @Get('me/ledger')
-  @ApiOperation({ summary: 'Historial de ledger (transacciones inmutables)' })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'offset', required: false, type: Number })
-  getLedger(
-    @CurrentUser() user: User,
-    @Query('limit') limit?: number,
-    @Query('offset') offset?: number,
+  @Get('balances/:currency')
+  @ApiOperation({ summary: 'Balance de una divisa específica' })
+  getBalanceByCurrency(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('currency') currency: string,
   ) {
-    return this.walletsService.getLedger(user.id, limit, offset);
+    return this.walletsService.getBalanceByCurrency(user.id, currency);
   }
 
-  @Get('me/payin-routes')
-  @ApiOperation({ summary: 'Rutas de pago disponibles (cuentas virtuales y liquidation addresses)' })
-  getPayinRoutes(@CurrentUser() user: User) {
+  @Get('payin-routes')
+  @ApiOperation({ summary: 'Rutas de pago disponibles (cuentas virtuales)' })
+  getPayinRoutes(@CurrentUser() user: AuthenticatedUser) {
     return this.walletsService.getPayinRoutes(user.id);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Detalle de una wallet específica' })
+  findOne(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.walletsService.findOne(id, user.id);
+  }
+}
+
+// ─────────────────────────────────────────────────
+//  Rutas admin: /admin/wallets/...
+// ─────────────────────────────────────────────────
+
+@ApiTags('Admin — Wallets')
+@ApiBearerAuth('supabase-jwt')
+@Controller('admin/wallets')
+@UseGuards(RolesGuard)
+export class AdminWalletsController {
+  constructor(private readonly walletsService: WalletsService) {}
+
+  @Post('balances/adjust')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Ajuste manual de balance (con audit log)' })
+  @ApiResponse({ status: 200, description: 'Balance ajustado' })
+  @ApiResponse({ status: 400, description: 'Saldo negativo resultante' })
+  adjustBalance(
+    @Body() dto: ManualAdjustmentDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.walletsService.adjustBalance(
+      dto.user_id,
+      dto.currency,
+      dto.amount,
+      dto.reason,
+      actor.id,
+    );
   }
 }

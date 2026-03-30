@@ -4,12 +4,17 @@ import { AppModule } from './app.module';
 import { ClassSerializerInterceptor, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
+import helmet from 'helmet';
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   // Prefijo global de la API
   const prefix = process.env.PATH_SUBDOMAIN || 'api';
   app.setGlobalPrefix(prefix);
+
+  // Security Headers
+  app.use(helmet());
 
   // CORS: acepta orígenes definidos en URL_FRONTEND (comma-separated)
   const allowedOrigins = (process.env.URL_FRONTEND ?? '')
@@ -57,6 +62,10 @@ async function bootstrap() {
   });
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3001;
+
+  // Habilitar cierre limpio (Graceful Shutdown)
+  app.enableShutdownHooks();
+
   await app.listen(port);
   console.log(`🚀 Guira API running on http://localhost:${port}/${prefix}`);
   console.log(`📚 Swagger docs: http://localhost:${port}/${prefix}/docs`);

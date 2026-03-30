@@ -50,7 +50,8 @@ Esta fase es la más crítica del proyecto. Un error aquí puede resultar en pé
 - [ ] F4.13 — `POST /admin/bridge/payouts/:id/approve` — aprobación manual (Admin/Staff)
 - [ ] F4.14 — `POST /admin/bridge/payouts/:id/reject` — rechazo (libera reserved_amount)
 - [ ] F4.15 — Servicio interno: `executePayout(payoutRequestId)` — llama Bridge POST /v0/transfers
-- [ ] F4.16 — Manejar respuesta de Bridge: INSERT `bridge_transfers`, INSERT `ledger_entries`
+- [ ] F4.16 — Manejar respuesta de Bridge: INSERT `bridge_transfers`, INSERT `ledger_entries` con `status = 'pending'` (**NO 'settled'** — el estado pasa a 'settled' únicamente cuando llega el webhook `transfer.complete`)
+- [ ] F4.16b — [GAP 7 FIX] `executePayout()` debe envolver las operaciones DB en una función PostgreSQL transaccional vía `supabase.rpc('execute_payout_tx', {...})` para garantizar atomicidad. Si falla después de reservar saldo pero antes de insertar en Bridge, el rollback debe liberar `reserved_amount`
 
 ### Transfers — Consultas
 - [ ] F4.17 — `GET /bridge/transfers` — historial de transferencias ejecutadas
@@ -204,25 +205,38 @@ async executePayout(payoutRequestId: string, bridgeCustomerId: string) {
     .eq('id', payoutRequestId).single();
 
   // Llamar Bridge Transfer API
-  const bridgeTransfer = await this.bridgeApiClient.post<BridgeTransferResponse>(
-    '/v0/transfers',
-    {
-      on_behalf_of: bridgeCustomerId,
-      source: {
-        payment_rail: 'usdc',
-        currency: 'usdc',
-        from_address: req.wallets.address,
+  let bridgeTransfer: BridgeTransferResponse;
+  try {
+    bridgeTransfer = await this.bridgeApiClient.post<BridgeTransferResponse>(
+      '/v0/transfers',
+      {
+        on_behalf_of: bridgeCustomerId,
+        source: {
+          payment_rail: 'usdc',
+          currency: 'usdc',
+          from_address: req.wallets.address,
+        },
+        destination: {
+          payment_rail: req.payment_rail,
+          currency: req.currency.toLowerCase(),
+          external_account_id: req.bridge_external_accounts.bridge_external_account_id,
+        },
+        amount: req.amount.toString(),
+        developer_fee_percent: '0.5',
       },
-      destination: {
-        payment_rail: req.payment_rail,
-        currency: req.currency.toLowerCase(),
-        external_account_id: req.bridge_external_accounts.bridge_external_account_id,
-      },
-      amount: req.amount.toString(),
-      developer_fee_percent: '0.5',
-    },
-    req.idempotency_key,
-  );
+      req.idempotency_key,
+    );
+  } catch (err) {
+    // [GAP 7 FIX] Si Bridge falla, liberar el reserved_amount antes de propagar el error
+    await this.supabase.rpc('release_reserved_balance', {
+      p_user_id: req.user_id,
+      p_currency: req.currency,
+      p_amount: req.amount,
+    });
+    await this.supabase.from('payout_requests')
+      .update({ status: 'failed', failure_reason: err.message }).eq('id', req.id);
+    throw err;
+  }
 
   // Guardar bridge_transfer
   await this.supabase.from('bridge_transfers').insert({
@@ -231,29 +245,58 @@ async executePayout(payoutRequestId: string, bridgeCustomerId: string) {
     bridge_transfer_id: bridgeTransfer.id,
     idempotency_key: req.idempotency_key,
     amount: req.amount,
+    fee_amount: req.fee_amount,
     status: 'processing',
-    bridge_state: bridgeTransfer.status,
-    // ...
+    bridge_state: bridgeTransfer.state,
+    source_payment_rail: 'usdc',
+    destination_payment_rail: req.payment_rail,
+    destination_currency: req.currency,
   });
 
-  // Crear ledger entry de débito
+  // [GAP 1 FIX] Crear ledger entry de débito como 'PENDING' — NO como 'settled'.
+  // El estado cambia a 'settled' ÚNICAMENTE cuando llega el webhook 'transfer.complete'.
+  // Si se marca 'settled' aquí, el trigger actualizaría balances aunque Bridge falle después.
   await this.ledgerService.createLedgerEntry({
     wallet_id: req.wallet_id,
     type: 'debit',
     amount: req.amount + req.fee_amount,
     currency: req.currency,
-    status: 'settled',
+    status: 'pending',  // ← CRÍTICO: pending, no 'settled'
     reference_type: 'payout_request',
     reference_id: req.id,
-    description: `Pago enviado — ${req.business_purpose}`,
+    bridge_transfer_id: bridgeTransfer.id,
+    description: `Pago en proceso — ${req.business_purpose}`,
   });
+  // Nota: El trigger de balances NO se dispara para status='pending'.
+  // El reserved_amount ya fue aplicado al crear el payout_request.
+  // Cuando 'transfer.complete' llega → el handler de webhook actualiza
+  // el ledger_entry a 'settled' → trigger descuenta definitivamente del balance.
 
-  // Actualizar estados
+  // Actualizar estado del payout_request
   await this.supabase.from('payout_requests')
-    .update({ status: 'processing' }).eq('id', req.id);
+    .update({ status: 'processing', bridge_transfer_id: bridgeTransfer.id })
+    .eq('id', req.id);
 
   return { bridge_transfer_id: bridgeTransfer.id, status: 'processing' };
 }
+
+// [GAP 7 FIX] Función SQL auxiliar para release de saldo reservado
+// Debe existir comme función PostgreSQL en Supabase:
+//
+// CREATE OR REPLACE FUNCTION public.release_reserved_balance(
+//   p_user_id uuid, p_currency text, p_amount numeric
+// ) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+// BEGIN
+//   UPDATE public.balances
+//   SET
+//     reserved_amount  = GREATEST(0, reserved_amount - p_amount),
+//     available_amount = available_amount + p_amount,
+//     updated_at       = NOW()
+//   WHERE user_id = p_user_id AND currency = p_currency;
+// END;
+// $$;
+//
+// Esta función también debe estar en FASE 0 checklist.
 ```
 
 ---
@@ -282,11 +325,13 @@ Toda llamada a Bridge que crea recursos DEBE incluir `Idempotency-Key`:
 ## ✅ CRITERIOS DE ACEPTACIÓN
 
 1. Un cliente puede crear Virtual Account y recibir instrucciones bancarias reales
-2. Un payout < umbrral se ejecuta automáticamente en Bridge con idempotency key
+2. Un payout < umbral se ejecuta automáticamente en Bridge con idempotency key
 3. Un payout ≥ umbral queda en `pending` y genera `compliance_review` para el Staff
-4. Los transfers fallidos liberan el `reserved_amount` correctamente
+4. Los transfers fallidos liberan el `reserved_amount` correctamente (via `release_reserved_balance()`)
 5. Los proveedores (suppliers) se pueden usar como destino de payouts
 6. Los pull jobs detectan gaps y crean `ledger_entries` de recuperación
+7. **[GAP 1]** Al ejecutar un payout → `ledger_entries.status = 'pending'` (NO 'settled'). El saldo del usuario no cambia hasta recibir `transfer.complete` por webhook
+8. **[GAP 7]** Si Bridge falla en `executePayout()` → `reserved_amount` se libera automáticamente y `payout_requests.status` queda en 'failed'
 
 ---
 

@@ -1,52 +1,81 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
 
 @Injectable()
 export class WalletsService {
+  private readonly logger = new Logger(WalletsService.name);
+
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
+    private readonly config: ConfigService,
   ) {}
 
-  /** Lista todas las wallets del usuario */
+  // ───────────────────────────────────────────────
+  //  Endpoints de usuario
+  // ───────────────────────────────────────────────
+
+  /** Lista wallets activas del usuario. */
   async findAllByUser(userId: string) {
     const { data, error } = await this.supabase
       .from('wallets')
-      .select('*')
+      .select('id, currency, address, network, provider_key, label, is_active, created_at')
       .eq('user_id', userId)
       .eq('is_active', true)
       .order('created_at', { ascending: true });
 
-    if (error) throw new Error(error.message);
+    if (error) throw new BadRequestException(error.message);
     return data ?? [];
   }
 
-  /** Obtiene balances del usuario (todas las monedas) */
+  /** Obtiene wallet específica verificando propiedad. */
+  async findOne(walletId: string, userId: string) {
+    const { data, error } = await this.supabase
+      .from('wallets')
+      .select('*')
+      .eq('id', walletId)
+      .eq('user_id', userId)
+      .single();
+
+    if (error || !data) throw new NotFoundException('Wallet no encontrada');
+    return data;
+  }
+
+  /** Balances del usuario (todas las monedas). */
   async getBalances(userId: string) {
+    const { data, error } = await this.supabase
+      .from('balances')
+      .select('id, currency, amount, available_amount, pending_amount, reserved_amount, updated_at')
+      .eq('user_id', userId)
+      .order('currency', { ascending: true });
+
+    if (error) throw new BadRequestException(error.message);
+    return data ?? [];
+  }
+
+  /** Balance de una divisa específica. */
+  async getBalanceByCurrency(userId: string, currency: string) {
     const { data, error } = await this.supabase
       .from('balances')
       .select('*')
       .eq('user_id', userId)
-      .order('currency', { ascending: true });
+      .eq('currency', currency.toUpperCase())
+      .single();
 
-    if (error) throw new Error(error.message);
-    return data ?? [];
+    if (error || !data) {
+      throw new NotFoundException(`No existe balance para ${currency}`);
+    }
+    return data;
   }
 
-  /** Historial de ledger (transacciones inmutables) */
-  async getLedger(userId: string, limit = 50, offset = 0) {
-    const { data, error, count } = await this.supabase
-      .from('ledger_entries')
-      .select('*', { count: 'exact' })
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    if (error) throw new Error(error.message);
-    return { entries: data ?? [], total: count ?? 0 };
-  }
-
-  /** Obtiene las rutas de pago disponibles (payin_routes) del usuario */
+  /** Rutas de payin del usuario (cuentas virtuales). */
   async getPayinRoutes(userId: string) {
     const { data, error } = await this.supabase
       .from('payin_routes')
@@ -59,20 +88,238 @@ export class WalletsService {
       .eq('user_id', userId)
       .eq('is_active', true);
 
-    if (error) throw new Error(error.message);
+    if (error) throw new BadRequestException(error.message);
     return data ?? [];
   }
 
-  /** Obtiene una wallet específica por id, verificando que pertenece al usuario */
-  async findOne(walletId: string, userId: string) {
-    const { data, error } = await this.supabase
-      .from('wallets')
+  // ───────────────────────────────────────────────
+  //  Servicios internos — Inicialización de cliente
+  // ───────────────────────────────────────────────
+
+  /**
+   * Inicializa las wallets de un cliente aprobado.
+   * Lee la configuración de wallets desde app_settings.
+   * Crea wallets en Bridge API y guarda los datos en la DB.
+   */
+  async initializeClientWallets(
+    userId: string,
+    bridgeCustomerId: string,
+  ): Promise<void> {
+    // Leer configuración desde app_settings
+    const walletConfigs = await this.getWalletConfigs();
+
+    for (const wc of walletConfigs) {
+      // Verificar duplicados
+      const { data: existing } = await this.supabase
+        .from('wallets')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('currency', wc.currency.toUpperCase())
+        .eq('network', wc.network)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (existing) continue;
+
+      // Crear en Bridge API
+      const bridgeWallet = await this.createBridgeWallet(
+        bridgeCustomerId,
+        wc.currency,
+        wc.network,
+      );
+
+      // Guardar en DB
+      await this.supabase.from('wallets').insert({
+        user_id: userId,
+        currency: wc.currency.toUpperCase(),
+        address: bridgeWallet.address,
+        network: wc.network,
+        provider_key: 'bridge',
+        provider_wallet_id: bridgeWallet.id,
+        label: `${wc.currency.toUpperCase()} (${wc.network})`,
+        is_active: true,
+      });
+    }
+
+    // Inicializar balances
+    await this.initializeBalances(
+      userId,
+      walletConfigs.map((c) => c.currency.toUpperCase()),
+    );
+
+    this.logger.log(
+      `Wallets inicializados para usuario ${userId}: ${walletConfigs.length} configuraciones`,
+    );
+  }
+
+  /**
+   * Inicializa filas de balance con valor 0 para las monedas indicadas.
+   * Siempre incluye USD (fiat base).
+   */
+  async initializeBalances(
+    userId: string,
+    currencies: string[],
+  ): Promise<void> {
+    const uniqueCurrencies = [...new Set([...currencies, 'USD'])];
+
+    for (const currency of uniqueCurrencies) {
+      // Verificar si ya existe
+      const { data: existing } = await this.supabase
+        .from('balances')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('currency', currency)
+        .maybeSingle();
+
+      if (existing) continue;
+
+      await this.supabase.from('balances').insert({
+        user_id: userId,
+        currency,
+        amount: 0,
+        available_amount: 0,
+        pending_amount: 0,
+        reserved_amount: 0,
+      });
+    }
+  }
+
+  // ───────────────────────────────────────────────
+  //  Admin — Ajuste manual de balance
+  // ───────────────────────────────────────────────
+
+  /** Ajuste manual de balance por parte de un admin (con audit_log). */
+  async adjustBalance(
+    targetUserId: string,
+    currency: string,
+    adjustmentAmount: number,
+    reason: string,
+    actorId: string,
+  ) {
+    const upperCurrency = currency.toUpperCase();
+
+    // Obtener balance actual
+    const { data: balance, error } = await this.supabase
+      .from('balances')
       .select('*')
-      .eq('id', walletId)
-      .eq('user_id', userId)
+      .eq('user_id', targetUserId)
+      .eq('currency', upperCurrency)
       .single();
 
-    if (error || !data) throw new NotFoundException('Wallet no encontrada');
-    return data;
+    if (error || !balance) {
+      throw new NotFoundException(
+        `No existe balance de ${upperCurrency} para el usuario`,
+      );
+    }
+
+    const newAmount = parseFloat(balance.amount) + adjustmentAmount;
+    const newAvailable = parseFloat(balance.available_amount) + adjustmentAmount;
+
+    if (newAvailable < 0) {
+      throw new BadRequestException(
+        'El ajuste resultaría en un saldo disponible negativo',
+      );
+    }
+
+    // Actualizar balance
+    const { data: updated, error: updateErr } = await this.supabase
+      .from('balances')
+      .update({
+        amount: newAmount,
+        available_amount: newAvailable,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', balance.id)
+      .select()
+      .single();
+
+    if (updateErr) throw new BadRequestException(updateErr.message);
+
+    // Audit log
+    await this.supabase.from('audit_logs').insert({
+      actor_id: actorId,
+      action: 'balance_manual_adjustment',
+      entity_type: 'balance',
+      entity_id: balance.id,
+      details: {
+        user_id: targetUserId,
+        currency: upperCurrency,
+        adjustment: adjustmentAmount,
+        previous_amount: balance.amount,
+        new_amount: newAmount,
+        reason,
+      },
+    });
+
+    this.logger.log(
+      `Ajuste de balance: ${adjustmentAmount} ${upperCurrency} para ${targetUserId} por ${actorId}`,
+    );
+
+    return updated;
+  }
+
+  // ───────────────────────────────────────────────
+  //  Helpers privados
+  // ───────────────────────────────────────────────
+
+  private async getWalletConfigs(): Promise<
+    Array<{ currency: string; network: string }>
+  > {
+    const { data } = await this.supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'SUPPORTED_WALLET_CONFIGS')
+      .single();
+
+    try {
+      return JSON.parse(
+        data?.value ?? '[{"currency":"usdc","network":"ethereum"}]',
+      );
+    } catch {
+      return [{ currency: 'usdc', network: 'ethereum' }];
+    }
+  }
+
+  private async createBridgeWallet(
+    bridgeCustomerId: string,
+    currency: string,
+    network: string,
+  ): Promise<{ id: string; address: string }> {
+    const apiKey = this.config.get<string>('app.bridgeApiKey');
+    const baseUrl =
+      this.config.get<string>('app.bridgeApiUrl') ?? 'https://api.bridge.xyz';
+
+    if (!apiKey) {
+      this.logger.warn('BRIDGE_API_KEY no configurada — wallet simulada');
+      return {
+        id: `simulated_wallet_${Date.now()}`,
+        address: `0xSimulated_${currency}_${network}_${Date.now()}`,
+      };
+    }
+
+    const response = await fetch(
+      `${baseUrl}/v0/customers/${bridgeCustomerId}/wallets`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Api-Key': apiKey,
+        },
+        body: JSON.stringify({ currency, chain: network }),
+      },
+    );
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new BadRequestException(
+        `Bridge wallet creation failed: [${response.status}] ${errorBody}`,
+      );
+    }
+
+    const wallet = (await response.json()) as Record<string, unknown>;
+    return {
+      id: wallet.id as string,
+      address: wallet.address as string,
+    };
   }
 }

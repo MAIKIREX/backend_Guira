@@ -1,0 +1,121 @@
+{
+  "documento": "Resumen Ejecutivo — Flujo de Alta de Cuenta Guira",
+  "version": "1.0.0",
+  "descripcion": "Vista rápida del flujo completo en formato de checklist para desarrolladores e integradores.",
+
+  "flujo_kyc_persona_natural": {
+    "titulo": "Checklist KYC — Persona Natural",
+    "total_llamadas": 7,
+    "pasos": [
+      { "orden": 1, "metodo": "POST",  "endpoint": "/auth/register",                          "autenticacion": "NO",  "resumen": "Crear cuenta con email, password y full_name" },
+      { "orden": 2, "metodo": "POST",  "endpoint": "[Supabase Auth] /auth/v1/token",           "autenticacion": "NO",  "resumen": "Login → obtener access_token y refresh_token" },
+      { "orden": 3, "metodo": "POST",  "endpoint": "/onboarding/kyc/person",                   "autenticacion": "SÍ",  "resumen": "Enviar datos biográficos completos (19 campos)" },
+      { "orden": 4, "metodo": "POST",  "endpoint": "/onboarding/kyc/application",              "autenticacion": "SÍ",  "resumen": "Crear expediente KYC formal" },
+      { "orden": 5, "metodo": "POST",  "endpoint": "/onboarding/documents/upload",             "autenticacion": "SÍ",  "resumen": "Subir documento de identidad (multipart/form-data)" },
+      { "orden": 6, "metodo": "POST",  "endpoint": "/onboarding/kyc/tos-accept",               "autenticacion": "SÍ",  "resumen": "Aceptar Términos de Servicio" },
+      { "orden": 7, "metodo": "PATCH", "endpoint": "/onboarding/kyc/application/submit",       "autenticacion": "SÍ",  "resumen": "Enviar expediente — cambia status a SUBMITTED" }
+    ],
+    "estado_final_en_espera": "profiles.onboarding_status = in_review",
+    "estado_tras_aprobacion": "profiles.onboarding_status = approved + wallet USD activa"
+  },
+
+  "flujo_kyb_empresa": {
+    "titulo": "Checklist KYB — Empresa",
+    "total_llamadas": "10 mínimo (más llamadas adicionales por cada director/UBO/documento extra)",
+    "pasos": [
+      { "orden": 1,  "metodo": "POST",  "endpoint": "/auth/register",                          "autenticacion": "NO",  "resumen": "Crear cuenta del representante legal" },
+      { "orden": 2,  "metodo": "POST",  "endpoint": "[Supabase Auth] /auth/v1/token",           "autenticacion": "NO",  "resumen": "Login → obtener access_token" },
+      { "orden": 3,  "metodo": "POST",  "endpoint": "/onboarding/kyb/business",                 "autenticacion": "SÍ",  "resumen": "Registrar datos de la empresa (23 campos)" },
+      { "orden": 4,  "metodo": "POST",  "endpoint": "/onboarding/kyb/business/directors",       "autenticacion": "SÍ",  "resumen": "Registrar director(es) — 1 mínimo" },
+      { "orden": 5,  "metodo": "POST",  "endpoint": "/onboarding/kyb/business/ubos",            "autenticacion": "SÍ",  "resumen": "Registrar UBO(s) con ≥25% participación (si aplica)" },
+      { "orden": 6,  "metodo": "POST",  "endpoint": "/onboarding/kyb/application",              "autenticacion": "SÍ",  "resumen": "Crear expediente KYB formal" },
+      { "orden": 7,  "metodo": "POST",  "endpoint": "/onboarding/documents/upload",             "autenticacion": "SÍ",  "resumen": "Subir acta constitutiva (subject_type=business)" },
+      { "orden": 8,  "metodo": "POST",  "endpoint": "/onboarding/documents/upload",             "autenticacion": "SÍ",  "resumen": "Subir documentos adicionales (fiscal, bancario, etc.)" },
+      { "orden": 9,  "metodo": "POST",  "endpoint": "/onboarding/kyb/tos-accept",               "autenticacion": "SÍ",  "resumen": "Aceptar Términos de Servicio para KYB" },
+      { "orden": 10, "metodo": "PATCH", "endpoint": "/onboarding/kyb/application/submit",       "autenticacion": "SÍ",  "resumen": "Enviar expediente — cambia status a SUBMITTED" }
+    ],
+    "estado_final_en_espera": "profiles.onboarding_status = in_review",
+    "estado_tras_aprobacion": "profiles.onboarding_status = approved + wallet USD activa + bridge_customer_id"
+  },
+
+  "endpoints_de_consulta": {
+    "descripcion": "Endpoints para consultar estado en cualquier momento del proceso.",
+    "tabla": [
+      { "metodo": "GET", "endpoint": "/auth/me",                         "descripcion": "Perfil completo con onboarding_status y bridge_customer_id" },
+      { "metodo": "GET", "endpoint": "/onboarding/kyc/person",           "descripcion": "Datos biográficos enviados" },
+      { "metodo": "GET", "endpoint": "/onboarding/kyc/application",      "descripcion": "Estado del expediente KYC" },
+      { "metodo": "GET", "endpoint": "/onboarding/kyb/business",         "descripcion": "Datos de empresa con directores y UBOs" },
+      { "metodo": "GET", "endpoint": "/onboarding/kyb/application",      "descripcion": "Estado del expediente KYB" },
+      { "metodo": "GET", "endpoint": "/onboarding/documents",            "descripcion": "Lista de documentos subidos" },
+      { "metodo": "GET", "endpoint": "/wallets",                         "descripcion": "Wallets activas (disponible solo tras aprobación)" },
+      { "metodo": "GET", "endpoint": "/wallets/balances",                "descripcion": "Saldos en todas las divisas" }
+    ]
+  },
+
+  "tipos_de_documentos_de_identidad": {
+    "passport":         "Pasaporte vigente",
+    "drivers_license":  "Licencia de conducir",
+    "national_id":      "INE, Cédula de Ciudadanía, DNI, etc."
+  },
+
+  "tipos_de_documentos_corporativos": {
+    "incorporation_certificate": "Acta constitutiva o certificado de incorporación",
+    "tax_registration":          "Constancia fiscal o registro tributario",
+    "bank_statement":            "Estado de cuenta bancario reciente (últimos 3 meses)",
+    "proof_of_address":          "Comprobante de domicilio (empresa o persona)",
+    "other":                     "Cualquier otro documento relevante"
+  },
+
+  "codigos_pais_comunes": {
+    "MX": "México",
+    "US": "Estados Unidos",
+    "CO": "Colombia",
+    "PE": "Perú",
+    "AR": "Argentina",
+    "BR": "Brasil",
+    "CL": "Chile",
+    "ES": "España"
+  },
+
+  "origen_de_fondos_aceptados": [
+    "salary",
+    "business",
+    "business_revenue",
+    "investments",
+    "inheritance",
+    "savings",
+    "loans",
+    "other"
+  ],
+
+  "propositos_de_cuenta_aceptados": [
+    "international_payments",
+    "business_operations",
+    "payroll",
+    "collections",
+    "savings",
+    "personal_use",
+    "other"
+  ],
+
+  "limites_por_defecto_tras_aprobacion": {
+    "descripcion": "Tras la aprobación, el usuario tiene límites base que el admin puede ajustar.",
+    "nota": "Los límites son configurables por admin en POST /admin/users/{id}/limits",
+    "campos": [
+      "daily_limit_usd",
+      "monthly_limit_usd",
+      "daily_deposit_limit",
+      "daily_payout_limit",
+      "single_txn_limit"
+    ]
+  },
+
+  "notas_de_seguridad": [
+    "Todos los documentos se almacenan cifrados en Supabase Storage (bucket: kyc-documents).",
+    "El bucket kyc-documents es privado — las URLs firmadas expiran en 1 hora.",
+    "Los tokens JWT de Supabase expiran en 3600 segundos (1 hora). Usar /auth/refresh para renovar.",
+    "El endpoint /auth/register tiene rate limiting activo para prevenir ataques de fuerza bruta.",
+    "El bridge_customer_id se genera con Idempotency-Key para evitar registros duplicados en Bridge.",
+    "Solo usuarios con role staff/admin/super_admin pueden acceder a /admin/compliance/* y /admin/wallets/*."
+  ]
+}
