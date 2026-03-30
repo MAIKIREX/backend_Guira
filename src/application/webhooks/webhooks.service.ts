@@ -181,16 +181,16 @@ export class WebhooksService {
     const senderName = (data.sender_name as string) ?? 'Desconocido';
     const currency = (data.currency as string) ?? 'usd';
 
-    // 1. Buscar VA — columna correcta
+    // 1. Buscar VA — incluyendo flags de external sweep
     const { data: va, error: vaErr } = await this.supabase
       .from('bridge_virtual_accounts')
-      .select('id, user_id, destination_wallet_id, source_currency, developer_fee_percent')
+      .select('id, user_id, destination_wallet_id, source_currency, developer_fee_percent, is_external_sweep, destination_address, external_destination_label')
       .eq('bridge_virtual_account_id', vaId)
       .single();
 
     if (vaErr || !va) throw new Error(`VA no encontrada: ${vaId}`);
 
-    // [GAP 6 FIX] 2. INSERT bridge_virtual_account_events
+    // 2. INSERT bridge_virtual_account_events (siempre, para auditoría)
     await this.supabase.from('bridge_virtual_account_events').insert({
       bridge_virtual_account_id: vaId,
       bridge_event_id: (payload.id as string) ?? null,
@@ -201,37 +201,69 @@ export class WebhooksService {
       raw_payload: payload,
     });
 
-    // 3. Obtener wallet del usuario
-    let walletId = va.destination_wallet_id;
-    if (!walletId) {
-      const { data: wallet } = await this.supabase
-        .from('wallets')
-        .select('id, currency')
-        .eq('user_id', va.user_id)
-        .eq('is_active', true)
-        .limit(1)
-        .single();
-      if (!wallet) throw new Error(`Wallet no encontrada para user ${va.user_id}`);
-      walletId = wallet.id;
-    }
-
-    // 4. Calcular fee
+    // 3. Calcular fee (aplica en ambos escenarios)
     const devFeePercent = parseFloat(va.developer_fee_percent ?? '0') || 1.0;
     const feeAmount = parseFloat((amount * devFeePercent / 100).toFixed(2));
     const netAmount = parseFloat((amount - feeAmount).toFixed(2));
 
-    // 5. INSERT payment_order
+    // ═══════════════════════════════════════════════════════════
+    //  BIFURCACIÓN: ¿Destino interno (Guira) o externo (Binance, etc.)?
+    // ═══════════════════════════════════════════════════════════
+
+    if (va.is_external_sweep) {
+      // ── CASO B: External Sweep (Doble Asiento Contable) ──────
+      // Los fondos fueron enviados por Bridge a una wallet FUERA de Guira.
+      // Guira no controla ese dinero, así que:
+      //   Credit (+$990) + Debit (-$990) = Balance neto $0.00
+      await this.handleExternalSweepDeposit(va, amount, feeAmount, netAmount, currency, senderName, payload);
+    } else {
+      // ── CASO A: Fondeo Interno (Wallet de Guira) ─────────────
+      // Los fondos se quedan en la plataforma → incrementar balance
+      await this.handleInternalDeposit(va, amount, feeAmount, netAmount, currency, senderName, payload);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  CASO A: Depósito Interno (fondos se quedan en Guira)
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleInternalDeposit(
+    va: Record<string, unknown>,
+    amount: number,
+    feeAmount: number,
+    netAmount: number,
+    currency: string,
+    senderName: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const userId = va.user_id as string;
+
+    // Obtener wallet interna del usuario
+    let walletId = va.destination_wallet_id as string | null;
+    if (!walletId) {
+      const { data: wallet } = await this.supabase
+        .from('wallets')
+        .select('id, currency')
+        .eq('user_id', userId)
+        .eq('is_active', true)
+        .limit(1)
+        .single();
+      if (!wallet) throw new Error(`Wallet no encontrada para user ${userId}`);
+      walletId = wallet.id;
+    }
+
+    // INSERT payment_order
     const { data: order } = await this.supabase
       .from('payment_orders')
       .insert({
-        user_id: va.user_id,
+        user_id: userId,
         wallet_id: walletId,
         source_type: 'bridge_virtual_account',
-        source_reference_id: vaId,
+        source_reference_id: va.id,
         amount,
         fee_amount: feeAmount,
         net_amount: netAmount,
-        currency: va.source_currency ?? currency,
+        currency: (va.source_currency as string) ?? currency,
         sender_name: senderName,
         bridge_event_id: (payload.id as string) ?? null,
         status: 'completed',
@@ -239,34 +271,135 @@ export class WebhooksService {
       .select('id')
       .single();
 
-    // 6. INSERT ledger_entry (credit, settled → trigger actualiza balance)
+    // INSERT ledger_entry (credit, settled → trigger de DB actualiza balance)
     await this.supabase.from('ledger_entries').insert({
       wallet_id: walletId,
       type: 'credit',
       amount: netAmount,
-      currency: va.source_currency ?? currency,
+      currency: (va.source_currency as string) ?? currency,
       status: 'settled',
       reference_type: 'payment_order',
       reference_id: order?.id ?? null,
       description: `Depósito recibido — ${senderName} ($${amount})`,
     });
 
-    // 7. Notificación al cliente
+    // Notificación
     await this.supabase.from('notifications').insert({
-      user_id: va.user_id,
+      user_id: userId,
       type: 'financial',
       title: 'Depósito Confirmado',
-      message: `Recibiste $${netAmount.toFixed(2)} (fee: $${feeAmount.toFixed(2)})`,
+      message: `Recibiste $${netAmount.toFixed(2)} en tu wallet Guira (fee: $${feeAmount.toFixed(2)})`,
       reference_type: 'payment_order',
       reference_id: order?.id ?? null,
     });
 
-    // 8. Activity log
+    // Activity log
     await this.supabase.from('activity_logs').insert({
-      user_id: va.user_id,
+      user_id: userId,
       action: 'DEPOSIT_RECEIVED',
-      description: `Depósito de $${amount} recibido de ${senderName} via VA`,
+      description: `Depósito de $${amount} recibido de ${senderName} via VA → wallet interna`,
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  CASO B: External Sweep (Doble Asiento — Balance Neto $0)
+  //  Los fondos ya salieron a Binance, MetaMask, etc.
+  //  Credit + Debit inmediato = Balance Guira no se altera.
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleExternalSweepDeposit(
+    va: Record<string, unknown>,
+    amount: number,
+    feeAmount: number,
+    netAmount: number,
+    currency: string,
+    senderName: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const userId = va.user_id as string;
+    const externalAddr = (va.destination_address as string) ?? 'Externa desconocida';
+    const externalLabel = (va.external_destination_label as string) ?? externalAddr;
+
+    // Wallet de referencia interna (para el asiento contable aunque los fondos no se queden)
+    const { data: refWallet } = await this.supabase
+      .from('wallets')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .limit(1)
+      .single();
+
+    if (!refWallet) throw new Error(`Wallet de referencia no encontrada para user ${userId}`);
+    const refWalletId = refWallet.id;
+
+    // 1. INSERT payment_order con status 'swept_external'
+    const { data: order } = await this.supabase
+      .from('payment_orders')
+      .insert({
+        user_id: userId,
+        wallet_id: refWalletId,
+        source_type: 'bridge_virtual_account',
+        source_reference_id: va.id,
+        amount,
+        fee_amount: feeAmount,
+        net_amount: netAmount,
+        currency: (va.source_currency as string) ?? currency,
+        sender_name: senderName,
+        bridge_event_id: (payload.id as string) ?? null,
+        status: 'swept_external',
+      })
+      .select('id')
+      .single();
+
+    const orderId = order?.id ?? null;
+
+    // 2. DOBLE ASIENTO CONTABLE (Credit + Debit instantáneo)
+    //    Ambos con status 'settled' para que los triggers se procesen y se cancelen mutuamente.
+
+    // Asiento 1: CRÉDITO — "El dinero entró desde la cuenta virtual"
+    await this.supabase.from('ledger_entries').insert({
+      wallet_id: refWalletId,
+      type: 'credit',
+      amount: netAmount,
+      currency: (va.source_currency as string) ?? currency,
+      status: 'settled',
+      reference_type: 'payment_order',
+      reference_id: orderId,
+      description: `Depósito recibido — ${senderName} ($${amount}) [External Sweep]`,
+    });
+
+    // Asiento 2: DÉBITO — "El dinero salió automáticamente a wallet externa"
+    await this.supabase.from('ledger_entries').insert({
+      wallet_id: refWalletId,
+      type: 'debit',
+      amount: netAmount,
+      currency: (va.source_currency as string) ?? currency,
+      status: 'settled',
+      reference_type: 'payment_order',
+      reference_id: orderId,
+      description: `Auto-sweep a wallet externa: ${externalLabel} (${externalAddr})`,
+    });
+
+    // 3. Notificación al cliente — informar que los fondos ya salieron
+    await this.supabase.from('notifications').insert({
+      user_id: userId,
+      type: 'financial',
+      title: 'Depósito Reenviado a Wallet Externa',
+      message: `$${netAmount.toFixed(2)} de ${senderName} fue reenviado automáticamente a ${externalLabel} (fee: $${feeAmount.toFixed(2)})`,
+      reference_type: 'payment_order',
+      reference_id: orderId,
+    });
+
+    // 4. Activity log
+    await this.supabase.from('activity_logs').insert({
+      user_id: userId,
+      action: 'DEPOSIT_EXTERNAL_SWEEP',
+      description: `Depósito de $${amount} de ${senderName} → auto-sweep a ${externalLabel} (${externalAddr}). Neto: $${netAmount} (fee: $${feeAmount})`,
+    });
+
+    this.logger.log(
+      `🔀 External sweep: $${netAmount} para user ${userId} → ${externalAddr}`,
+    );
   }
 
   // ═══════════════════════════════════════════════

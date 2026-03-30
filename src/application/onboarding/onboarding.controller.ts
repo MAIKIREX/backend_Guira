@@ -64,6 +64,16 @@ export class OnboardingController {
     return this.onboardingService.getKycApplication(user.id);
   }
 
+  @Get('kyc/tos-link')
+  @ApiOperation({ summary: 'Obtener link para aceptar Terms of Service (KYC)' })
+  @ApiResponse({ status: 200, description: 'URL de aceptación de ToS' })
+  getKycTosLink(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('redirect_uri') redirectUri?: string,
+  ) {
+    return this.onboardingService.generateTosLink(user.id, redirectUri);
+  }
+
   @Post('kyc/tos-accept')
   @ApiOperation({ summary: 'Aceptar Terms of Service (KYC)' })
   @ApiBody({
@@ -152,6 +162,16 @@ export class OnboardingController {
   @ApiOperation({ summary: 'Estado de la aplicación KYB' })
   getKybApplication(@CurrentUser() user: AuthenticatedUser) {
     return this.onboardingService.getKybApplication(user.id);
+  }
+
+  @Get('kyb/tos-link')
+  @ApiOperation({ summary: 'Obtener link para aceptar Terms of Service (KYB)' })
+  @ApiResponse({ status: 200, description: 'URL de aceptación de ToS' })
+  getKybTosLink(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('redirect_uri') redirectUri?: string,
+  ) {
+    return this.onboardingService.generateTosLink(user.id, redirectUri);
   }
 
   @Post('kyb/tos-accept')

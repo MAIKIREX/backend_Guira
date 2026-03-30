@@ -17,10 +17,27 @@ export class CreateVirtualAccountDto {
   @IsNotEmpty()
   destination_payment_rail: string;
 
-  @ApiPropertyOptional({ description: 'Wallet ID de destino (si aplica)' })
+  @ApiPropertyOptional({ description: 'Wallet interna de Guira como destino (si los fondos se quedan en plataforma)' })
   @IsOptional()
   @IsUUID()
   destination_wallet_id?: string;
+
+  @ApiPropertyOptional({
+    description: 'Dirección de wallet externa (Binance, MetaMask, etc.). Si se proporciona, los fondos se envían fuera de Guira y NO incrementan el balance interno.',
+    example: '0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18',
+  })
+  @IsOptional()
+  @IsString()
+  destination_address?: string;
+
+  @ApiPropertyOptional({
+    description: 'Etiqueta descriptiva para la wallet externa',
+    example: 'Mi Binance USDC',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  destination_label?: string;
 }
 
 export class CreateExternalAccountDto {

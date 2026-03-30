@@ -192,18 +192,47 @@ Sube documentos base. Repetir por cada documento necesario (acta constitutiva, c
 
 ---
 
-### 8. Aceptar Términos de Servicio (ToS)
+### 8. Obtener Link y Aceptar Términos de Servicio (ToS)
 
-El representante acepta los términos corporativos.
+El representante acepta los términos corporativos requeridos por Bridge. Al igual que el proceso individual, se realiza en dos fases:
+
+#### 8.1 Obtener Link de ToS
+El frontend solicita el enlace donde el representante legal aceptará los términos. El backend automáticamente determina si el cliente es nuevo (`POST /v0/customers/tos_links`) o existente (`GET /v0/customers/:id/tos_acceptance_link`) en Bridge.
+
+- **Método:** `GET`
+- **Endpoint:** `/onboarding/kyb/tos-link?redirect_uri=https://tu-app.com/callback` *(opcional)*
+- **Autenticación requerida:** Sí
+
+**📤 Respuesta Exitosa (200 OK):**
+```json
+{
+  "url": "https://dashboard.bridge.xyz/accept-terms-of-service?..."
+}
+```
+
+> El Frontend redirige al usuario a esta `url` o la muestra en un iFrame. Tras aceptar, Bridge retorna el control (vía redirección a `redirect_uri` o postMessage) y provee un `signed_agreement_id`.
+
+#### 8.2 Confirmar Aceptación en Guira
+El frontend informa al backend de Guira que el proceso terminó, enviando el identificador del acuerdo.
 
 - **Método:** `POST`
 - **Endpoint:** `/onboarding/kyb/tos-accept`
 - **Autenticación requerida:** Sí
 
-#### 📥 Body Request
+**📥 Body Request:**
 ```json
 {
-  "tos_contract_id": "bridge-tos-business-v1"
+  "tos_contract_id": "signed_agreement_id_recibido_de_bridge"
+}
+```
+
+**📤 Respuesta Exitosa (200 OK):**
+```json
+{
+  "id": "uuid-de-la-aplicacion-kyb",
+  "tos_accepted_at": "2026-03-29T16:45:00Z",
+  "tos_contract_id": "signed_agreement_id_recibido_de_bridge",
+  "updated_at": "2026-03-29T16:45:00Z"
 }
 ```
 

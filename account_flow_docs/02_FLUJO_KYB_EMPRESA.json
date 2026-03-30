@@ -1,7 +1,7 @@
 {
   "flujo": "KYB — Alta de Empresa",
   "descripcion": "Proceso completo para dar de alta a una empresa u organización en Guira. Incluye registro de datos de la empresa, directores y beneficiarios finales (UBOs). Se compone de 10 pasos secuenciales.",
-  "total_pasos": 10,
+  "total_pasos": 11,
   "tiempo_estimado": "10–20 minutos para el usuario + tiempo de revisión compliance (48–96 horas hábiles)",
   "prerequisito": "El representante legal/administrador debe tener primero una cuenta personal creada (Pasos 1 y 2 del flujo KYC).",
 
@@ -347,20 +347,37 @@
 
     {
       "paso": 8,
-      "nombre": "Aceptar Términos de Servicio (ToS) para KYB",
+      "nombre": "Obtener Link de Términos de Servicio (ToS) para KYB",
+      "descripcion": "El frontend solicita el enlace donde el representante aceptará los términos en nombre de la empresa. El backend determina si el cliente es nuevo o existente en Bridge y devuelve la URL.",
+      "metodo": "GET",
+      "endpoint": "/onboarding/kyb/tos-link?redirect_uri=https://tu-app.com/callback",
+      "autenticacion_requerida": true,
+      "body": null,
+      "respuesta_exitosa": {
+        "http_status": 200,
+        "body": {
+          "url": "https://dashboard.bridge.xyz/accept-terms-of-service?..."
+        }
+      },
+      "nota_redireccion": "El Frontend redirige al representante a esta url o la muestra en un iFrame. Tras aceptar, Bridge retorna el control vía redirección a redirect_uri y provee un signed_agreement_id."
+    },
+
+    {
+      "paso": 9,
+      "nombre": "Confirmar Aceptación de ToS en Guira",
       "descripcion": "El representante acepta los Términos de Servicio en nombre de la empresa. Paso obligatorio antes del envío.",
       "metodo": "POST",
       "endpoint": "/onboarding/kyb/tos-accept",
       "autenticacion_requerida": true,
       "body": {
-        "tos_contract_id": "bridge-tos-business-v1"
+        "tos_contract_id": "signed_agreement_id_recibido_de_bridge"
       },
       "respuesta_exitosa": {
         "http_status": 200,
         "body": {
           "id": "uuid-de-la-aplicacion-kyb",
           "tos_accepted_at": "2026-03-29T16:00:00Z",
-          "tos_contract_id": "bridge-tos-business-v1",
+          "tos_contract_id": "signed_agreement_id_recibido_de_bridge",
           "updated_at": "2026-03-29T16:00:00Z"
         }
       },
@@ -371,7 +388,7 @@
     },
 
     {
-      "paso": 9,
+      "paso": 10,
       "nombre": "Enviar Expediente KYB para Revisión",
       "descripcion": "Envía formalmente el expediente completo al equipo de compliance. El sistema valida: al menos 1 director, al menos 1 documento de empresa y que el ToS haya sido aceptado.",
       "metodo": "PATCH",
@@ -381,7 +398,7 @@
       "validaciones_previas": [
         "Debe existir al menos 1 director registrado (Paso 4).",
         "Debe existir al menos 1 documento con subject_type=business (Paso 7).",
-        "El campo tos_accepted_at debe estar presente (Paso 8 completado)."
+        "El campo tos_accepted_at debe estar presente (Paso 9 completado)."
       ],
       "respuesta_exitosa": {
         "http_status": 200,
@@ -400,7 +417,7 @@
       "errores_posibles": [
         { "http_status": 400, "descripcion": "Debes agregar al menos un director (Paso 4 pendiente)." },
         { "http_status": 400, "descripcion": "Debes adjuntar al menos un documento de la empresa (Paso 7 pendiente)." },
-        { "http_status": 400, "descripcion": "Debes aceptar los Terms of Service (Paso 8 pendiente)." }
+        { "http_status": 400, "descripcion": "Debes aceptar los Terms of Service (Paso 9 pendiente)." }
       ],
       "efecto_en_db": [
         "Actualiza `kyb_applications.status` a `SUBMITTED`.",
@@ -411,7 +428,7 @@
     },
 
     {
-      "paso": 10,
+      "paso": 11,
       "nombre": "(Esperar) Revisión de Compliance y Activación",
       "descripcion": "El equipo de compliance de Guira revisa el expediente. No requiere acción adicional del usuario.",
       "acciones_del_equipo_interno": [

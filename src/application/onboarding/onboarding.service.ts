@@ -11,6 +11,7 @@ import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
 import { CreatePersonDto } from './dto/create-person.dto';
 import { CreateBusinessDto } from './dto/create-business.dto';
 import { CreateDirectorDto, CreateUboDto } from './dto/create-director-ubo.dto';
+import { BridgeApiClient } from '../bridge/bridge-api.client';
 
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
@@ -27,6 +28,7 @@ export class OnboardingService {
 
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
+    private readonly bridgeApiClient: BridgeApiClient,
   ) {}
 
   // ───────────────────────────────────────────────
@@ -159,6 +161,41 @@ export class OnboardingService {
 
     if (error) throw new BadRequestException(error.message);
     return data;
+  }
+
+  /** Genera el link de Terms of Service de Bridge (KYC/KYB) */
+  async generateTosLink(userId: string, redirectUri?: string) {
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('bridge_customer_id')
+      .eq('id', userId)
+      .single();
+
+    let url = '';
+
+    if (profile?.bridge_customer_id) {
+      const res = await this.bridgeApiClient.get<{ url: string }>(
+        `/v0/customers/${profile.bridge_customer_id}/tos_acceptance_link`,
+      );
+      url = res.url;
+    } else {
+      const idempotencyKey = `tos-link-${userId}-${Date.now()}`;
+      const res = await this.bridgeApiClient.post<{ url: string }>(
+        `/v0/customers/tos_links`,
+        {},
+        idempotencyKey,
+      );
+      url = res.url;
+    }
+
+    if (redirectUri) {
+      const hasParams = url.includes('?');
+      url = `${url}${hasParams ? '&' : '?'}redirect_uri=${encodeURIComponent(
+        redirectUri,
+      )}`;
+    }
+
+    return { url };
   }
 
   /** Envía el expediente KYC para revisión. */

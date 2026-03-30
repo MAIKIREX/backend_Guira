@@ -7,6 +7,8 @@ const mockSupabase = {
   from: jest.fn().mockReturnThis(),
   select: jest.fn().mockReturnThis(),
   eq: jest.fn().mockReturnThis(),
+  lte: jest.fn().mockReturnThis(),
+  or: jest.fn().mockReturnThis(),
   maybeSingle: jest.fn(),
 };
 

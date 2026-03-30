@@ -1,7 +1,7 @@
 {
   "flujo": "KYC — Alta de Persona Natural",
   "descripcion": "Proceso completo para dar de alta a un usuario individual (persona física) en Guira. Se compone de 7 pasos secuenciales.",
-  "total_pasos": 7,
+  "total_pasos": 8,
   "tiempo_estimado": "5–10 minutos para el usuario + tiempo de revisión del equipo compliance (24–72 horas hábiles)",
 
   "pasos": [
@@ -240,23 +240,40 @@
 
     {
       "paso": 6,
-      "nombre": "Aceptar Términos de Servicio (ToS)",
-      "descripcion": "El usuario confirma que acepta los Términos de Servicio de la plataforma y del proveedor Bridge. Este paso es obligatorio antes de enviar el expediente.",
+      "nombre": "Obtener Link de Términos de Servicio (ToS)",
+      "descripcion": "El frontend solicita el enlace donde el cliente aceptará los términos. El backend determina si el cliente es nuevo o existente en Bridge y devuelve la URL.",
+      "metodo": "GET",
+      "endpoint": "/onboarding/kyc/tos-link?redirect_uri=https://tu-app.com/callback",
+      "autenticacion_requerida": true,
+      "body": null,
+      "respuesta_exitosa": {
+        "http_status": 200,
+        "body": {
+          "url": "https://dashboard.bridge.xyz/accept-terms-of-service?..."
+        }
+      },
+      "nota_redireccion": "El Frontend redirige al usuario a esta url. Tras aceptar, Bridge retorna el control vía redirección a redirect_uri y provee un signed_agreement_id."
+    },
+
+    {
+      "paso": 7,
+      "nombre": "Confirmar Aceptación de ToS en Guira",
+      "descripcion": "Una vez completado el flujo en Bridge, se informa al backend enviando el ID del contrato firmado.",
       "metodo": "POST",
       "endpoint": "/onboarding/kyc/tos-accept",
       "autenticacion_requerida": true,
       "body": {
-        "tos_contract_id": "bridge-tos-contract-v2"
+        "tos_contract_id": "signed_agreement_id_recibido_de_bridge"
       },
       "descripcion_campos": {
-        "tos_contract_id": "OPCIONAL. ID del contrato ToS específico de Bridge, si aplica. Si no se proporciona, se registra null."
+        "tos_contract_id": "REQUERIDO. El signed_agreement_id proveído por Bridge vía query string (redirect_uri) o postMessage."
       },
       "respuesta_exitosa": {
         "http_status": 200,
         "body": {
           "id": "uuid-de-la-aplicacion-kyc",
           "tos_accepted_at": "2026-03-29T15:30:00Z",
-          "tos_contract_id": "bridge-tos-contract-v2",
+          "tos_contract_id": "signed_agreement_id_recibido_de_bridge",
           "updated_at": "2026-03-29T15:30:00Z"
         }
       },
@@ -267,7 +284,7 @@
     },
 
     {
-      "paso": 7,
+      "paso": 8,
       "nombre": "Enviar Expediente KYC para Revisión",
       "descripcion": "Envía formalmente el expediente completo al equipo de compliance de Guira. El sistema valida que existan documentos adjuntos y que el ToS haya sido aceptado. El perfil pasa a onboarding_status = in_review.",
       "metodo": "PATCH",
@@ -276,7 +293,7 @@
       "body": null,
       "validaciones_previas": [
         "Debe existir al menos 1 documento con subject_type=person.",
-        "El campo tos_accepted_at debe estar presente (Paso 6 completado)."
+        "El campo tos_accepted_at debe estar presente (Paso 7 completado)."
       ],
       "respuesta_exitosa": {
         "http_status": 200,
@@ -290,7 +307,7 @@
       },
       "errores_posibles": [
         { "http_status": 400, "descripcion": "Debes adjuntar al menos un documento de identidad (Paso 5 pendiente)." },
-        { "http_status": 400, "descripcion": "Debes aceptar los Terms of Service (Paso 6 pendiente)." },
+        { "http_status": 400, "descripcion": "Debes aceptar los Terms of Service (Paso 7 pendiente)." },
         { "http_status": 404, "descripcion": "No existe aplicación KYC (Paso 4 pendiente)." }
       ],
       "efecto_en_db": [

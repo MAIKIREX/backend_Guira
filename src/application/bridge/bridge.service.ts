@@ -37,6 +37,14 @@ export class BridgeService {
   async createVirtualAccount(userId: string, dto: CreateVirtualAccountDto) {
     const profile = await this.getVerifiedProfile(userId);
 
+    // Validación: no pueden venir ambos destinos a la vez
+    if (dto.destination_wallet_id && dto.destination_address) {
+      throw new BadRequestException(
+        'No puedes especificar destination_wallet_id y destination_address al mismo tiempo. ' +
+        'Usa destination_wallet_id para fondear tu wallet en Guira, o destination_address para enviar a una wallet externa (Binance, MetaMask, etc.).',
+      );
+    }
+
     // Verificar duplicados
     const { data: existing } = await this.supabase
       .from('bridge_virtual_accounts')
@@ -52,9 +60,22 @@ export class BridgeService {
       );
     }
 
-    // Obtener wallet destino
+    // ── Determinar destino ──────────────────────────────
+    // Caso A: Wallet interna de Guira (fondos se quedan en plataforma)
+    // Caso B: Wallet externa (Binance, MetaMask, etc.) — fondos salen de Guira
+    // Caso C: Ninguno especificado — default a wallet interna del usuario
     let destinationAddress: string | undefined;
-    if (dto.destination_wallet_id) {
+    let isExternalSweep = false;
+
+    if (dto.destination_address) {
+      // ── Caso B: Wallet externa ──
+      destinationAddress = dto.destination_address;
+      isExternalSweep = true;
+      this.logger.log(
+        `VA con destino externo para user ${userId}: ${dto.destination_address} (${dto.destination_label ?? 'sin etiqueta'})`,
+      );
+    } else if (dto.destination_wallet_id) {
+      // ── Caso A: Wallet interna ──
       const { data: wallet } = await this.supabase
         .from('wallets')
         .select('address')
@@ -90,6 +111,8 @@ export class BridgeService {
         destination_payment_rail: dto.destination_payment_rail,
         destination_address: destinationAddress ?? null,
         destination_wallet_id: dto.destination_wallet_id ?? null,
+        is_external_sweep: isExternalSweep,
+        external_destination_label: dto.destination_label ?? null,
         bank_name: (bridgeVA.source_deposit_instructions as Record<string, unknown>)?.bank_name ?? null,
         account_number: (bridgeVA.source_deposit_instructions as Record<string, unknown>)?.account_number ?? null,
         routing_number: (bridgeVA.source_deposit_instructions as Record<string, unknown>)?.routing_number ?? null,

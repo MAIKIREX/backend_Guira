@@ -187,27 +187,45 @@ El usuario sube una foto/escaneo de su documento de identidad. El backend lo alm
 
 ---
 
-### 6. Aceptar Términos de Servicio (ToS)
+### 6. Obtener Link y Aceptar Términos de Servicio (ToS)
 
-El usuario confirma que acepta los Términos de Servicio de la plataforma y del proveedor Bridge. Obligatorio antes del envío.
+El usuario debe aceptar los Términos de Servicio de Bridge antes de enviar su información. El proceso consta de dos fases:
+
+#### 6.1 Obtener Link de ToS
+El frontend solicita el enlace donde el cliente aceptará los términos. El backend automáticamente determina si el cliente es nuevo (`POST /v0/customers/tos_links`) o existente (`GET /v0/customers/:id/tos_acceptance_link`) en Bridge.
+
+- **Método:** `GET`
+- **Endpoint:** `/onboarding/kyc/tos-link?redirect_uri=https://tu-app.com/callback` *(opcional)*
+- **Autenticación requerida:** Sí
+
+**📤 Respuesta Exitosa (200 OK):**
+```json
+{
+  "url": "https://dashboard.bridge.xyz/accept-terms-of-service?..."
+}
+```
+> El Frontend redirige al usuario a esta `url` o la muestra en un iFrame. Tras aceptar, Bridge retorna el control (vía redirección a `redirect_uri` o `postMessage`) y provee un `signed_agreement_id`.
+
+#### 6.2 Confirmar Aceptación en Guira
+Una vez completado el flujo en Bridge, se informa al backend enviando el ID del contrato firmado.
 
 - **Método:** `POST`
 - **Endpoint:** `/onboarding/kyc/tos-accept`
 - **Autenticación requerida:** Sí
 
-#### 📥 Body Request
+**📥 Body Request:**
 ```json
 {
-  "tos_contract_id": "bridge-tos-contract-v2"
+  "tos_contract_id": "signed_agreement_id_recibido_de_bridge"
 }
 ```
 
-#### 📤 Respuesta Exitosa (200 OK)
+**📤 Respuesta Exitosa (200 OK):**
 ```json
 {
   "id": "uuid-de-la-aplicacion-kyc",
   "tos_accepted_at": "2026-03-29T15:30:00Z",
-  "tos_contract_id": "bridge-tos-contract-v2",
+  "tos_contract_id": "signed_agreement_id_recibido_de_bridge",
   "updated_at": "2026-03-29T15:30:00Z"
 }
 ```
