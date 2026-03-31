@@ -99,9 +99,10 @@ export class CreateBusinessDto {
   @MaxLength(2)
   country: string;
 
-  @ApiProperty({ example: 'Plataforma de pagos internacionales' })
+  @ApiPropertyOptional({ example: 'Plataforma de pagos internacionales' })
+  @IsOptional()
   @IsString()
-  business_description: string;
+  business_description?: string;
 
   @ApiPropertyOptional({ example: 'fintech' })
   @IsOptional()
@@ -113,13 +114,15 @@ export class CreateBusinessDto {
   @IsString()
   account_purpose?: string;
 
-  @ApiProperty({ example: 'business_revenue' })
+  @ApiPropertyOptional({ example: 'business_revenue' })
+  @IsOptional()
   @IsString()
-  source_of_funds: string;
+  source_of_funds?: string;
 
-  @ApiProperty({ example: false })
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
   @IsBoolean()
-  conducts_money_services: boolean;
+  conducts_money_services?: boolean;
 
   @ApiPropertyOptional({ example: false })
   @IsOptional()

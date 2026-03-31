@@ -1,20 +1,65 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsNumber,
+  Min,
+  Max,
+  MaxLength,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+// ═══════════════════════════════════════════════════
+//  Virtual Account DTO (depósitos entrantes)
+// ═══════════════════════════════════════════════════
+
+/**
+ * Monedas fuente soportadas por Bridge para Virtual Accounts.
+ * Cada moneda tiene instrucciones de depósito diferentes:
+ * - usd → routing_number + account_number (ACH/Wire)
+ * - eur → IBAN (SEPA)
+ * - mxn → CLABE (SPEI)
+ * - brl → br_code (PIX)
+ * - gbp → sort_code + account_number (FPS, Beta)
+ */
+const SUPPORTED_SOURCE_CURRENCIES = ['usd', 'eur', 'mxn', 'brl', 'gbp'] as const;
+
+/**
+ * Redes blockchain de destino soportadas por Bridge.
+ */
+const SUPPORTED_DESTINATION_RAILS = [
+  'ethereum', 'polygon', 'solana', 'base', 'arbitrum', 'optimism', 'stellar',
+] as const;
+
 export class CreateVirtualAccountDto {
-  @ApiProperty({ example: 'usd', description: 'Moneda origen del depósito' })
-  @IsString()
-  @IsNotEmpty()
+  @ApiProperty({
+    example: 'usd',
+    enum: SUPPORTED_SOURCE_CURRENCIES,
+    description: 'Moneda origen del depósito. Bridge soporta: usd, eur, mxn, brl, gbp',
+  })
+  @IsEnum(SUPPORTED_SOURCE_CURRENCIES, {
+    message: `source_currency debe ser una de: ${SUPPORTED_SOURCE_CURRENCIES.join(', ')}`,
+  })
   source_currency: string;
 
-  @ApiProperty({ example: 'usdc', description: 'Moneda destino de conversión' })
+  @ApiProperty({ example: 'usdc', description: 'Moneda destino de conversión (ej: usdc, usdt)' })
   @IsString()
   @IsNotEmpty()
   destination_currency: string;
 
-  @ApiProperty({ example: 'ethereum', description: 'Red de destino para crypto' })
-  @IsString()
-  @IsNotEmpty()
+  @ApiProperty({
+    example: 'ethereum',
+    enum: SUPPORTED_DESTINATION_RAILS,
+    description: 'Red blockchain de destino. Bridge soporta: ethereum, polygon, solana, base, arbitrum, optimism, stellar',
+  })
+  @IsEnum(SUPPORTED_DESTINATION_RAILS, {
+    message: `destination_payment_rail debe ser una de: ${SUPPORTED_DESTINATION_RAILS.join(', ')}`,
+  })
   destination_payment_rail: string;
 
   @ApiPropertyOptional({ description: 'Wallet interna de Guira como destino (si los fondos se quedan en plataforma)' })
@@ -38,71 +83,234 @@ export class CreateVirtualAccountDto {
   @IsString()
   @MaxLength(100)
   destination_label?: string;
+
+  @ApiPropertyOptional({
+    description: 'Porcentaje de fee que Guira cobra sobre cada depósito recibido en esta VA (ej: 1.0 = 1%). Si no se especifica, se usa el fee por defecto de la configuración.',
+    example: 1.0,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  developer_fee_percent?: number;
+}
+
+// ═══════════════════════════════════════════════════
+//  External Account DTOs (cuentas bancarias destino)
+// ═══════════════════════════════════════════════════
+
+/**
+ * Dirección del beneficiario. Bridge recomienda enviarla para cuentas US
+ * y valida con `beneficiary_address_valid` en la respuesta.
+ */
+export class BeneficiaryAddressDto {
+  @ApiProperty({ example: '123 Main St', description: 'Línea de dirección principal (Bridge: 4-35 chars)' })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(4)
+  @MaxLength(35)
+  street_line_1: string;
+
+  @ApiPropertyOptional({ example: 'Suite 100', description: 'Línea 2 (máx 35 chars)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(35)
+  street_line_2?: string;
+
+  @ApiProperty({ example: 'San Francisco' })
+  @IsString()
+  @IsNotEmpty()
+  city: string;
+
+  @ApiPropertyOptional({ example: 'CA', description: 'ISO 3166-2 subdivision code. Requerido para US (máx 3 chars)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  state?: string;
+
+  @ApiPropertyOptional({ example: '94102', description: 'Requerido para países que usan código postal' })
+  @IsOptional()
+  @IsString()
+  postal_code?: string;
+
+  @ApiProperty({ example: 'USA', description: 'Código de país ISO 3166-1 alpha-3 (exactamente 3 chars)' })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(3)
+  @MaxLength(3)
+  country: string;
 }
 
 export class CreateExternalAccountDto {
-  @ApiProperty({ example: 'Banco Nacional', description: 'Nombre del banco' })
+  // ── Campos obligatorios para todas las variantes ──
+
+  @ApiProperty({
+    example: 'John Doe',
+    description: 'Nombre del titular. Para ACH/Wire: mín 3, máx 35 caracteres.',
+  })
   @IsString()
   @IsNotEmpty()
-  bank_name: string;
+  @MinLength(1)
+  @MaxLength(256)
+  account_owner_name: string;
 
-  @ApiProperty({ example: 'María González', description: 'Nombre del titular' })
+  @ApiProperty({
+    example: 'usd',
+    description: 'Moneda asociada a la cuenta externa',
+  })
   @IsString()
   @IsNotEmpty()
-  account_name: string;
-
-  @ApiProperty({ example: 'usd' })
-  @IsString()
   currency: string;
 
-  @ApiProperty({ example: 'wire', enum: ['ach', 'wire', 'sepa', 'spei', 'pix'] })
-  @IsEnum(['ach', 'wire', 'sepa', 'spei', 'pix'])
+  @ApiProperty({
+    example: 'wire',
+    enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b'],
+    description: 'Rail de pago. Se usa internamente para derivar el account_type de Bridge (us, iban, clabe, pix, bre_b).',
+  })
+  @IsEnum(['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b'])
   payment_rail: string;
 
-  @ApiPropertyOptional({ example: 'MX' })
+  // ── Campos opcionales globales ──
+
+  @ApiPropertyOptional({ example: 'Wells Fargo', description: 'Nombre del banco' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  bank_name?: string;
+
+  @ApiPropertyOptional({ example: 'US', description: 'País de la cuenta (ISO alpha-2)' })
   @IsOptional()
   @IsString()
   country?: string;
 
-  // ACH / Wire
-  @ApiPropertyOptional({ example: '021000021' })
+  // ── Dirección del beneficiario (recomendada para US) ──
+
+  @ApiPropertyOptional({
+    description: 'Dirección del beneficiario. Bridge recomienda enviarla para cuentas US (ACH/Wire) para validar beneficiary_address_valid.',
+    type: () => BeneficiaryAddressDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BeneficiaryAddressDto)
+  address?: BeneficiaryAddressDto;
+
+  // ── ACH / Wire (account_type se infiere como "us") ──
+
+  @ApiPropertyOptional({ example: '021000021', description: 'Routing number (requerido para ACH/Wire). Bridge exige exactamente 9 chars.' })
   @IsOptional()
   @IsString()
+  @MinLength(9)
+  @MaxLength(9)
   routing_number?: string;
 
-  @ApiPropertyOptional({ example: '123456789' })
+  @ApiPropertyOptional({ example: '1210002481111', description: 'Número de cuenta bancaria (requerido para ACH/Wire). Bridge: mín 1 char.' })
   @IsOptional()
   @IsString()
+  @MinLength(1)
   account_number?: string;
 
-  @ApiPropertyOptional({ enum: ['checking', 'savings'] })
+  @ApiPropertyOptional({
+    enum: ['checking', 'savings'],
+    description: 'Tipo de cuenta bancaria US. Se envía a Bridge como checking_or_savings.',
+    example: 'checking',
+  })
   @IsOptional()
-  @IsString()
-  account_type?: string;
+  @IsEnum(['checking', 'savings'])
+  checking_or_savings?: string;
 
-  // SEPA
-  @ApiPropertyOptional({ example: 'DE89370400440532013000' })
+  // ── SEPA / IBAN ──
+
+  @ApiPropertyOptional({ example: 'DE89370400440532013000', description: 'IBAN account number (requerido para SEPA)' })
   @IsOptional()
   @IsString()
   iban?: string;
 
-  @ApiPropertyOptional({ example: 'COBADEFFXXX' })
+  @ApiPropertyOptional({ example: 'COBADEFFXXX', description: 'SWIFT/BIC code (requerido para SEPA)' })
   @IsOptional()
   @IsString()
   swift_bic?: string;
 
-  // SPEI
-  @ApiPropertyOptional({ example: '012345678901234567' })
+  @ApiPropertyOptional({
+    example: 'NLD',
+    description: 'País de la cuenta IBAN (ISO 3166-1 alpha-3, exactamente 3 chars). Requerido por Bridge para cuentas IBAN.',
+  })
   @IsOptional()
   @IsString()
+  @MinLength(3)
+  @MaxLength(3)
+  iban_country?: string;
+
+  @ApiPropertyOptional({
+    enum: ['individual', 'business'],
+    description: 'Tipo de titular. Requerido cuando el account_type de Bridge es "iban".',
+  })
+  @IsOptional()
+  @IsEnum(['individual', 'business'])
+  account_owner_type?: string;
+
+  @ApiPropertyOptional({ description: 'Nombre del titular individual (requerido si account_owner_type = individual)' })
+  @IsOptional()
+  @IsString()
+  first_name?: string;
+
+  @ApiPropertyOptional({ description: 'Apellido del titular individual (requerido si account_owner_type = individual)' })
+  @IsOptional()
+  @IsString()
+  last_name?: string;
+
+  @ApiPropertyOptional({ description: 'Nombre de la empresa (requerido si account_owner_type = business)' })
+  @IsOptional()
+  @IsString()
+  business_name?: string;
+
+  // ── SPEI (México) ──
+
+  @ApiPropertyOptional({ example: '014180655500000007', description: 'CLABE interbancaria (requerido para SPEI). Bridge exige exactamente 18 chars.' })
+  @IsOptional()
+  @IsString()
+  @MinLength(18)
+  @MaxLength(18)
   clabe?: string;
 
-  // PIX
-  @ApiPropertyOptional()
+  // ── PIX (Brasil) ── Bridge soporta dos variantes: pix_key O br_code
+
+  @ApiPropertyOptional({
+    example: 'joao.silva@email.com',
+    description: 'Clave PIX del destinatario (email, CPF, teléfono, o clave aleatoria). Mutuamente excluyente con br_code.',
+  })
+  @IsOptional()
+  @IsString()
+  pix_key?: string;
+
+  @ApiPropertyOptional({
+    description: 'BR Code (código "copia e cola" PIX). Mutuamente excluyente con pix_key.',
+  })
   @IsOptional()
   @IsString()
   br_code?: string;
+
+  @ApiPropertyOptional({
+    example: '12345678901',
+    description: 'Número de documento del titular PIX (CPF/CNPJ). Opcional para Bridge.',
+  })
+  @IsOptional()
+  @IsString()
+  document_number?: string;
+
+  // ── Bre-B (Colombia) ──
+
+  @ApiPropertyOptional({
+    example: '1234567890123456',
+    description: 'Clave Bre-B para cuentas colombianas (requerido para bre_b).',
+  })
+  @IsOptional()
+  @IsString()
+  bre_b_key?: string;
 }
+
+// ═══════════════════════════════════════════════════
+//  Liquidation Address DTO
+// ═══════════════════════════════════════════════════
 
 export class CreateLiquidationAddressDto {
   @ApiProperty({ example: 'usdc' })

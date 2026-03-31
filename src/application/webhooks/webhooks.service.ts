@@ -4,6 +4,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
+import { BridgeApiClient } from '../bridge/bridge-api.client';
 
 interface SinkEventDto {
   provider: string;
@@ -21,6 +22,7 @@ export class WebhooksService {
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
     private readonly config: ConfigService,
+    private readonly bridgeApi: BridgeApiClient,
   ) {}
 
   // ═══════════════════════════════════════════════
@@ -643,8 +645,8 @@ export class WebhooksService {
       })
       .eq('id', userId);
 
-    // Inicializar wallets y balances
-    await this.initializeWalletsForUser(userId);
+    // Inicializar wallets y balances vía Bridge API
+    await this.initializeWalletsForUser(userId, bridgeCustomerId);
 
     // Notificación
     const typeLabel = customerType === 'business' ? 'KYB' : 'KYC';
@@ -737,7 +739,19 @@ export class WebhooksService {
     }
   }
 
-  private async initializeWalletsForUser(userId: string): Promise<void> {
+  /**
+   * Inicializa wallets de un cliente recién aprobado vía Bridge API.
+   *
+   * Según la documentación de Bridge:
+   * - Endpoint: POST /v0/customers/{customerID}/wallets
+   * - Body requerido: { chain } (enum: base, ethereum, solana, tempo, tron)
+   * - Header requerido: Idempotency-Key
+   * - Respuesta: { id, chain, address, created_at, updated_at }
+   */
+  private async initializeWalletsForUser(
+    userId: string,
+    bridgeCustomerId: string | null,
+  ): Promise<void> {
     try {
       // Leer config de wallets
       const { data: setting } = await this.supabase
@@ -751,27 +765,66 @@ export class WebhooksService {
       );
 
       for (const wc of configs) {
+        // Verificar duplicados
         const { data: existing } = await this.supabase
           .from('wallets')
           .select('id')
           .eq('user_id', userId)
           .eq('currency', wc.currency.toUpperCase())
+          .eq('network', wc.network)
           .eq('is_active', true)
           .maybeSingle();
 
         if (existing) continue;
 
+        // Llamar Bridge API para crear wallet real
+        let walletAddress: string | null = null;
+        let providerWalletId: string | null = null;
+
+        if (bridgeCustomerId && this.bridgeApi.isConfigured) {
+          try {
+            const idempotencyKey = `wallet-${bridgeCustomerId}-${wc.network}-${Date.now()}`;
+            const bridgeWallet = await this.bridgeApi.post<{
+              id: string;
+              chain: string;
+              address: string;
+              created_at: string;
+              updated_at: string;
+            }>(
+              `/v0/customers/${bridgeCustomerId}/wallets`,
+              { chain: wc.network },
+              idempotencyKey,
+            );
+            walletAddress = bridgeWallet.address;
+            providerWalletId = bridgeWallet.id;
+          } catch (walletErr) {
+            this.logger.error(
+              `Error creando Bridge wallet (${wc.network}) para user ${userId}: ${walletErr}`,
+            );
+            // Continuar con la siguiente wallet — no bloquear todo el flujo
+            continue;
+          }
+        } else {
+          this.logger.warn(
+            `Bridge API no disponible para user ${userId} — wallet ${wc.network} no creada`,
+          );
+          continue;
+        }
+
+        // Guardar en DB con datos reales de Bridge
         await this.supabase.from('wallets').insert({
           user_id: userId,
           currency: wc.currency.toUpperCase(),
+          address: walletAddress,
           network: wc.network,
-          label: `${wc.currency.toUpperCase()} (${wc.network})`,
           provider_key: 'bridge',
+          provider_wallet_id: providerWalletId,
+          label: `${wc.currency.toUpperCase()} (${wc.network})`,
           is_active: true,
         });
       }
 
-      // Inicializar balances
+      // Inicializar balances (siempre incluir USD como fiat base)
       const currencies = [...new Set([...configs.map((c) => c.currency.toUpperCase()), 'USD'])];
       for (const currency of currencies) {
         const { data: existing } = await this.supabase
@@ -792,8 +845,10 @@ export class WebhooksService {
           });
         }
       }
+
+      this.logger.log(`Wallets inicializadas para user ${userId}: ${configs.length} configuraciones`);
     } catch (err) {
-      this.logger.warn(`Error inicializando wallets para ${userId}: ${err}`);
+      this.logger.error(`Error inicializando wallets para ${userId}: ${err}`);
     }
   }
 

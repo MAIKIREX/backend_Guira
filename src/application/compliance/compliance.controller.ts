@@ -42,7 +42,7 @@ export class ComplianceController {
     return this.complianceService.listDocuments(user.id, subjectType);
   }
 
-  // ── KYC ──────────────────────────────────────────────────────────
+  // ── KYC (Lectura — crear/submit en /onboarding/kyc) ─────────────
 
   @Get('kyc')
   @ApiOperation({ summary: 'Obtener estado actual de KYC' })
@@ -50,36 +50,12 @@ export class ComplianceController {
     return this.complianceService.getKycApplication(user.id);
   }
 
-  @Post('kyc')
-  @ApiOperation({ summary: 'Crear/retomar KYC application' })
-  createKyc(@CurrentUser() user: User) {
-    return this.complianceService.createKycApplication(user.id);
-  }
-
-  @Post('kyc/:id/submit')
-  @ApiOperation({ summary: 'Enviar KYC para revisión' })
-  submitKyc(@CurrentUser() user: User, @Param('id') id: string) {
-    return this.complianceService.submitKycApplication(user.id, id);
-  }
-
-  // ── KYB ──────────────────────────────────────────────────────────
+  // ── KYB (Lectura — crear/submit en /onboarding/kyb) ─────────────
 
   @Get('kyb')
   @ApiOperation({ summary: 'Obtener estado actual de KYB (empresa)' })
   getKyb(@CurrentUser() user: User) {
     return this.complianceService.getKybApplication(user.id);
-  }
-
-  @Post('kyb')
-  @ApiOperation({ summary: 'Crear/retomar KYB application' })
-  createKyb(@CurrentUser() user: User) {
-    return this.complianceService.createKybApplication(user.id);
-  }
-
-  @Post('kyb/:id/submit')
-  @ApiOperation({ summary: 'Enviar KYB para revisión' })
-  submitKyb(@CurrentUser() user: User, @Param('id') id: string) {
-    return this.complianceService.submitKybApplication(user.id, id);
   }
 
   // ── Reviews ───────────────────────────────────────────────────────

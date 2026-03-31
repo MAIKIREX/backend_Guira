@@ -100,7 +100,7 @@ export class OnboardingService {
       .from('kyc_applications')
       .select('*')
       .eq('user_id', userId)
-      .in('status', ['pending', 'SUBMITTED', 'in_review'])
+      .in('status', ['pending', 'submitted', 'in_review'])
       .maybeSingle();
 
     if (existing) {
@@ -203,7 +203,7 @@ export class OnboardingService {
     const app = await this.getKycApplication(userId);
     if (!app) throw new NotFoundException('No existe aplicación KYC');
 
-    if (app.status === 'SUBMITTED' || app.status === 'in_review') {
+    if (app.status === 'submitted' || app.status === 'in_review') {
       return app; // Ya fue enviado — idempotente
     }
 
@@ -230,7 +230,7 @@ export class OnboardingService {
     const { data, error } = await this.supabase
       .from('kyc_applications')
       .update({
-        status: 'SUBMITTED',
+        status: 'submitted',
         submitted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
@@ -245,6 +245,15 @@ export class OnboardingService {
       .from('profiles')
       .update({ onboarding_status: 'in_review' })
       .eq('id', userId);
+
+    // Crear compliance_review automáticamente para el staff
+    const person = await this.getPerson(userId);
+    await this.supabase.from('compliance_reviews').insert({
+      subject_type: 'kyc_applications',
+      subject_id: app.id,
+      status: 'open',
+      priority: person?.is_pep ? 'high' : 'normal',
+    });
 
     // Notificar al staff
     await this.notifyStaff(
@@ -363,7 +372,7 @@ export class OnboardingService {
       .from('kyb_applications')
       .select('*')
       .eq('business_id', biz.id)
-      .in('status', ['pending', 'SUBMITTED', 'in_review'])
+      .in('status', ['pending', 'submitted', 'in_review'])
       .maybeSingle();
 
     if (existing) return existing;
@@ -419,7 +428,7 @@ export class OnboardingService {
     const app = await this.getKybApplication(userId);
     if (!app) throw new NotFoundException('No existe aplicación KYB');
 
-    if (app.status === 'SUBMITTED' || app.status === 'in_review') {
+    if (app.status === 'submitted' || app.status === 'in_review') {
       return app;
     }
 
@@ -456,7 +465,7 @@ export class OnboardingService {
     const { data, error } = await this.supabase
       .from('kyb_applications')
       .update({
-        status: 'SUBMITTED',
+        status: 'submitted',
         submitted_at: new Date().toISOString(),
         directors_complete: true,
         ubos_complete: true,
@@ -473,6 +482,14 @@ export class OnboardingService {
       .from('profiles')
       .update({ onboarding_status: 'in_review' })
       .eq('id', userId);
+
+    // Crear compliance_review automáticamente para el staff
+    await this.supabase.from('compliance_reviews').insert({
+      subject_type: 'kyb_applications',
+      subject_id: app.id,
+      status: 'open',
+      priority: 'normal',
+    });
 
     await this.notifyStaff(
       userId,

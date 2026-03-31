@@ -85,21 +85,47 @@ export class BridgeService {
       destinationAddress = wallet?.address;
     }
 
-    // Crear en Bridge
+    // ── Determinar developer_fee_percent ──────────────────
+    // Si el DTO lo trae, usar ese valor; sino leer de fees_config
+    let devFeePercent: string | undefined;
+    if (dto.developer_fee_percent !== undefined) {
+      devFeePercent = dto.developer_fee_percent.toString();
+    } else {
+      // Fallback: leer fee por defecto de app_settings
+      const { data: feeSetting } = await this.supabase
+        .from('app_settings')
+        .select('value')
+        .eq('key', 'DEFAULT_VA_FEE_PERCENT')
+        .maybeSingle();
+      devFeePercent = feeSetting?.value ?? undefined;
+    }
+
+    // ── Crear en Bridge (formato anidado source/destination) ──
+    const bridgePayload: Record<string, unknown> = {
+      source: { currency: dto.source_currency.toLowerCase() },
+      destination: {
+        payment_rail: dto.destination_payment_rail,
+        currency: dto.destination_currency.toLowerCase(),
+        ...(destinationAddress ? { address: destinationAddress } : {}),
+      },
+    };
+
+    // Solo enviar developer_fee_percent si tiene valor
+    if (devFeePercent) {
+      bridgePayload.developer_fee_percent = devFeePercent;
+    }
+
     const bridgeVA = await this.bridgeApi.post<Record<string, unknown>>(
       `/v0/customers/${profile.bridge_customer_id}/virtual_accounts`,
-      {
-        source_currency: dto.source_currency,
-        destination_currency: dto.destination_currency,
-        destination_payment_rail: dto.destination_payment_rail,
-        ...(destinationAddress
-          ? { destination_address: destinationAddress }
-          : {}),
-      },
+      bridgePayload,
       `va-${userId}-${dto.source_currency}-${Date.now()}`,
     );
 
-    // Guardar en DB
+    // ── Extraer TODOS los campos de source_deposit_instructions ──
+    const sdi = (bridgeVA.source_deposit_instructions as Record<string, unknown>) ?? {};
+    const bridgeDest = (bridgeVA.destination as Record<string, unknown>) ?? {};
+
+    // Guardar en DB con todos los campos de la respuesta de Bridge
     const { data, error } = await this.supabase
       .from('bridge_virtual_accounts')
       .insert({
@@ -109,13 +135,25 @@ export class BridgeService {
         source_currency: dto.source_currency.toLowerCase(),
         destination_currency: dto.destination_currency.toLowerCase(),
         destination_payment_rail: dto.destination_payment_rail,
-        destination_address: destinationAddress ?? null,
+        destination_address: (bridgeDest.address as string) ?? destinationAddress ?? null,
         destination_wallet_id: dto.destination_wallet_id ?? null,
         is_external_sweep: isExternalSweep,
         external_destination_label: dto.destination_label ?? null,
-        bank_name: (bridgeVA.source_deposit_instructions as Record<string, unknown>)?.bank_name ?? null,
-        account_number: (bridgeVA.source_deposit_instructions as Record<string, unknown>)?.account_number ?? null,
-        routing_number: (bridgeVA.source_deposit_instructions as Record<string, unknown>)?.routing_number ?? null,
+        // ── Campos de source_deposit_instructions (respuesta de Bridge) ──
+        bank_name: (sdi.bank_name as string) ?? null,
+        bank_address: (sdi.bank_address as string) ?? null,
+        beneficiary_name: (sdi.bank_beneficiary_name as string) ?? null,
+        beneficiary_address: (sdi.bank_beneficiary_address as string) ?? null,
+        routing_number: (sdi.bank_routing_number as string) ?? null,
+        account_number: (sdi.bank_account_number as string) ?? null,
+        // Campos multi-divisa (Bridge los devuelve según source_currency)
+        iban: (sdi.iban as string) ?? null,
+        clabe: (sdi.clabe as string) ?? null,
+        br_code: (sdi.br_code as string) ?? null,
+        sort_code: (sdi.sort_code as string) ?? null,
+        payment_rails: (sdi.payment_rails as string[]) ?? null,
+        // Fee
+        developer_fee_percent: devFeePercent ? parseFloat(devFeePercent) : null,
         status: 'active',
       })
       .select()
@@ -178,53 +216,230 @@ export class BridgeService {
   //  EXTERNAL ACCOUNTS (cuentas bancarias destino)
   // ═══════════════════════════════════════════════════
 
-  /** Registra cuenta bancaria en Bridge + DB. */
+  /**
+   * Registra cuenta bancaria externa en Bridge + guarda en DB.
+   *
+   * - Deriva `account_type` de Bridge a partir del `payment_rail` del DTO.
+   * - Usa `checking_or_savings` (no `account_type`) dentro del objeto `account` para US.
+   * - Envía `address` del beneficiario cuando se proporciona (recomendado para US).
+   * - Envía `account_owner_type`/`first_name`/`last_name`/`business_name` para IBAN.
+   * - Guarda `beneficiary_address_valid` de la respuesta de Bridge.
+   */
   async createExternalAccount(userId: string, dto: CreateExternalAccountDto) {
     const profile = await this.getVerifiedProfile(userId);
 
+    // Validar longitud de account_owner_name para ACH/Wire (Bridge exige 3-35)
+    if (
+      (dto.payment_rail === 'ach' || dto.payment_rail === 'wire') &&
+      (dto.account_owner_name.length < 3 || dto.account_owner_name.length > 35)
+    ) {
+      throw new BadRequestException(
+        'Para transferencias ACH/Wire, account_owner_name debe tener entre 3 y 35 caracteres.',
+      );
+    }
+
+    // Derivar account_type de Bridge desde payment_rail
+    const bridgeAccountType = this.getBridgeAccountType(dto.payment_rail);
+
+    // ── Construir payload base ──
     const bridgePayload: Record<string, unknown> = {
-      bank_name: dto.bank_name,
-      account_owner_name: dto.account_name,
+      account_owner_name: dto.account_owner_name,
+      account_type: bridgeAccountType,
       currency: dto.currency,
     };
 
-    // Campos según payment rail
+    // bank_name es opcional
+    if (dto.bank_name) {
+      bridgePayload.bank_name = dto.bank_name;
+    }
+
+    // ── Campos específicos según payment rail ──
     if (dto.payment_rail === 'ach' || dto.payment_rail === 'wire') {
+      // US: datos dentro del objeto `account`
       bridgePayload.account = {
         account_number: dto.account_number,
         routing_number: dto.routing_number,
-        account_type: dto.account_type ?? 'checking',
+        checking_or_savings: dto.checking_or_savings ?? 'checking',
       };
+
+      // Dirección del beneficiario (recomendada para US)
+      if (dto.address) {
+        bridgePayload.address = {
+          street_line_1: dto.address.street_line_1,
+          ...(dto.address.street_line_2
+            ? { street_line_2: dto.address.street_line_2 }
+            : {}),
+          city: dto.address.city,
+          ...(dto.address.state ? { state: dto.address.state } : {}),
+          ...(dto.address.postal_code
+            ? { postal_code: dto.address.postal_code }
+            : {}),
+          country: dto.address.country,
+        };
+      }
     } else if (dto.payment_rail === 'sepa') {
-      bridgePayload.iban = { account_number: dto.iban, bic: dto.swift_bic };
+      // IBAN: Bridge espera propiedad raíz "iban" (NO "account")
+      bridgePayload.iban = {
+        account_number: dto.iban,
+        bic: dto.swift_bic,
+        ...(dto.iban_country ? { country: dto.iban_country } : {}),
+      };
+
+      // owner_type/name fields (opcionales según Bridge, pero recomendados)
+      if (dto.account_owner_type) {
+        bridgePayload.account_owner_type = dto.account_owner_type;
+        if (dto.account_owner_type === 'individual') {
+          if (dto.first_name) bridgePayload.first_name = dto.first_name;
+          if (dto.last_name) bridgePayload.last_name = dto.last_name;
+        } else if (dto.account_owner_type === 'business') {
+          if (dto.business_name) bridgePayload.business_name = dto.business_name;
+        }
+      }
+
+      // Dirección del beneficiario (opcional para IBAN)
+      if (dto.address) {
+        bridgePayload.address = {
+          street_line_1: dto.address.street_line_1,
+          ...(dto.address.street_line_2
+            ? { street_line_2: dto.address.street_line_2 }
+            : {}),
+          city: dto.address.city,
+          ...(dto.address.state ? { state: dto.address.state } : {}),
+          ...(dto.address.postal_code
+            ? { postal_code: dto.address.postal_code }
+            : {}),
+          country: dto.address.country,
+        };
+      }
     } else if (dto.payment_rail === 'spei') {
-      bridgePayload.clabe = { clabe: dto.clabe };
+      // CLABE (México): Bridge espera propiedad raíz "clabe" con "account_number"
+      bridgePayload.clabe = {
+        account_number: dto.clabe,
+      };
+
+      // owner info (opcional pero recomendado según ejemplos Bridge)
+      if (dto.account_owner_type) {
+        bridgePayload.account_owner_type = dto.account_owner_type;
+        if (dto.account_owner_type === 'individual') {
+          if (dto.first_name) bridgePayload.first_name = dto.first_name;
+          if (dto.last_name) bridgePayload.last_name = dto.last_name;
+        } else if (dto.account_owner_type === 'business') {
+          if (dto.business_name) bridgePayload.business_name = dto.business_name;
+        }
+      }
+
+      // Dirección (opcional)
+      if (dto.address) {
+        bridgePayload.address = {
+          street_line_1: dto.address.street_line_1,
+          ...(dto.address.street_line_2
+            ? { street_line_2: dto.address.street_line_2 }
+            : {}),
+          city: dto.address.city,
+          ...(dto.address.state ? { state: dto.address.state } : {}),
+          ...(dto.address.postal_code
+            ? { postal_code: dto.address.postal_code }
+            : {}),
+          country: dto.address.country,
+        };
+      }
+    } else if (dto.payment_rail === 'pix') {
+      // PIX (Brasil): Bridge distingue "pix_key" y "br_code" como propiedades raíz
+      if (dto.pix_key) {
+        bridgePayload.pix_key = {
+          pix_key: dto.pix_key,
+          ...(dto.document_number
+            ? { document_number: dto.document_number }
+            : {}),
+        };
+      } else if (dto.br_code) {
+        bridgePayload.br_code = {
+          br_code: dto.br_code,
+          ...(dto.document_number
+            ? { document_number: dto.document_number }
+            : {}),
+        };
+      }
+
+      // owner info (opcional pero recomendado según ejemplos Bridge)
+      if (dto.account_owner_type) {
+        bridgePayload.account_owner_type = dto.account_owner_type;
+        if (dto.account_owner_type === 'individual') {
+          if (dto.first_name) bridgePayload.first_name = dto.first_name;
+          if (dto.last_name) bridgePayload.last_name = dto.last_name;
+        } else if (dto.account_owner_type === 'business') {
+          if (dto.business_name) bridgePayload.business_name = dto.business_name;
+        }
+      }
+
+      // Dirección (opcional)
+      if (dto.address) {
+        bridgePayload.address = {
+          street_line_1: dto.address.street_line_1,
+          ...(dto.address.street_line_2
+            ? { street_line_2: dto.address.street_line_2 }
+            : {}),
+          city: dto.address.city,
+          ...(dto.address.state ? { state: dto.address.state } : {}),
+          ...(dto.address.postal_code
+            ? { postal_code: dto.address.postal_code }
+            : {}),
+          country: dto.address.country,
+        };
+      }
+    } else if (dto.payment_rail === 'bre_b') {
+      // Bre-B (Colombia): Bridge espera propiedad raíz "account" con "bre_b_key"
+      bridgePayload.account = {
+        bre_b_key: dto.bre_b_key,
+      };
     }
 
+    // ── Llamar Bridge API ──
     const bridgeEA = await this.bridgeApi.post<Record<string, unknown>>(
       `/v0/customers/${profile.bridge_customer_id}/external_accounts`,
       bridgePayload,
       `ea-${userId}-${Date.now()}`,
     );
 
+    // Extraer datos de respuesta de Bridge (la estructura varía por rail)
+    const bridgeAccount = bridgeEA.account as Record<string, unknown> | undefined;
+    const bridgeIban = bridgeEA.iban as Record<string, unknown> | undefined;
+    const bridgeClabe = bridgeEA.clabe as Record<string, unknown> | undefined;
+    const bridgePixKey = bridgeEA.pix_key as Record<string, unknown> | undefined;
+    const bridgeBrCode = bridgeEA.br_code as Record<string, unknown> | undefined;
+
+    // ── Guardar en DB ──
     const { data, error } = await this.supabase
       .from('bridge_external_accounts')
       .insert({
         user_id: userId,
         bridge_external_account_id: bridgeEA.id,
         bridge_customer_id: profile.bridge_customer_id,
-        bank_name: dto.bank_name,
-        account_name: dto.account_name,
-        account_last_4: (dto.account_number ?? dto.iban ?? dto.clabe ?? '')
-          .slice(-4),
+        bank_name: dto.bank_name ?? (bridgeEA.bank_name as string) ?? null,
+        account_name: dto.account_owner_name,
+        account_last_4:
+          (bridgeAccount?.last_4 as string) ??
+          (bridgeIban?.last_4 as string) ??
+          (bridgeClabe?.last_4 as string) ??
+          (bridgePixKey?.account_preview as string)?.slice(-4) ??
+          (bridgeBrCode?.account_preview as string)?.slice(-4) ??
+          (dto.account_number ?? dto.iban ?? dto.clabe ?? dto.pix_key ?? dto.br_code ?? dto.bre_b_key ?? '')
+            .slice(-4),
         currency: dto.currency.toLowerCase(),
         payment_rail: dto.payment_rail,
-        account_type: dto.account_type ?? null,
+        account_type: dto.checking_or_savings ?? null,
         routing_number: dto.routing_number ?? null,
         iban: dto.iban ?? null,
         swift_bic: dto.swift_bic ?? null,
         country: dto.country ?? null,
-        is_active: true,
+        is_active: (bridgeEA.active as boolean) ?? true,
+        // Nuevos campos de la respuesta de Bridge
+        beneficiary_address_valid:
+          (bridgeEA.beneficiary_address_valid as boolean) ?? null,
+        account_owner_type: dto.account_owner_type ?? null,
+        first_name: dto.first_name ?? null,
+        last_name: dto.last_name ?? null,
+        business_name: dto.business_name ?? null,
       })
       .select()
       .single();
@@ -258,7 +473,7 @@ export class BridgeService {
 
     await this.supabase
       .from('bridge_external_accounts')
-      .update({ is_active: false })
+      .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', eaId);
 
     return { message: 'Cuenta externa desactivada' };
@@ -733,5 +948,29 @@ export class BridgeService {
       status: 'pending',
       requested_by: userId,
     });
+  }
+
+  /**
+   * Mapea el payment_rail interno de Guira al `account_type` que Bridge espera.
+   *
+   * Bridge account_type values: us, iban, clabe, pix, bre_b, gb, unknown
+   * Guira payment_rail values:  ach, wire, sepa, spei, pix, bre_b
+   */
+  private getBridgeAccountType(paymentRail: string): string {
+    const map: Record<string, string> = {
+      ach: 'us',
+      wire: 'us',
+      sepa: 'iban',
+      spei: 'clabe',
+      pix: 'pix',
+      bre_b: 'bre_b',
+    };
+    const accountType = map[paymentRail];
+    if (!accountType) {
+      throw new BadRequestException(
+        `Payment rail '${paymentRail}' no tiene un account_type de Bridge mapeado.`,
+      );
+    }
+    return accountType;
   }
 }

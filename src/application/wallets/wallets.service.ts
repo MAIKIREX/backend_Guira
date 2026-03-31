@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
+import { BridgeApiClient } from '../bridge/bridge-api.client';
 
 @Injectable()
 export class WalletsService {
@@ -16,6 +17,7 @@ export class WalletsService {
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
     private readonly config: ConfigService,
+    private readonly bridgeApi: BridgeApiClient,
   ) {}
 
   // ───────────────────────────────────────────────
@@ -280,46 +282,38 @@ export class WalletsService {
     }
   }
 
+  /**
+   * Crea una Bridge Wallet vía Bridge API.
+   *
+   * Según la documentación de Bridge:
+   * - Endpoint: POST /v0/customers/{customerID}/wallets
+   * - Body requerido: { chain } (enum: base, ethereum, solana, tempo, tron)
+   * - Header requerido: Idempotency-Key
+   * - Respuesta: { id, chain, address, created_at, updated_at }
+   */
   private async createBridgeWallet(
     bridgeCustomerId: string,
-    currency: string,
+    _currency: string,
     network: string,
-  ): Promise<{ id: string; address: string }> {
-    const apiKey = this.config.get<string>('app.bridgeApiKey');
-    const baseUrl =
-      this.config.get<string>('app.bridgeApiUrl') ?? 'https://api.bridge.xyz';
+  ): Promise<{ id: string; address: string; chain: string }> {
+    const idempotencyKey = `wallet-${bridgeCustomerId}-${network}-${Date.now()}`;
 
-    if (!apiKey) {
-      this.logger.warn('BRIDGE_API_KEY no configurada — wallet simulada');
-      return {
-        id: `simulated_wallet_${Date.now()}`,
-        address: `0xSimulated_${currency}_${network}_${Date.now()}`,
-      };
-    }
-
-    const response = await fetch(
-      `${baseUrl}/v0/customers/${bridgeCustomerId}/wallets`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Api-Key': apiKey,
-        },
-        body: JSON.stringify({ currency, chain: network }),
-      },
+    const response = await this.bridgeApi.post<{
+      id: string;
+      chain: string;
+      address: string;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `/v0/customers/${bridgeCustomerId}/wallets`,
+      { chain: network },
+      idempotencyKey,
     );
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new BadRequestException(
-        `Bridge wallet creation failed: [${response.status}] ${errorBody}`,
-      );
-    }
-
-    const wallet = (await response.json()) as Record<string, unknown>;
     return {
-      id: wallet.id as string,
-      address: wallet.address as string,
+      id: response.id,
+      address: response.address,
+      chain: response.chain,
     };
   }
 }

@@ -3,6 +3,15 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
 import { RegisterDocumentDto, GetDocumentUploadUrlDto } from './dto/document.dto';
 
+/**
+ * ComplianceService — Lectura de estado de compliance para el usuario.
+ * 
+ * NOTA: La lógica de creación/submit de KYC/KYB vive exclusivamente en
+ * OnboardingService para evitar duplicación. Este servicio se limita a:
+ * - Documentos (upload URLs, registro, listado)
+ * - Lectura de reviews para el usuario
+ * - Consulta de estado de aplicaciones
+ */
 @Injectable()
 export class ComplianceService {
   constructor(
@@ -49,7 +58,7 @@ export class ComplianceService {
     return data ?? [];
   }
 
-  // ── KYC Application ───────────────────────────────────────────────
+  // ── KYC Application (Lectura) ─────────────────────────────────────
 
   /** Obtiene la KYC application activa del usuario */
   async getKycApplication(userId: string) {
@@ -65,82 +74,28 @@ export class ComplianceService {
     return data;
   }
 
-  /** Crea una nueva KYC application (si no existe una pendiente) */
-  async createKycApplication(userId: string) {
-    // Verificar que no haya un KYC activo
-    const existing = await this.getKycApplication(userId);
-    if (existing && ['submitted', 'pending'].includes(existing.status)) {
-      return existing;
-    }
-
-    const { data, error } = await this.supabase
-      .from('kyc_applications')
-      .insert({ user_id: userId, status: 'pending' })
-      .select()
-      .single();
-
-    if (error) throw new Error(error.message);
-    return data;
-  }
-
-  /** Marca un KYC como submitted (enviado para revisión) */
-  async submitKycApplication(userId: string, kycId: string) {
-    const { data, error } = await this.supabase
-      .from('kyc_applications')
-      .update({ status: 'submitted', submitted_at: new Date().toISOString() })
-      .eq('id', kycId)
-      .eq('user_id', userId)
-      .select()
-      .single();
-
-    if (error || !data) throw new NotFoundException('KYC no encontrado o no pertenece al usuario');
-    return data;
-  }
-
-  // ── KYB Application ───────────────────────────────────────────────
+  // ── KYB Application (Lectura) ─────────────────────────────────────
 
   /** Obtiene la KYB application con datos de negocio */
   async getKybApplication(userId: string) {
+    // Primero buscar el business del usuario
+    const { data: biz } = await this.supabase
+      .from('businesses')
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (!biz) return null;
+
     const { data, error } = await this.supabase
       .from('kyb_applications')
       .select(`*, businesses (*, business_directors(*), business_ubos(*))`)
-      .eq('user_id', userId)
+      .eq('business_id', biz.id)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (error) throw new Error(error.message);
-    return data;
-  }
-
-  /** Crea una nueva KYB application */
-  async createKybApplication(userId: string) {
-    const existing = await this.getKybApplication(userId);
-    if (existing && ['submitted', 'pending'].includes(existing.status)) {
-      return existing;
-    }
-
-    const { data, error } = await this.supabase
-      .from('kyb_applications')
-      .insert({ user_id: userId, status: 'pending' })
-      .select()
-      .single();
-
-    if (error) throw new Error(error.message);
-    return data;
-  }
-
-  /** Marca un KYB como submitted */
-  async submitKybApplication(userId: string, kybId: string) {
-    const { data, error } = await this.supabase
-      .from('kyb_applications')
-      .update({ status: 'submitted', submitted_at: new Date().toISOString() })
-      .eq('id', kybId)
-      .eq('user_id', userId)
-      .select()
-      .single();
-
-    if (error || !data) throw new NotFoundException('KYB no encontrado o no pertenece al usuario');
     return data;
   }
 
@@ -151,7 +106,7 @@ export class ComplianceService {
       .from('compliance_reviews')
       .select('*')
       .eq('subject_id', userId)
-      .order('reviewed_at', { ascending: false });
+      .order('opened_at', { ascending: false });
 
     if (error) throw new Error(error.message);
     return data ?? [];

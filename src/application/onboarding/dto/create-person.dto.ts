@@ -27,15 +27,17 @@ export class CreatePersonDto {
   @IsDateString()
   date_of_birth: string;
 
-  @ApiProperty({ example: 'MX', description: 'ISO 3166-1 alpha-2' })
+  @ApiPropertyOptional({ example: 'MX', description: 'ISO 3166-1 alpha-2' })
+  @IsOptional()
   @IsString()
   @MaxLength(2)
-  nationality: string;
+  nationality?: string;
 
-  @ApiProperty({ example: 'MX' })
+  @ApiPropertyOptional({ example: 'MX' })
+  @IsOptional()
   @IsString()
   @MaxLength(2)
-  country_of_residence: string;
+  country_of_residence?: string;
 
   @ApiProperty({ enum: ['passport', 'drivers_license', 'national_id'] })
   @IsEnum(['passport', 'drivers_license', 'national_id'])
@@ -95,13 +97,15 @@ export class CreatePersonDto {
   @IsString()
   tax_id?: string;
 
-  @ApiProperty({ example: 'salary' })
+  @ApiPropertyOptional({ example: 'salary' })
+  @IsOptional()
   @IsString()
-  source_of_funds: string;
+  source_of_funds?: string;
 
-  @ApiProperty({ example: 'international_payments' })
+  @ApiPropertyOptional({ example: 'international_payments' })
+  @IsOptional()
   @IsString()
-  account_purpose: string;
+  account_purpose?: string;
 
   @ApiProperty({ example: false })
   @IsBoolean()

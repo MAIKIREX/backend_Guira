@@ -5,14 +5,16 @@ import {
   NotFoundException,
   Logger,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
+import { BridgeApiClient } from '../bridge/bridge-api.client';
 
 /**
  * Servicio interno para registrar clientes en Bridge API tras la aprobación de KYC/KYB.
- * Este servicio NO se expone directamente a clientes — es llamado por el WorkerService
+ * Este servicio NO se expone directamente a clientes — es llamado por ComplianceActionsService
  * o por un admin tras aprobar un compliance_review.
+ *
+ * Usa BridgeApiClient centralizado para todas las llamadas HTTP a Bridge.
  */
 @Injectable()
 export class BridgeCustomerService {
@@ -20,20 +22,8 @@ export class BridgeCustomerService {
 
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
-    private readonly config: ConfigService,
+    private readonly bridgeApiClient: BridgeApiClient,
   ) {}
-
-  private get bridgeBaseUrl(): string {
-    return this.config.get<string>('app.bridgeApiUrl') ?? 'https://api.bridge.xyz';
-  }
-
-  private get bridgeHeaders(): Record<string, string> {
-    const apiKey = this.config.get<string>('app.bridgeApiKey');
-    return {
-      'Content-Type': 'application/json',
-      'Api-Key': apiKey ?? '',
-    };
-  }
 
   /**
    * Registra un usuario como Customer en Bridge API.
@@ -41,8 +31,7 @@ export class BridgeCustomerService {
    * Retorna el bridge_customer_id asignado.
    */
   async registerCustomerInBridge(userId: string): Promise<string> {
-    const apiKey = this.config.get<string>('app.bridgeApiKey');
-    if (!apiKey) {
+    if (!this.bridgeApiClient.isConfigured) {
       this.logger.warn('BRIDGE_API_KEY no configurada — registro Bridge omitido');
       return 'bridge_pending_api_key';
     }
@@ -81,43 +70,30 @@ export class BridgeCustomerService {
     if (person) {
       customerPayload = this.buildIndividualPayload(person, profile);
     } else if (business) {
-      customerPayload = await this.buildBusinessPayload(business, profile);
+      customerPayload = this.buildBusinessPayload(business, profile);
     } else {
       throw new NotFoundException(
         'No se encontraron datos personales ni de empresa para este usuario',
       );
     }
 
-    // 3. Llamar Bridge API
+    // 3. Llamar Bridge API usando BridgeApiClient centralizado
+    const idempotencyKey = `register-customer-${userId}`;
     let bridgeCustomer: Record<string, unknown>;
+
     try {
-      const response = await fetch(`${this.bridgeBaseUrl}/v0/customers`, {
-        method: 'POST',
-        headers: {
-          ...this.bridgeHeaders,
-          'Idempotency-Key': `register-customer-${userId}`,
-        },
-        body: JSON.stringify(customerPayload),
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        await this.logActivity(
-          userId,
-          'BRIDGE_CUSTOMER_REGISTRATION_FAILED',
-          `Bridge rechazó: HTTP ${response.status} — ${errorBody}`,
-        );
-        throw new BadGatewayException(
-          `Bridge API rechazó customer: [${response.status}] ${errorBody}`,
-        );
-      }
-
-      bridgeCustomer = (await response.json()) as Record<string, unknown>;
-    } catch (err) {
-      if (err instanceof BadGatewayException) throw err;
-      throw new BadGatewayException(
-        `Error conectando con Bridge API: ${(err as Error).message}`,
+      bridgeCustomer = await this.bridgeApiClient.post<Record<string, unknown>>(
+        '/v0/customers',
+        customerPayload,
+        idempotencyKey,
       );
+    } catch (err) {
+      await this.logActivity(
+        userId,
+        'BRIDGE_CUSTOMER_REGISTRATION_FAILED',
+        `Bridge rechazó registro: ${(err as Error).message}`,
+      );
+      throw err;
     }
 
     const customerId = bridgeCustomer.id as string;
@@ -143,7 +119,7 @@ export class BridgeCustomerService {
     await this.logActivity(
       userId,
       'BRIDGE_CUSTOMER_REGISTERED',
-      `Customer registrado: ${customerId}`,
+      `Customer registrado en Bridge: ${customerId}`,
     );
 
     this.logger.log(
@@ -154,56 +130,109 @@ export class BridgeCustomerService {
   }
 
   // ───────────────────────────────────────
+  //  Payload Builders — alineados con Bridge API
+  // ───────────────────────────────────────
 
+  /**
+   * Construye el payload para un customer individual (KYC).
+   * Campos alineados con Bridge API POST /v0/customers.
+   * @see https://apidocs.bridge.xyz/reference/post_customers
+   */
   private buildIndividualPayload(
     person: Record<string, unknown>,
     profile: Record<string, unknown>,
   ): Record<string, unknown> {
-    return {
+    const payload: Record<string, unknown> = {
       type: 'individual',
       first_name: person.first_name,
       last_name: person.last_name,
       email: (person.email as string) ?? (profile.email as string),
       date_of_birth: person.date_of_birth,
+      phone: person.phone ?? null,
       address: {
-        street: person.address1,
+        street_line_1: person.address1,
+        street_line_2: person.address2 ?? undefined,
         city: person.city,
-        state: person.state ?? '',
-        postal_code: person.postal_code ?? '',
+        state: person.state ?? undefined,
+        postal_code: person.postal_code ?? undefined,
         country: person.country,
       },
     };
+
+    // Tax ID (SSN para US, RFC para MX, etc.) — opcional según país
+    if (person.tax_id) {
+      payload.tax_identification_number = person.tax_id;
+    }
+
+    // Limpiar undefined del address para no enviar campos vacíos
+    const address = payload.address as Record<string, unknown>;
+    Object.keys(address).forEach((key) => {
+      if (address[key] === undefined || address[key] === '') {
+        delete address[key];
+      }
+    });
+
+    return payload;
   }
 
-  private async buildBusinessPayload(
+  /**
+   * Construye el payload para un customer business (KYB).
+   * Campos alineados con Bridge API POST /v0/customers.
+   *
+   * NOTA: Los directores/UBOs no se envían en el customer payload.
+   * Bridge los gestiona por separado vía endorsements o KYC Links.
+   */
+  private buildBusinessPayload(
     business: Record<string, unknown>,
     profile: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    // Obtener directores y UBOs para el payload
-    const { data: directors } = await this.supabase
-      .from('business_directors')
-      .select('*')
-      .eq('business_id', business.id);
-
-    return {
+  ): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
       type: 'business',
-      name: business.legal_name,
+      business_name: business.legal_name,
       email: (business.email as string) ?? (profile.email as string),
+      phone: business.phone ?? null,
       tax_identification_number: business.tax_id,
       address: {
-        street: business.address1,
+        street_line_1: business.address1,
+        street_line_2: business.address2 ?? undefined,
         city: business.city,
-        state: business.state ?? '',
-        postal_code: business.postal_code ?? '',
+        state: business.state ?? undefined,
+        postal_code: business.postal_code ?? undefined,
         country: business.country,
       },
-      representatives: (directors ?? []).map((d) => ({
-        first_name: d.first_name,
-        last_name: d.last_name,
-        title: d.position,
-      })),
     };
+
+    // Campos opcionales pero recomendados para KYB approval
+    if (business.trade_name) {
+      payload.doing_business_as_name = business.trade_name;
+    }
+    if (business.entity_type) {
+      payload.entity_type = business.entity_type;
+    }
+    if (business.country_of_incorporation) {
+      payload.incorporation_country = business.country_of_incorporation;
+    }
+    if (business.incorporation_date) {
+      payload.incorporation_date = business.incorporation_date;
+    }
+    if (business.website) {
+      payload.website = business.website;
+    }
+
+    // Limpiar undefined del address para no enviar campos vacíos
+    const address = payload.address as Record<string, unknown>;
+    Object.keys(address).forEach((key) => {
+      if (address[key] === undefined || address[key] === '') {
+        delete address[key];
+      }
+    });
+
+    return payload;
   }
+
+  // ───────────────────────────────────────
+  //  Wallet Initialization
+  // ───────────────────────────────────────
 
   private async initializeWallet(userId: string) {
     try {
@@ -222,7 +251,6 @@ export class BridgeCustomerService {
           user_id: userId,
           label: 'Principal',
           currency: 'usd',
-          status: 'active',
         })
         .select('id')
         .single();
@@ -241,6 +269,10 @@ export class BridgeCustomerService {
       this.logger.warn(`Error inicializando wallet para ${userId}: ${err}`);
     }
   }
+
+  // ───────────────────────────────────────
+  //  Logging
+  // ───────────────────────────────────────
 
   private async logActivity(
     userId: string,
