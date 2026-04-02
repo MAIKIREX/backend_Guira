@@ -12,6 +12,9 @@ import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../core/guards/supabase-auth.guard';
 import { WebhooksService } from './webhooks.service';
 
+// Extensión del tipo Request de Express para incluir el rawBody capturado en main.ts
+type RequestWithRawBody = Request & { rawBody?: Buffer };
+
 @ApiTags('Webhooks')
 @Controller('webhooks')
 export class WebhooksController {
@@ -22,20 +25,31 @@ export class WebhooksController {
   /**
    * Endpoint receptor de webhooks de Bridge.
    * Es PÚBLICO (no requiere JWT de usuario).
-   * Guarda el payload crudo y responde 200 inmediatamente.
-   * El procesamiento real lo hace el CRON worker.
+   *
+   * Flujo:
+   * 1. Recibe el evento con el raw body capturado en main.ts
+   * 2. Persiste el evento en webhook_events con status 'pending'
+   * 3. Responde 200 inmediatamente (Bridge reintenta si no recibe 200 rápido)
+   * 4. El CRON worker procesa la cola async cada 30s
+   *
+   * Header de firma de Bridge: X-Webhook-Signature: t=<timestamp>,v0=<base64sig>
    */
   @Public()
-  @Throttle({ default: { limit: 1000, ttl: 60000 } }) // Permite ráfagas del proveedor (1000 / minuto)
+  @Throttle({ default: { limit: 1000, ttl: 60000 } }) // Permite ráfagas del proveedor (1000/min)
   @Post('bridge')
   @HttpCode(200)
   @ApiOperation({ summary: 'Receptor de webhooks Bridge (Webhook Sink)' })
+  @ApiExcludeEndpoint()
   async receiveBridgeWebhook(
-    @Req() req: Request,
-    @Headers('x-bridge-signature') signature: string,
+    @Req() req: RequestWithRawBody,
+    @Headers('x-webhook-signature') signatureHeader: string,
     @Headers('bridge-api-version') apiVersion: string,
   ) {
     const payload = req.body as Record<string, unknown>;
+    // El rawBody (Buffer) es requerido para verificar la firma RSA/SHA256 de Bridge.
+    // Se captura en el middleware de main.ts antes del JSON parsing.
+    const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(payload));
+
     const providerEventId = (payload?.id as string) ?? null;
     const eventType = (payload?.type as string) ?? 'unknown';
 
@@ -46,8 +60,9 @@ export class WebhooksController {
       event_type: eventType,
       provider_event_id: providerEventId,
       raw_payload: payload,
+      raw_body: rawBody,
       headers: {
-        'x-bridge-signature': signature ?? null,
+        'x-webhook-signature': signatureHeader ?? null,
         'bridge-api-version': apiVersion ?? null,
       },
       bridge_api_version: apiVersion ?? null,

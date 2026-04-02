@@ -11,6 +11,8 @@ interface SinkEventDto {
   event_type: string;
   provider_event_id: string | null;
   raw_payload: Record<string, unknown>;
+  // Buffer crudo de la petición — requerido para verificación de firma Bridge
+  raw_body: Buffer;
   headers: Record<string, string | null>;
   bridge_api_version: string | null;
 }
@@ -47,6 +49,18 @@ export class WebhooksService {
         return;
       }
       this.logger.error(`Error guardando webhook: ${error.message}`);
+      return;
+    }
+
+    // Pre-verificar firma con el raw body mientras aún está disponible en memoria.
+    // El CRON worker también re-verifica desde la DB, pero aquí podemos logear
+    // si el evento llegó con firma inválida desde el inicio.
+    const signatureHeader = dto.headers['x-webhook-signature'] ?? null;
+    const isValid = this.verifyBridgeSignature(dto.raw_body, signatureHeader);
+    if (!isValid) {
+      this.logger.warn(
+        `⚠️  Firma no verificada en evento ${dto.provider_event_id} (se procesará en CRON si está en dev)`,
+      );
     }
   }
 
@@ -86,11 +100,16 @@ export class WebhooksService {
       .eq('id', id);
 
     try {
-      // Verificar firma HMAC
+      // Verificar firma Bridge con el payload crudo almacenado.
+      // NOTA: En el CRON usamos el raw_payload serializado como fallback ya que
+      // el raw body original no se persiste en DB (solo el JSON).  Para máxima
+      // fidelidad la verificación primaria ocurre en sinkEvent() con el Buffer real.
       const headers = (event.headers as Record<string, string | null>) ?? {};
-      const signature = headers['x-bridge-signature'] ?? null;
+      const signatureHeader = headers['x-webhook-signature'] ?? null;
       const payload = event.raw_payload as Record<string, unknown>;
-      const verified = this.verifyBridgeSignature(payload, signature);
+      // Reconstruir buffer desde el JSON guardado (fallback para el CRON)
+      const rawBodyFallback = Buffer.from(JSON.stringify(payload));
+      const verified = this.verifyBridgeSignature(rawBodyFallback, signatureHeader);
 
       if (!verified && this.config.get('app.nodeEnv') === 'production') {
         this.logger.warn(`❌ Firma inválida en evento ${id}`);
@@ -795,20 +814,76 @@ export class WebhooksService {
   //  HELPERS
   // ═══════════════════════════════════════════════
 
+  /**
+   * Verifica la firma Bridge de un webhook.
+   *
+   * Formato del header X-Webhook-Signature:
+   *   t=<unix_timestamp>,v0=<base64_encoded_signature>
+   *
+   * Algoritmo de verificación (Bridge docs):
+   *   1. Extraer timestamp (t) y firma base64 (v0) del header
+   *   2. Rechazar si el evento tiene más de 10 minutos (anti-replay)
+   *   3. Construir el mensaje: `<timestamp>.<rawBody>`
+   *   4. Generar digest SHA256 del mensaje
+   *   5. Verificar la firma RSA con la public_key del webhook
+   *
+   * @param rawBody - Buffer con el body exactamente como llegó de Bridge
+   * @param signatureHeader - Valor del header X-Webhook-Signature
+   */
   private verifyBridgeSignature(
-    payload: Record<string, unknown>,
+    rawBody: Buffer,
     signatureHeader: string | null,
   ): boolean {
     const publicKey = this.config.get<string>('app.bridgeWebhookPublicKey');
     if (!publicKey || !signatureHeader) return false;
 
     try {
-      const signature = signatureHeader.replace(/^v0=/, '');
-      const verifier = crypto.createVerify('RSA-SHA256');
-      verifier.update(JSON.stringify(payload));
-      return verifier.verify(publicKey.replace(/\\n/g, '\n'), Buffer.from(signature, 'hex'));
+      // Parsear el header: t=<timestamp>,v0=<base64sig>
+      const parts = Object.fromEntries(
+        signatureHeader.split(',').map((part) => {
+          const [k, ...v] = part.split('=');
+          return [k.trim(), v.join('=').trim()];
+        }),
+      );
+
+      const timestamp = parts['t'];
+      const signatureB64 = parts['v0'];
+
+      if (!timestamp || !signatureB64) {
+        this.logger.warn('Firma Bridge malformada: faltan campos t o v0');
+        return false;
+      }
+
+      // Anti-replay: rechazar eventos de más de 10 minutos
+      const eventAge = Date.now() / 1000 - parseInt(timestamp, 10);
+      if (eventAge > 600) {
+        this.logger.warn(`Evento Bridge demasiado antiguo (${Math.round(eventAge)}s) — posible replay attack`);
+        return false;
+      }
+
+      // Construir el mensaje que Bridge firmó: "<timestamp>.<rawBody>"
+      const message = Buffer.concat([
+        Buffer.from(`${timestamp}.`),
+        rawBody,
+      ]);
+
+      // Generar digest SHA256 del mensaje
+      const digest = crypto.createHash('sha256').update(message).digest();
+
+      // Verificar firma RSA con la public_key del webhook
+      const signatureBuf = Buffer.from(signatureB64, 'base64');
+      const normalizedKey = publicKey.replace(/\\n/g, '\n');
+
+      const result = crypto.verify(
+        'RSA-SHA256',
+        digest,
+        { key: normalizedKey, padding: crypto.constants.RSA_PKCS1_PADDING },
+        signatureBuf,
+      );
+
+      return result;
     } catch (e) {
-      this.logger.error(`Error verificando firma: ${e}`);
+      this.logger.error(`Error verificando firma Bridge: ${e}`);
       return false;
     }
   }
