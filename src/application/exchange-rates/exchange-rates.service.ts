@@ -1,0 +1,226 @@
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
+import { Cron, CronExpression } from '@nestjs/schedule';
+
+@Injectable()
+export class ExchangeRatesService {
+  private readonly logger = new Logger(ExchangeRatesService.name);
+  private readonly EXTERNAL_API_URL = 'https://api-mdp-2.onrender.com/api/forex/exchange-rate/all?asset=USDT';
+
+  constructor(
+    @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
+  ) {}
+
+  /**
+   * Tarea automática para sincronizar las tasas de cambio diariamente (a medianoche).
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async handleCronSyncRates() {
+    this.logger.log('Iniciando cron job: Sincronización automática de exchange rates...');
+    await this.syncExternalRates('system-cron');
+  }
+
+  /**
+   * Sincroniza desde el API externo (Binance P2P history).
+   * BUY: Tasa a la que el usuario compra USDT dando BOB (1 USDT = X BOB). 
+   *      Para nuestro par BOB_USD, multiplicador = 1 / X.
+   * SELL: Tasa a la que el usuario vende USDT por BOB (1 USDT = Y BOB).
+   *       Para nuestro par USD_BOB, multiplicador = Y.
+   */
+  async syncExternalRates(actorId = 'system_admin') {
+    try {
+      const response = await fetch(this.EXTERNAL_API_URL);
+      if (!response.ok) {
+        throw new Error(`Error en la API externa: ${response.status} ${response.statusText}`);
+      }
+
+      const payload = await response.json();
+
+      // buy = Precio al que compran USD con BOB (ej: 9.32 BOB por USD)
+      const buyRateBobPerUsd = payload?.buy?.data?.result?.exchangeRate;
+      // sell = Precio al que venden USD por BOB (ej: 9.28 BOB por USD)
+      const sellRateBobPerUsd = payload?.sell?.data?.result?.exchangeRate;
+
+      if (!buyRateBobPerUsd || !sellRateBobPerUsd) {
+        throw new Error('Payload inválido desde el API externo (exchange rates faltantes).');
+      }
+
+      // 1. De BOB a USD (User da BOB, recibe USD)
+      const bobToUsdRate = 1 / buyRateBobPerUsd;
+
+      // 2. De USD a BOB (User da USD, recibe BOB)
+      const usdToBobRate = sellRateBobPerUsd;
+
+      // Actualizamos los pares en nuestra base de datos
+      await this.updateRateInternal('BOB_USD', bobToUsdRate, actorId);
+      await this.updateRateInternal('BOB_USDC', bobToUsdRate, actorId);
+
+      await this.updateRateInternal('USD_BOB', usdToBobRate, actorId);
+      await this.updateRateInternal('USDC_BOB', usdToBobRate, actorId);
+
+      this.logger.log('Sincronización de tasas de cambio completada exitosamente.');
+      return { 
+        message: 'Tasas sincronizadas correctamente',
+        buy_rate_bob_usd: bobToUsdRate,
+        sell_rate_usd_bob: usdToBobRate
+      };
+    } catch (error) {
+      this.logger.error(`Falló la sincronización de tasas de cambio: ${(error as Error).message}`);
+      throw new BadRequestException('No se pudo establecer conexión con el proveedor de tipos de cambio.');
+    }
+  }
+
+  /**
+   * Método interno helper para updates estandarizados sin parámetros de spread
+   */
+  private async updateRateInternal(pair: string, rate: number, actorId: string) {
+    try {
+      const old = await this.getRate(pair);
+      
+      await this.supabase
+        .from('exchange_rates_config')
+        .update({
+          rate,
+          updated_by: actorId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('pair', pair.toUpperCase());
+
+      await this.supabase.from('audit_logs').insert({
+        performed_by: actorId === 'system_cron' ? null : actorId, // system actions might not have UUID
+        action: 'DB_SYNC_EXCHANGE_RATE',
+        table_name: 'exchange_rates_config',
+        previous_values: { rate: old.base_rate },
+        new_values: { rate: rate, pair },
+        source: actorId.includes('system') ? 'system' : 'admin_panel',
+      });
+    } catch (e) {
+      this.logger.warn(`El par ${pair} no está inicializado en la base de datos o hubo un error: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * Obtiene el tipo de cambio para un par, aplicando el spread.
+   *
+   * El spread se aplica SIEMPRE en contra del usuario (a favor de la plataforma):
+   *   - Para compra (BOB → USD): el usuario recibe menos USD
+   *   - Para venta (USD → BOB): el usuario recibe menos BOB
+   */
+  async getRate(pair: string) {
+    const { data, error } = await this.supabase
+      .from('exchange_rates_config')
+      .select('*')
+      .eq('pair', pair.toUpperCase())
+      .single();
+
+    if (error || !data) {
+      throw new NotFoundException(
+        `Tipo de cambio no configurado para ${pair}`,
+      );
+    }
+
+    const baseRate = parseFloat(data.rate);
+    const spreadPercent = parseFloat(data.spread_percent ?? '0');
+    const spreadMultiplier = 1 - spreadPercent / 100;
+    const effectiveRate = baseRate * spreadMultiplier;
+
+    return {
+      pair: data.pair,
+      base_rate: baseRate,
+      spread_percent: spreadPercent,
+      effective_rate: parseFloat(effectiveRate.toFixed(6)),
+      updated_at: data.updated_at,
+    };
+  }
+
+  /** Convierte un monto aplicando tipo de cambio con spread. */
+  async convertAmount(
+    amount: number,
+    fromCurrency: string,
+    toCurrency: string,
+  ) {
+    const pair = `${fromCurrency}_${toCurrency}`.toUpperCase();
+    const rateData = await this.getRate(pair);
+    const converted = amount * rateData.effective_rate;
+
+    return {
+      original_amount: amount,
+      original_currency: fromCurrency.toUpperCase(),
+      converted_amount: parseFloat(converted.toFixed(2)),
+      destination_currency: toCurrency.toUpperCase(),
+      rate_applied: rateData.effective_rate,
+      base_rate: rateData.base_rate,
+      spread_percent: rateData.spread_percent,
+    };
+  }
+
+  /** Lista todos los pares de tipo de cambio. */
+  async getAllRates() {
+    const { data, error } = await this.supabase
+      .from('exchange_rates_config')
+      .select('*')
+      .order('pair');
+
+    if (error) throw new BadRequestException(error.message);
+    return data ?? [];
+  }
+
+  /** Actualiza tipo de cambio (solo admin, manual). */
+  async updateRate(
+    pair: string,
+    dto: { rate: number; spread_percent?: number },
+    actorId: string,
+  ) {
+    // Obtener valores previos para audit
+    const old = await this.getRate(pair);
+
+    const updatePayload: Record<string, unknown> = {
+      rate: dto.rate,
+      updated_by: actorId,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (dto.spread_percent !== undefined) {
+      updatePayload.spread_percent = dto.spread_percent;
+    }
+
+    const { data, error } = await this.supabase
+      .from('exchange_rates_config')
+      .update(updatePayload)
+      .eq('pair', pair.toUpperCase())
+      .select()
+      .single();
+
+    if (error) throw new BadRequestException(error.message);
+
+    // Audit log
+    await this.supabase.from('audit_logs').insert({
+      performed_by: actorId,
+      action: 'UPDATE_EXCHANGE_RATE',
+      table_name: 'exchange_rates_config',
+      previous_values: {
+        rate: old.base_rate,
+        spread: old.spread_percent,
+      },
+      new_values: {
+        rate: dto.rate,
+        spread: dto.spread_percent ?? old.spread_percent,
+        pair,
+      },
+      source: 'admin_panel',
+    });
+
+    this.logger.log(
+      `✅ Exchange rate ${pair} actualizado por ${actorId}: ${old.base_rate} → ${dto.rate}`,
+    );
+
+    return data;
+  }
+}

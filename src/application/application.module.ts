@@ -12,6 +12,9 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AdminModule } from './admin/admin.module';
 import { SupportModule } from './support/support.module';
+import { PaymentOrdersModule } from './payment-orders/payment-orders.module';
+import { PsavModule } from './psav/psav.module';
+import { ExchangeRatesModule } from './exchange-rates/exchange-rates.module';
 
 /**
  * ApplicationModule agrupa todos los módulos de negocio de Guira.
@@ -32,6 +35,9 @@ import { SupportModule } from './support/support.module';
     NotificationsModule,
     AdminModule,
     SupportModule,
+    PaymentOrdersModule,
+    PsavModule,
+    ExchangeRatesModule,
   ],
 })
 export class ApplicationModule {}

@@ -16,6 +16,7 @@ import {
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/auth-response.dto';
+import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
 import { Public } from '../../core/guards/supabase-auth.guard';
 import type { AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
@@ -80,5 +81,35 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Sesión cerrada' })
   async logout(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.logout(user.id);
+  }
+
+  @Post('forgot-password')
+  @Public()
+  @UseGuards(RateLimitGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Solicitar restablecimiento de contraseña',
+    description: 'Envía un correo con un enlace para restablecer la contraseña a la cuenta asociada.',
+  })
+  @ApiResponse({ status: 200, description: 'Correo enviado (si existe)' })
+  @ApiResponse({ status: 429, description: 'Demasiados intentos' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Post('reset-password')
+  @ApiBearerAuth('supabase-jwt')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Restablecer contraseña',
+    description: 'Actualiza la contraseña del usuario. Requiere estar autenticado con el token especial recibido por correo.',
+  })
+  @ApiResponse({ status: 200, description: 'Contraseña actualizada' })
+  @ApiResponse({ status: 401, description: 'Token inválido o expirado' })
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.authService.resetPassword(user.id, dto);
   }
 }

@@ -96,7 +96,7 @@ export class AdminService {
     const offset = (page - 1) * limit;
     let query = this.supabase
       .from('audit_logs')
-      .select('*, profiles!audit_logs_performed_by_fkey(email, first_name, last_name)', { count: 'exact' })
+      .select('*, profiles!audit_logs_performed_by_fkey(email, full_name)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 

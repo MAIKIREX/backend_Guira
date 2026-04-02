@@ -85,7 +85,7 @@ export class SupportService {
     const offset = (page - 1) * limit;
     let query = this.supabase
       .from('support_tickets')
-      .select('*, profiles!support_tickets_user_id_fkey(email, first_name, last_name, business_name)', { count: 'exact' })
+      .select('*, profiles!support_tickets_user_id_fkey(email, full_name)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 

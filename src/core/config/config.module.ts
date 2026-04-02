@@ -26,7 +26,7 @@ import appConfig from './app/app.config';
         // Bridge API
         BRIDGE_API_KEY: Joi.string().allow('').default(''),
         BRIDGE_API_URL: Joi.string().uri().allow('').default(''),
-        BRIDGE_WEBHOOK_SECRET: Joi.string().allow('').default(''),
+        BRIDGE_WEBHOOK_PUBLIC_KEY: Joi.string().allow('').default(''),
       }),
     }),
   ],

@@ -20,7 +20,7 @@ export class ComplianceActionsService {
   async listOpenReviews(filters: Record<string, string>) {
     let query = this.supabase
       .from('compliance_reviews')
-      .select('*, profiles!compliance_reviews_subject_id_fkey(email, first_name, last_name, business_name)')
+      .select('*')
       .eq('status', 'open')
       .order('priority', { ascending: false })
       .order('opened_at', { ascending: true });
@@ -30,7 +30,63 @@ export class ComplianceActionsService {
 
     const { data, error } = await query;
     if (error) throw new BadRequestException(error.message);
-    return data ?? [];
+    if (!data || data.length === 0) return [];
+
+    const enrichedData = await Promise.all(
+      data.map(async (review) => {
+        let userId: string | null = null;
+
+        try {
+          if (review.subject_type === 'kyc_applications') {
+            const { data: kyc } = await this.supabase.from('kyc_applications').select('user_id').eq('id', review.subject_id).single();
+            userId = kyc?.user_id || null;
+          } else if (review.subject_type === 'kyb_applications') {
+            const { data: kyb } = await this.supabase.from('kyb_applications').select('requester_user_id').eq('id', review.subject_id).single();
+            userId = kyb?.requester_user_id || null;
+          } else if (review.subject_type === 'payout_request') {
+            const { data: pay } = await this.supabase.from('payout_requests').select('user_id').eq('id', review.subject_id).single();
+            userId = pay?.user_id || null;
+          }
+        } catch (err) {
+          // Ignore relations error if subject was deleted
+        }
+
+        let profileData: Record<string, any> | null = null;
+        if (userId) {
+          const { data: prof } = await this.supabase.from('profiles').select('email, full_name, role').eq('id', userId).maybeSingle();
+          if (prof) {
+            let businessName = null;
+            if (review.subject_type === 'kyb_applications') {
+              const { data: biz } = await this.supabase.from('businesses').select('legal_name').eq('user_id', userId).maybeSingle();
+              businessName = biz?.legal_name;
+            }
+
+            let firstName = '';
+            let lastName = '';
+            if (prof.full_name) {
+              const parts = prof.full_name.split(' ');
+              firstName = parts[0] || '';
+              lastName = parts.slice(1).join(' ') || '';
+            }
+
+            profileData = {
+              email: prof.email,
+              first_name: firstName,
+              last_name: lastName,
+              full_name: prof.full_name,
+              business_name: businessName || '',
+            };
+          }
+        }
+
+        return {
+          ...review,
+          profiles: profileData,
+        };
+      }),
+    );
+
+    return enrichedData;
   }
 
   async getReviewDetail(reviewId: string) {

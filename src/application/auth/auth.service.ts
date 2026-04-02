@@ -5,11 +5,13 @@ import {
   UnauthorizedException,
   NotFoundException,
   Logger,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
 import { RegisterDto } from './dto/register.dto';
 import { AuthResponseDto, MeResponseDto } from './dto/auth-response.dto';
+import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
 
 @Injectable()
 export class AuthService {
@@ -149,5 +151,50 @@ export class AuthService {
     }
 
     return { message: 'Sesión cerrada exitosamente' };
+  }
+
+  /**
+   * Solicita el envío de un correo para restablecer la contraseña.
+   */
+  async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
+    // Usamos el cliente regular (no admin) para resetPasswordForEmail
+    // para que use las plantillas de email configuradas en el proyecto
+    const { error } = await this.supabase.auth.resetPasswordForEmail(dto.email, {
+      redirectTo: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/reset-password`,
+    });
+
+    if (error) {
+      this.logger.error(`Error en forgot password para ${dto.email}: ${error.message}`);
+      // Nunca confirmamos si el email existe o no por seguridad, 
+      // pero si el error es de rate limit etc, lo manejamos.
+      // Retornamos éxito de todas formas si no es un error de sistema crítico.
+    }
+
+    return {
+      message: 'Si el correo está registrado, recibirás instrucciones para restablecer tu contraseña.',
+    };
+  }
+
+  /**
+   * Restablece la contraseña de un usuario asumiendo que ya se autenticó temporalmente
+   * con el token enviado a su correo electrónico.
+   * Requiere el ID del usuario (extraído del token) y la nueva contraseña.
+   */
+  async resetPassword(userId: string, dto: ResetPasswordDto): Promise<{ message: string }> {
+    // Usamos updateUser usando la sesión de supabase
+    // Dado que estamos en el backend con Guards personalizados, la forma más segura 
+    // es usar el API admin para actualizar el usuario directamente, ya que el middleware
+    // de SupabaseAuthGuard ya validó la autenticidad de la petición con el token JWT
+    
+    const { error } = await this.supabase.auth.admin.updateUserById(userId, {
+      password: dto.new_password,
+    });
+
+    if (error) {
+      this.logger.error(`Error reseteando contraseña para ${userId}: ${error.message}`);
+      throw new InternalServerErrorException('No se pudo restablecer la contraseña. Intente nuevamente.');
+    }
+
+    return { message: 'Contraseña actualizada exitosamente' };
   }
 }

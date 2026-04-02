@@ -468,6 +468,37 @@ export class WebhooksService {
         .eq('id', transfer.payout_request_id);
     }
 
+    // 2b. UPDATE payment_orders (si el transfer está vinculado a una order)
+    const { data: paymentOrder } = await this.supabase
+      .from('payment_orders')
+      .select('id, user_id, wallet_id, flow_type, amount, fee_amount, currency')
+      .eq('bridge_transfer_id', bridgeTransferId)
+      .eq('status', 'processing')
+      .maybeSingle();
+
+    if (paymentOrder) {
+      await this.supabase
+        .from('payment_orders')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          tx_hash: (data?.destination_tx_hash as string) ?? null,
+        })
+        .eq('id', paymentOrder.id);
+
+      // Asentar ledger entries vinculadas a la payment_order
+      await this.supabase
+        .from('ledger_entries')
+        .update({ status: 'settled' })
+        .eq('reference_type', 'payment_order')
+        .eq('reference_id', paymentOrder.id)
+        .eq('status', 'pending');
+
+      this.logger.log(
+        `✅ Payment order ${paymentOrder.id} completada vía webhook (transfer ${bridgeTransferId})`,
+      );
+    }
+
     // [GAP 1 FIX] 3. UPDATE ledger_entry existente: pending → settled
     // NO crear uno nuevo — el trigger de balance solo se activa al cambiar a settled
     await this.supabase
@@ -566,6 +597,48 @@ export class WebhooksService {
       p_currency: currency.toUpperCase(),
       p_amount: payoutAmount,
     });
+
+    // 4b. UPDATE payment_orders (si el transfer está vinculado a una order)
+    const { data: failedOrder } = await this.supabase
+      .from('payment_orders')
+      .select('id, user_id, wallet_id, amount, fee_amount, currency')
+      .eq('bridge_transfer_id', bridgeTransferId)
+      .in('status', ['processing', 'created'])
+      .maybeSingle();
+
+    if (failedOrder) {
+      await this.supabase
+        .from('payment_orders')
+        .update({
+          status: 'failed',
+          failure_reason: `Bridge transfer ${bridgeTransferId} falló`,
+        })
+        .eq('id', failedOrder.id);
+
+      // Liberar balance reservado de la payment_order
+      const orderTotal =
+        parseFloat(failedOrder.amount ?? '0') +
+        parseFloat(failedOrder.fee_amount ?? '0');
+      if (orderTotal > 0) {
+        await this.supabase.rpc('release_reserved_balance', {
+          p_user_id: failedOrder.user_id,
+          p_currency: (failedOrder.currency ?? 'USDC').toUpperCase(),
+          p_amount: orderTotal,
+        });
+      }
+
+      // Marcar ledger entries como failed
+      await this.supabase
+        .from('ledger_entries')
+        .update({ status: 'failed' })
+        .eq('reference_type', 'payment_order')
+        .eq('reference_id', failedOrder.id)
+        .eq('status', 'pending');
+
+      this.logger.warn(
+        `❌ Payment order ${failedOrder.id} falló vía webhook (transfer ${bridgeTransferId})`,
+      );
+    }
 
     // 5. Notificación
     await this.supabase.from('notifications').insert({
@@ -726,15 +799,16 @@ export class WebhooksService {
     payload: Record<string, unknown>,
     signatureHeader: string | null,
   ): boolean {
-    const secret = this.config.get<string>('app.bridgeWebhookSecret');
-    if (!secret || !signatureHeader) return false;
+    const publicKey = this.config.get<string>('app.bridgeWebhookPublicKey');
+    if (!publicKey || !signatureHeader) return false;
 
     try {
       const signature = signatureHeader.replace(/^v0=/, '');
       const verifier = crypto.createVerify('RSA-SHA256');
       verifier.update(JSON.stringify(payload));
-      return verifier.verify(secret, Buffer.from(signature, 'hex'));
-    } catch {
+      return verifier.verify(publicKey.replace(/\\n/g, '\n'), Buffer.from(signature, 'hex'));
+    } catch (e) {
+      this.logger.error(`Error verificando firma: ${e}`);
       return false;
     }
   }

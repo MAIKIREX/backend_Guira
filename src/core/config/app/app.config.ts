@@ -13,7 +13,7 @@ export interface AppConfig {
   supabaseServiceRoleKey: string;
   bridgeApiKey: string;
   bridgeApiUrl: string;
-  bridgeWebhookSecret: string;
+  bridgeWebhookPublicKey: string;
 }
 
 export default registerAs('app', (): AppConfig => ({
@@ -26,5 +26,5 @@ export default registerAs('app', (): AppConfig => ({
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
   bridgeApiKey: process.env.BRIDGE_API_KEY ?? '',
   bridgeApiUrl: process.env.BRIDGE_API_URL ?? '',
-  bridgeWebhookSecret: process.env.BRIDGE_WEBHOOK_SECRET ?? '',
+  bridgeWebhookPublicKey: process.env.BRIDGE_WEBHOOK_PUBLIC_KEY ?? '',
 }));
