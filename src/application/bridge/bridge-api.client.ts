@@ -16,8 +16,11 @@ export class BridgeApiClient {
   private readonly apiKey: string;
 
   constructor(private readonly config: ConfigService) {
-    this.baseUrl =
+    const rawUrl =
       config.get<string>('app.bridgeApiUrl') ?? 'https://api.bridge.xyz';
+    // Normalizar: quitar /v0 al final si el env var lo incluye.
+    // Los paths internos ya incluyen /v0/... de forma explícita.
+    this.baseUrl = rawUrl.replace(/\/v0\/?$/, '');
     this.apiKey = config.get<string>('app.bridgeApiKey') ?? '';
   }
 

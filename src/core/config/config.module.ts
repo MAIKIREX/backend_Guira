@@ -26,8 +26,13 @@ import appConfig from './app/app.config';
         SUPABASE_SERVICE_ROLE_KEY: Joi.string().required(),
 
         // Bridge API
-        BRIDGE_API_KEY: Joi.string().allow('').default(''),
-        BRIDGE_API_URL: Joi.string().uri().allow('').default(''),
+        // En producción BRIDGE_API_KEY es OBLIGATORIA — el servidor no arranca sin ella.
+        BRIDGE_API_KEY: Joi.when('NODE_ENV', {
+          is: 'production',
+          then: Joi.string().required(),
+          otherwise: Joi.string().allow('').default(''),
+        }),
+        BRIDGE_API_URL: Joi.string().uri().allow('').default('https://api.bridge.xyz'),
         // En producción esta key es OBLIGATORIA para verificar firmas de webhooks
         BRIDGE_WEBHOOK_PUBLIC_KEY: Joi.when('NODE_ENV', {
           is: 'production',
