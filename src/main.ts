@@ -8,47 +8,10 @@ import type { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 
 async function bootstrap() {
-  // IMPORTANTE: Deshabilitar el body parser por defecto de NestJS para poder
-  // capturar el raw body antes de que Express lo parsee.
-  // Esto es REQUERIDO para la verificación de firmas RSA/SHA256 de Bridge Webhooks.
-  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  // IMPORTANTE: Habilitamos rawBody para poder verificar firmas RSA/SHA256 
+  // de Bridge Webhooks sin interferir con FileInterceptor (Multer) o uploads.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
-  // ─── Raw body middleware (DEBE ir ANTES de cualquier otro middleware) ─────────
-  // Captura el buffer crudo de la petición y lo almacena en req['rawBody'].
-  // Luego parsea el JSON normalmente para el resto de la app.
-  // El webhook service usa rawBody para verificar la firma de Bridge (SHA256/RSA).
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    let data = Buffer.alloc(0);
-
-    req.on('data', (chunk: Buffer) => {
-      data = Buffer.concat([data, chunk]);
-    });
-
-    req.on('end', () => {
-      // Guardar raw buffer en la request para uso del webhook service
-      (req as Request & { rawBody?: Buffer }).rawBody = data;
-
-      const contentType = req.headers['content-type'] ?? '';
-
-      if (contentType.includes('application/json')) {
-        try {
-          req.body = JSON.parse(data.toString('utf-8'));
-        } catch {
-          req.body = {};
-        }
-      } else if (contentType.includes('application/x-www-form-urlencoded')) {
-        const params = new URLSearchParams(data.toString('utf-8'));
-        req.body = Object.fromEntries(params.entries());
-      } else {
-        req.body = data;
-      }
-
-      next();
-    });
-
-    req.on('error', next);
-  });
-  // ────────────────────────────────────────────────────────────────────────────
 
   // Prefijo global de la API
   const prefix = process.env.PATH_SUBDOMAIN || 'api';
