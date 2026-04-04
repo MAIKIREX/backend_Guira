@@ -181,7 +181,7 @@ export class OnboardingService {
     } else {
       const idempotencyKey = `tos-link-${userId}-${Date.now()}`;
       const res = await this.bridgeApiClient.post<{ url: string }>(
-        `/v0/customers/tos_links`,
+        `/v0/tos_links`,
         {},
         idempotencyKey,
       );
