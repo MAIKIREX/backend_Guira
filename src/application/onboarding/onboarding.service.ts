@@ -12,6 +12,7 @@ import { CreatePersonDto } from './dto/create-person.dto';
 import { CreateBusinessDto } from './dto/create-business.dto';
 import { CreateDirectorDto, CreateUboDto } from './dto/create-director-ubo.dto';
 import { BridgeApiClient } from '../bridge/bridge-api.client';
+import * as crypto from 'crypto';
 
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
@@ -532,6 +533,10 @@ export class OnboardingService {
     subjectType: string,
     subjectId?: string,
   ) {
+    if (!file) {
+      throw new BadRequestException('El archivo no se encontró o está vacío');
+    }
+
     // Validar mime type
     if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
       throw new BadRequestException(
