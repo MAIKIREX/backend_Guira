@@ -79,8 +79,25 @@ export class ComplianceActionsService {
           }
         }
 
+        // Determinar status de la aplicación si es necesario para el UI
+        let appStatus = review.status; // fallback a review status ('open')
+        let appUpdatedAt = review.opened_at;
+        try {
+          if (review.subject_type === 'kyc_applications') {
+            const { data: kyc } = await this.supabase.from('kyc_applications').select('status, updated_at').eq('id', review.subject_id).single();
+            if (kyc) { appStatus = kyc.status; appUpdatedAt = kyc.updated_at; }
+          } else if (review.subject_type === 'kyb_applications') {
+            const { data: kyb } = await this.supabase.from('kyb_applications').select('status, updated_at').eq('id', review.subject_id).single();
+            if (kyb) { appStatus = kyb.status; appUpdatedAt = kyb.updated_at; }
+          }
+        } catch (e) {}
+
         return {
           ...review,
+          user_id: userId,
+          type: review.subject_type === 'kyb_applications' ? 'company' : 'personal',
+          application_status: appStatus,
+          updated_at: appUpdatedAt,
           profiles: profileData,
         };
       }),
