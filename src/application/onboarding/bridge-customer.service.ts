@@ -616,16 +616,27 @@ export class BridgeCustomerService {
       // Fetch images for identity document
       let query = this.supabase
         .from('documents')
-        .select('id, document_type, storage_path, mime_type')
+        .select('id, document_type, storage_path, mime_type, created_at')
         .eq('user_id', userId)
         .eq('subject_type', subjectType)
-        .eq('status', 'pending');
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
 
       if (subjectId) {
         query = query.eq('subject_id', subjectId);
       }
 
-      const { data: docs } = await query;
+      const { data: rawDocs } = await query;
+      const docs: any[] = [];
+      if (rawDocs) {
+        const typeMap = new Set<string>();
+        for (const d of rawDocs) {
+          if (!typeMap.has(d.document_type)) {
+            typeMap.add(d.document_type);
+            docs.push(d);
+          }
+        }
+      }
 
       if (docs && docs.length > 0) {
         for (const doc of docs) {
@@ -697,16 +708,27 @@ export class BridgeCustomerService {
   ): Promise<Record<string, unknown>[]> {
     let query = this.supabase
       .from('documents')
-      .select('id, document_type, storage_path, mime_type')
+      .select('id, document_type, storage_path, mime_type, created_at')
       .eq('user_id', userId)
       .eq('subject_type', subjectType)
-      .eq('status', 'pending');
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
 
     if (subjectId) {
       query = query.eq('subject_id', subjectId);
     }
 
-    const { data: docs, error } = await query;
+    const { data: rawDocs, error } = await query;
+    const docs: any[] = [];
+    if (rawDocs && !error) {
+      const typeMap = new Set<string>();
+      for (const d of rawDocs) {
+        if (!typeMap.has(d.document_type)) {
+          typeMap.add(d.document_type);
+          docs.push(d);
+        }
+      }
+    }
 
     if (error || !docs || docs.length === 0) return [];
 
