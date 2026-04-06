@@ -6,9 +6,25 @@ import {
   IsBoolean,
   IsArray,
   IsEmail,
-  MaxLength,
+  Length,
+  IsEnum,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { SourceOfFundsEnum, AccountPurposeEnum } from './create-person.dto';
+
+/**
+ * Bridge-accepted values for business_type.
+ * H11 — enforced enum to replace loose string (LLC, Corp, SA, etc.)
+ */
+export enum BusinessTypeEnum {
+  COOPERATIVE  = 'cooperative',
+  CORPORATION  = 'corporation',
+  LLC          = 'llc',
+  OTHER        = 'other',
+  PARTNERSHIP  = 'partnership',
+  SOLE_PROP    = 'sole_prop',
+  TRUST        = 'trust',
+}
 
 export class CreateBusinessDto {
   @ApiProperty({ example: 'Guira Payments S.A. de C.V.' })
@@ -31,18 +47,28 @@ export class CreateBusinessDto {
   @IsNotEmpty()
   tax_id: string;
 
-  @ApiProperty({ enum: ['LLC', 'Corp', 'SA', 'SAS', 'SRL', 'Other'] })
-  @IsString()
-  entity_type: string;
+  /**
+   * H11 — Bridge accepts strict business_type enum.
+   * Use BusinessTypeEnum values: llc, corporation, partnership, sole_prop, trust, cooperative, other.
+   */
+  @ApiProperty({ enum: BusinessTypeEnum })
+  @IsEnum(BusinessTypeEnum)
+  entity_type: BusinessTypeEnum;
 
   @ApiPropertyOptional({ example: '2020-01-15' })
   @IsOptional()
   @IsDateString()
   incorporation_date?: string;
 
-  @ApiProperty({ example: 'MX' })
+  /**
+   * H05/H09 — Updated to allow 2-3 char codes. BridgeCustomerService converts to alpha-3.
+   */
+  @ApiProperty({
+    example: 'MEX',
+    description: 'ISO 3166-1 alpha-3 country code (3 characters preferred)',
+  })
   @IsString()
-  @MaxLength(2)
+  @Length(2, 3)
   country_of_incorporation: string;
 
   @ApiPropertyOptional({ example: 'Jalisco' })
@@ -50,7 +76,7 @@ export class CreateBusinessDto {
   @IsString()
   state_of_incorporation?: string;
 
-  @ApiPropertyOptional({ example: ['MX', 'US', 'CN'] })
+  @ApiPropertyOptional({ example: ['MEX', 'USA', 'CHN'] })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -94,9 +120,15 @@ export class CreateBusinessDto {
   @IsString()
   postal_code?: string;
 
-  @ApiProperty({ example: 'MX' })
+  /**
+   * H05 — Bridge requires ISO alpha-3. BridgeCustomerService converts automatically.
+   */
+  @ApiProperty({
+    example: 'MEX',
+    description: 'ISO 3166-1 alpha-3 country code (3 characters preferred)',
+  })
   @IsString()
-  @MaxLength(2)
+  @Length(2, 3)
   country: string;
 
   @ApiPropertyOptional({ example: 'Plataforma de pagos internacionales' })
@@ -109,15 +141,17 @@ export class CreateBusinessDto {
   @IsString()
   business_industry?: string;
 
-  @ApiPropertyOptional({ example: 'international_payments' })
+  /** H10 — enforced Bridge enum */
+  @ApiPropertyOptional({ enum: AccountPurposeEnum })
   @IsOptional()
-  @IsString()
-  account_purpose?: string;
+  @IsEnum(AccountPurposeEnum)
+  account_purpose?: AccountPurposeEnum;
 
-  @ApiPropertyOptional({ example: 'business_revenue' })
+  /** H10 — enforced Bridge enum */
+  @ApiPropertyOptional({ enum: SourceOfFundsEnum })
   @IsOptional()
-  @IsString()
-  source_of_funds?: string;
+  @IsEnum(SourceOfFundsEnum)
+  source_of_funds?: SourceOfFundsEnum;
 
   @ApiPropertyOptional({ example: false })
   @IsOptional()
@@ -133,4 +167,68 @@ export class CreateBusinessDto {
   @IsOptional()
   @IsString()
   compliance_explanation?: string;
+
+  // ── P1: High-risk / Enhanced Due Diligence ──────────────────────────
+
+  /**
+   * P1 — Bridge high-risk field.
+   * Estimated annual revenue of the business.
+   */
+  @ApiPropertyOptional({
+    enum: ['less_than_100k', '100k_to_1m', '1m_to_10m', '10m_to_100m', 'greater_than_100m'],
+  })
+  @IsOptional()
+  @IsEnum(['less_than_100k', '100k_to_1m', '1m_to_10m', '10m_to_100m', 'greater_than_100m'])
+  estimated_annual_revenue_usd?: 'less_than_100k' | '100k_to_1m' | '1m_to_10m' | '10m_to_100m' | 'greater_than_100m';
+
+  /**
+   * P1 — Bridge high-risk field.
+   * Array of activity codes that Bridge considers high-risk
+   * (e.g. 'money_services', 'gaming', 'crypto_exchange', 'cannabis', 'adult_content').
+   */
+  @ApiPropertyOptional({ example: ['money_services', 'crypto_exchange'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  high_risk_activities?: string[];
+
+  // ── P2: Physical / Operational Address ─────────────────────────────
+
+  /**
+   * P2 — Operational address if different from the registered legal address.
+   * Bridge field: physical_address. Sent only when physical_city + physical_country are present.
+   */
+  @ApiPropertyOptional({ example: 'Calle Industria 55' })
+  @IsOptional()
+  @IsString()
+  physical_address1?: string;
+
+  @ApiPropertyOptional({ example: 'Piso 2' })
+  @IsOptional()
+  @IsString()
+  physical_address2?: string;
+
+  @ApiPropertyOptional({ example: 'Monterrey' })
+  @IsOptional()
+  @IsString()
+  physical_city?: string;
+
+  @ApiPropertyOptional({ example: 'Nuevo León' })
+  @IsOptional()
+  @IsString()
+  physical_state?: string;
+
+  @ApiPropertyOptional({ example: '64000' })
+  @IsOptional()
+  @IsString()
+  physical_postal_code?: string;
+
+  @ApiPropertyOptional({
+    example: 'MEX',
+    description: 'ISO 3166-1 alpha-3 country code for physical location',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(2, 3)
+  physical_country?: string;
 }

@@ -5,7 +5,7 @@ import {
   IsDateString,
   IsBoolean,
   IsEmail,
-  MaxLength,
+  Length,
   IsEnum,
   IsNumber,
   Min,
@@ -24,6 +24,10 @@ export class CreateDirectorDto {
   @IsNotEmpty()
   last_name: string;
 
+  /**
+   * Position/title of the director (maps to Bridge `title` field).
+   * H03 — bridge associated_person uses `title`; stored as `position` in DB.
+   */
   @ApiProperty({ example: 'CEO' })
   @IsString()
   @IsNotEmpty()
@@ -38,16 +42,25 @@ export class CreateDirectorDto {
   @IsDateString()
   date_of_birth?: string;
 
-  @ApiPropertyOptional({ example: 'MX' })
+  /**
+   * H09 — Updated to accept alpha-3 (3 chars). BridgeCustomerService converts.
+   */
+  @ApiPropertyOptional({
+    example: 'MEX',
+    description: 'ISO 3166-1 alpha-3 nationality code',
+  })
   @IsOptional()
   @IsString()
-  @MaxLength(2)
+  @Length(2, 3)
   nationality?: string;
 
-  @ApiPropertyOptional({ example: 'MX' })
+  @ApiPropertyOptional({
+    example: 'MEX',
+    description: 'ISO 3166-1 alpha-3 country of residence',
+  })
   @IsOptional()
   @IsString()
-  @MaxLength(2)
+  @Length(2, 3)
   country_of_residence?: string;
 
   @ApiPropertyOptional({ enum: ['passport', 'drivers_license', 'national_id'] })
@@ -65,6 +78,10 @@ export class CreateDirectorDto {
   @IsDateString()
   id_expiry_date?: string;
 
+  /**
+   * H03 — Bridge requires email for associated_persons. Kept optional for
+   * backward compatibility but validation enforces format when provided.
+   */
   @ApiPropertyOptional({ example: 'carlos@empresa.com' })
   @IsOptional()
   @IsEmail()
@@ -85,10 +102,16 @@ export class CreateDirectorDto {
   @IsString()
   city?: string;
 
-  @ApiPropertyOptional()
+  /**
+   * H05 — Updated to accept alpha-3. BridgeCustomerService converts.
+   */
+  @ApiPropertyOptional({
+    example: 'MEX',
+    description: 'ISO 3166-1 alpha-3 country code',
+  })
   @IsOptional()
   @IsString()
-  @MaxLength(2)
+  @Length(2, 3)
   country?: string;
 }
 
@@ -103,6 +126,7 @@ export class CreateUboDto {
   @IsNotEmpty()
   last_name: string;
 
+  /** ownership_percentage on Bridge side; stored as ownership_percent in DB. */
   @ApiProperty({ example: 51.5 })
   @IsNumber()
   @Min(0)
@@ -114,16 +138,22 @@ export class CreateUboDto {
   @IsDateString()
   date_of_birth?: string;
 
-  @ApiPropertyOptional({ example: 'MX' })
+  @ApiPropertyOptional({
+    example: 'MEX',
+    description: 'ISO 3166-1 alpha-3 nationality code',
+  })
   @IsOptional()
   @IsString()
-  @MaxLength(2)
+  @Length(2, 3)
   nationality?: string;
 
-  @ApiPropertyOptional({ example: 'MX' })
+  @ApiPropertyOptional({
+    example: 'MEX',
+    description: 'ISO 3166-1 alpha-3 country of residence',
+  })
   @IsOptional()
   @IsString()
-  @MaxLength(2)
+  @Length(2, 3)
   country_of_residence?: string;
 
   @ApiPropertyOptional()
@@ -146,6 +176,7 @@ export class CreateUboDto {
   @IsString()
   tax_id?: string;
 
+  /** H03 — Bridge requires email for associated_persons. */
   @ApiPropertyOptional()
   @IsOptional()
   @IsEmail()
@@ -164,6 +195,11 @@ export class CreateUboDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  address2?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   city?: string;
 
   @ApiPropertyOptional()
@@ -176,10 +212,16 @@ export class CreateUboDto {
   @IsString()
   postal_code?: string;
 
-  @ApiPropertyOptional()
+  /**
+   * H05 — Updated to accept alpha-3. BridgeCustomerService converts.
+   */
+  @ApiPropertyOptional({
+    example: 'MEX',
+    description: 'ISO 3166-1 alpha-3 country code',
+  })
   @IsOptional()
   @IsString()
-  @MaxLength(2)
+  @Length(2, 3)
   country?: string;
 
   @ApiProperty({ example: false })
