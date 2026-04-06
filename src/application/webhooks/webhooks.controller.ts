@@ -50,8 +50,9 @@ export class WebhooksController {
     // Se captura en el middleware de main.ts antes del JSON parsing.
     const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(payload));
 
-    const providerEventId = (payload?.id as string) ?? null;
-    const eventType = (payload?.type as string) ?? 'unknown';
+    // Bridge envía el event ID en "event_id" y el tipo en "event_type" (no "id"/"type")
+    const providerEventId = (payload?.event_id as string) ?? null;
+    const eventType = (payload?.event_type as string) ?? 'unknown';
 
     this.logger.log(`📨 Bridge webhook recibido: ${eventType} (${providerEventId})`);
 

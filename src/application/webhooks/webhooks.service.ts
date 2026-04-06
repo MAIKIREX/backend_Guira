@@ -32,6 +32,18 @@ export class WebhooksService {
   // ═══════════════════════════════════════════════
 
   async sinkEvent(dto: SinkEventDto): Promise<void> {
+    // Verificar firma ANTES del INSERT mientras el raw body original está en memoria.
+    // Esta es la única oportunidad de verificar de forma fidedigna — en el CRON el
+    // body ha sido re-serializado desde JSON y no coincide byte a byte con el original.
+    const signatureHeader = dto.headers['x-webhook-signature'] ?? null;
+    const signatureVerified = this.verifyBridgeSignature(dto.raw_body, signatureHeader);
+
+    if (!signatureVerified) {
+      this.logger.warn(
+        `⚠️  Firma Bridge no verificada para evento ${dto.provider_event_id ?? dto.event_type}`,
+      );
+    }
+
     const { error } = await this.supabase.from('webhook_events').insert({
       provider: dto.provider,
       event_type: dto.event_type,
@@ -40,7 +52,7 @@ export class WebhooksService {
       headers: dto.headers,
       bridge_api_version: dto.bridge_api_version,
       status: 'pending',
-      signature_verified: false,
+      signature_verified: signatureVerified, // valor real, no hardcoded false
     });
 
     if (error) {
@@ -49,18 +61,6 @@ export class WebhooksService {
         return;
       }
       this.logger.error(`Error guardando webhook: ${error.message}`);
-      return;
-    }
-
-    // Pre-verificar firma con el raw body mientras aún está disponible en memoria.
-    // El CRON worker también re-verifica desde la DB, pero aquí podemos logear
-    // si el evento llegó con firma inválida desde el inicio.
-    const signatureHeader = dto.headers['x-webhook-signature'] ?? null;
-    const isValid = this.verifyBridgeSignature(dto.raw_body, signatureHeader);
-    if (!isValid) {
-      this.logger.warn(
-        `⚠️  Firma no verificada en evento ${dto.provider_event_id} (se procesará en CRON si está en dev)`,
-      );
     }
   }
 
@@ -70,6 +70,26 @@ export class WebhooksService {
 
   @Cron('*/30 * * * * *', { name: 'process-webhooks' })
   async processWebhooks(): Promise<void> {
+    // ── 1. Rescatar eventos atascados en 'processing' por más de 2 minutos ──────
+    // Ocurre cuando el proceso fue interrumpido a mitad del processOne().
+    const stuckCutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const { data: stuckEvents } = await this.supabase
+      .from('webhook_events')
+      .select('id')
+      .eq('status', 'processing')
+      .lt('processing_started_at', stuckCutoff)
+      .lt('retry_count', 5)
+      .limit(10);
+
+    if (stuckEvents && stuckEvents.length > 0) {
+      this.logger.warn(`🔄 Rescatando ${stuckEvents.length} evento(s) atascados en 'processing'`);
+      await this.supabase
+        .from('webhook_events')
+        .update({ status: 'pending' })
+        .in('id', stuckEvents.map((e) => e.id));
+    }
+
+    // ── 2. Procesar eventos pendientes ───────────────────────────────────────────
     const { data: events, error } = await this.supabase
       .from('webhook_events')
       .select('*')
@@ -100,19 +120,13 @@ export class WebhooksService {
       .eq('id', id);
 
     try {
-      // Verificar firma Bridge con el payload crudo almacenado.
-      // NOTA: En el CRON usamos el raw_payload serializado como fallback ya que
-      // el raw body original no se persiste en DB (solo el JSON).  Para máxima
-      // fidelidad la verificación primaria ocurre en sinkEvent() con el Buffer real.
-      const headers = (event.headers as Record<string, string | null>) ?? {};
-      const signatureHeader = headers['x-webhook-signature'] ?? null;
-      const payload = event.raw_payload as Record<string, unknown>;
-      // Reconstruir buffer desde el JSON guardado (fallback para el CRON)
-      const rawBodyFallback = Buffer.from(JSON.stringify(payload));
-      const verified = this.verifyBridgeSignature(rawBodyFallback, signatureHeader);
+      // La firma ya fue verificada en sinkEvent() con el raw body original.
+      // Aquí solo leemos el resultado guardado — NO re-verificamos con un buffer
+      // re-serializado desde JSON (no coincide byte a byte con el original de Bridge).
+      const signatureVerified = event.signature_verified as boolean;
 
-      if (!verified && this.config.get('app.nodeEnv') === 'production') {
-        this.logger.warn(`❌ Firma inválida en evento ${id}`);
+      if (!signatureVerified && this.config.get('app.nodeEnv') === 'production') {
+        this.logger.warn(`❌ Firma inválida en evento ${id} — ignorado en producción`);
         await this.supabase
           .from('webhook_events')
           .update({ status: 'ignored' })
@@ -120,13 +134,9 @@ export class WebhooksService {
         return;
       }
 
-      await this.supabase
-        .from('webhook_events')
-        .update({ signature_verified: verified })
-        .eq('id', id);
-
       // Despachar
       const eventType = event.event_type as string;
+      const payload = event.raw_payload as Record<string, unknown>;
       await this.dispatchEvent(eventType, payload);
 
       // Marcar procesado
@@ -163,10 +173,32 @@ export class WebhooksService {
     eventType: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
+    // Los event types aquí deben coincidir EXACTAMENTE con los que Bridge envía.
+    // Bridge usa event_type en formato "category.verb" o "category.verb.qualifier".
     switch (eventType) {
-      case 'virtual_account.funds_received':
-        await this.handleFundsReceived(payload);
+      // ── Customer lifecycle ────────────────────────────────────────────────────
+      case 'customer.created':
+        await this.handleCustomerCreated(payload);
         break;
+      case 'customer.updated':
+      case 'customer.updated.status_transitioned':
+        await this.handleCustomerUpdated(payload);
+        break;
+
+      // ── KYC link lifecycle ────────────────────────────────────────────────────
+      case 'kyc_link.created':
+        // Solo log — no hay acción de negocio requerida en creación
+        this.logger.log(`kyc_link.created: ${payload?.event_object_id}`);
+        break;
+      case 'kyc_link.updated.status_transitioned':
+        await this.handleKycLinkStatusTransitioned(payload);
+        break;
+      // Alias legacy — Bridge enviaba este tipo en versiones anteriores
+      case 'kyc_link.approved':
+        await this.handleKycApproved(payload);
+        break;
+
+      // ── Transfers ─────────────────────────────────────────────────────────────
       case 'transfer.payment_processed':
         await this.handleTransferPaymentProcessed(payload);
         break;
@@ -176,22 +208,206 @@ export class WebhooksService {
       case 'transfer.failed':
         await this.handleTransferFailed(payload);
         break;
-      case 'kyc_link.approved':
-        // [GAP 2 FIX] Bridge usa el mismo evento para KYC y KYB.
-        // Determinamos el tipo por customer.type en el payload.
-        await this.handleKycApproved(payload);
+
+      // ── Virtual accounts ──────────────────────────────────────────────────────
+      case 'virtual_account.funds_received':
+        await this.handleFundsReceived(payload);
         break;
+
+      // ── Liquidation ───────────────────────────────────────────────────────────
       case 'liquidation_address.payment_completed':
         await this.handleLiquidationPayment(payload);
         break;
+
       default:
-        this.logger.warn(`Evento desconocido ignorado: ${eventType}`);
+        this.logger.warn(`⚠️ Evento Bridge sin handler: ${eventType} — registrado pero no procesado`);
     }
+  }
+
+  // ═══════════════════════════════════════════════
+  //  HANDLER: customer.created
+  //  Bridge confirma que el customer fue creado. Persistimos el bridge_customer_id
+  //  si a\u00fan no está guardado (el approveReview ya lo guarda, esto es idempotente).
+  // ═══════════════════════════════════════════════
+
+  private async handleCustomerCreated(payload: Record<string, unknown>): Promise<void> {
+    const eventObject = payload.event_object as Record<string, unknown> | undefined;
+    const customerId = eventObject?.id as string | undefined;
+    const email = eventObject?.email as string | undefined;
+
+    if (!customerId || !email) {
+      this.logger.warn('customer.created: payload sin id o email');
+      return;
+    }
+
+    // Buscar perfil por email y guardar bridge_customer_id si aún no está
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('id, bridge_customer_id')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (!profile) {
+      this.logger.warn(`customer.created: no se encontró profile para email ${email}`);
+      return;
+    }
+
+    if (!profile.bridge_customer_id) {
+      await this.supabase
+        .from('profiles')
+        .update({ bridge_customer_id: customerId })
+        .eq('id', profile.id);
+      this.logger.log(`customer.created: bridge_customer_id ${customerId} guardado para user ${profile.id}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════
+  //  HANDLER: customer.updated / customer.updated.status_transitioned
+  //  Cuando Bridge cambia el status del customer (ej. incomplete → active),
+  //  actualizamos el perfil y \u2014 si llega a active \u2014 inicializamos wallets.
+  // ═══════════════════════════════════════════════
+
+  private async handleCustomerUpdated(payload: Record<string, unknown>): Promise<void> {
+    const eventObject = payload.event_object as Record<string, unknown> | undefined;
+    const customerId = eventObject?.id as string | undefined;
+    const email = eventObject?.email as string | undefined;
+    const newStatus = payload.event_object_status as string | undefined;
+
+    if (!customerId || !email) return;
+
+    // Solo actuar en transiciones a 'active' (customer completamente verificado)
+    if (newStatus !== 'active') {
+      this.logger.log(`customer.updated: status=${newStatus} para customer ${customerId} — sin acción`);
+      return;
+    }
+
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('id, bridge_customer_id, onboarding_status')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (!profile) {
+      this.logger.warn(`customer.updated: no se encontró profile para email ${email}`);
+      return;
+    }
+
+    // Actualizar bridge_customer_id y onboarding_status si es necesario
+    const updates: Record<string, unknown> = {};
+    if (!profile.bridge_customer_id) updates.bridge_customer_id = customerId;
+    if (profile.onboarding_status !== 'approved') updates.onboarding_status = 'approved';
+
+    if (Object.keys(updates).length > 0) {
+      await this.supabase.from('profiles').update(updates).eq('id', profile.id);
+    }
+
+    // Inicializar wallets si no existen aún
+    await this.initializeWalletsForUser(profile.id, customerId);
+
+    this.logger.log(`customer.updated: customer ${customerId} → active, wallets inicializadas para user ${profile.id}`);
+  }
+
+  // ═══════════════════════════════════════════════
+  //  HANDLER: kyc_link.updated.status_transitioned
+  //  Este es el evento REAL que Bridge envía cuando el KYC es aprobado.
+  //  Usa event_object (no data). Ejecuta la lógica de aprobación completa.
+  // ═══════════════════════════════════════════════
+
+  private async handleKycLinkStatusTransitioned(payload: Record<string, unknown>): Promise<void> {
+    const eventObject = payload.event_object as Record<string, unknown> | undefined;
+    const kycStatus = eventObject?.kyc_status as string | undefined;
+
+    // Solo actuar si el KYC fue aprobado
+    if (kycStatus !== 'approved') {
+      this.logger.log(`kyc_link.updated.status_transitioned: kyc_status=${kycStatus} — sin acción`);
+      return;
+    }
+
+    const customerId = eventObject?.customer_id as string | undefined;
+    const email = eventObject?.email as string | undefined;
+    const customerType = (eventObject?.type as string) ?? 'individual';
+
+    if (!customerId) {
+      this.logger.warn('kyc_link.updated.status_transitioned: payload sin customer_id');
+      return;
+    }
+
+    // Buscar perfil por bridge_customer_id o email
+    let profile: { id: string } | null = null;
+
+    const { data: byCustomerId } = await this.supabase
+      .from('profiles')
+      .select('id')
+      .eq('bridge_customer_id', customerId)
+      .maybeSingle();
+    profile = byCustomerId;
+
+    if (!profile && email) {
+      const { data: byEmail } = await this.supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', email)
+        .maybeSingle();
+      profile = byEmail;
+    }
+
+    if (!profile) {
+      this.logger.warn(`kyc_link.updated.status_transitioned: no se encontró profile para customer ${customerId}`);
+      return;
+    }
+
+    const userId = profile.id;
+
+    // Actualizar la aplicación correcta según tipo de customer
+    if (customerType === 'business') {
+      await this.supabase
+        .from('kyb_applications')
+        .update({ status: 'approved', approved_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .in('status', ['submitted', 'under_review', 'pending']);
+    } else {
+      await this.supabase
+        .from('kyc_applications')
+        .update({ status: 'approved', approved_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .in('status', ['submitted', 'under_review', 'pending']);
+    }
+
+    // Actualizar perfil
+    await this.supabase
+      .from('profiles')
+      .update({
+        onboarding_status: 'approved',
+        bridge_customer_id: customerId,
+      })
+      .eq('id', userId);
+
+    // Inicializar wallets
+    await this.initializeWalletsForUser(userId, customerId);
+
+    // Notificación
+    const typeLabel = customerType === 'business' ? 'KYB' : 'KYC';
+    await this.supabase.from('notifications').insert({
+      user_id: userId,
+      type: 'onboarding',
+      title: `Verificación ${typeLabel} Aprobada`,
+      message: `Tu verificación ${typeLabel} ha sido aprobada. Ya puedes operar en la plataforma.`,
+    });
+
+    // Activity log
+    await this.supabase.from('activity_logs').insert({
+      user_id: userId,
+      action: `${typeLabel}_APPROVED_WEBHOOK`,
+      description: `Verificación ${typeLabel} confirmada por Bridge webhook — customer: ${customerId}`,
+    });
+
+    this.logger.log(`✅ kyc_link aprobado para customer ${customerId} (user ${userId})`);
   }
 
   // ═══════════════════════════════════════════════
   //  HANDLER: funds_received (REFACTORIZADO)
   // ═══════════════════════════════════════════════
+
 
   private async handleFundsReceived(payload: Record<string, unknown>): Promise<void> {
     const data = payload?.data as Record<string, unknown>;
