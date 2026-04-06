@@ -138,8 +138,9 @@ export class CreateBusinessDto {
 
   @ApiPropertyOptional({ example: 'fintech' })
   @IsOptional()
-  @IsString()
-  business_industry?: string;
+  @IsArray()
+  @IsString({ each: true })
+  business_industry?: string[];
 
   /** H10 — enforced Bridge enum */
   @ApiPropertyOptional({ enum: AccountPurposeEnum })
@@ -152,6 +153,12 @@ export class CreateBusinessDto {
   @IsOptional()
   @IsEnum(SourceOfFundsEnum)
   source_of_funds?: SourceOfFundsEnum;
+
+  /** Required when account_purpose = 'other' */
+  @ApiPropertyOptional({ example: 'Custom purpose description' })
+  @IsOptional()
+  @IsString()
+  account_purpose_other?: string;
 
   @ApiPropertyOptional({ example: false })
   @IsOptional()
@@ -173,23 +180,32 @@ export class CreateBusinessDto {
   /**
    * P1 — Bridge high-risk field.
    * Estimated annual revenue of the business.
+   * Updated to match Bridge API OpenAPI spec exact enum values.
    */
   @ApiPropertyOptional({
-    enum: ['less_than_100k', '100k_to_1m', '1m_to_10m', '10m_to_100m', 'greater_than_100m'],
+    enum: ['0_99999', '100000_999999', '1000000_9999999', '10000000_49999999', '50000000_249999999', '250000000_plus'],
   })
   @IsOptional()
-  @IsEnum(['less_than_100k', '100k_to_1m', '1m_to_10m', '10m_to_100m', 'greater_than_100m'])
-  estimated_annual_revenue_usd?: 'less_than_100k' | '100k_to_1m' | '1m_to_10m' | '10m_to_100m' | 'greater_than_100m';
+  @IsEnum(['0_99999', '100000_999999', '1000000_9999999', '10000000_49999999', '50000000_249999999', '250000000_plus'])
+  estimated_annual_revenue_usd?: '0_99999' | '100000_999999' | '1000000_9999999' | '10000000_49999999' | '50000000_249999999' | '250000000_plus';
 
   /**
    * P1 — Bridge high-risk field.
-   * Array of activity codes that Bridge considers high-risk
-   * (e.g. 'money_services', 'gaming', 'crypto_exchange', 'cannabis', 'adult_content').
+   * Array of activity codes from the Bridge high_risk_activities enum.
+   * Updated to match Bridge API OpenAPI spec exact enum values.
    */
-  @ApiPropertyOptional({ example: ['money_services', 'crypto_exchange'] })
+  @ApiPropertyOptional({ example: ['money_services', 'gambling'] })
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
+  @IsEnum([
+    'adult_entertainment', 'gambling', 'hold_client_funds', 'investment_services',
+    'lending_banking', 'marijuana_or_related_services', 'money_services',
+    'nicotine_tobacco_or_related_services',
+    'operate_foreign_exchange_virtual_currencies_brokerage_otc',
+    'pharmaceuticals', 'precious_metals_precious_stones_jewelry',
+    'safe_deposit_box_rentals', 'third_party_payment_processing',
+    'weapons_firearms_and_explosives', 'none_of_the_above',
+  ], { each: true })
   high_risk_activities?: string[];
 
   // ── P2: Physical / Operational Address ─────────────────────────────

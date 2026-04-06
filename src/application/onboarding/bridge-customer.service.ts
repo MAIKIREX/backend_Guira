@@ -78,22 +78,28 @@ export class BridgeCustomerService {
     ZA: 'ZAF', ZM: 'ZMB', ZW: 'ZWE',
   };
 
-  /** Mapa de document_type interno → purposes de Bridge. */
+  /** Mapa de document_type interno → purposes de Bridge.
+   *  Actualizado P0-A: solo propósitos válidos del enum Bridge.
+   *  Documentos de identidad (passport, national_id, drivers_license, selfie) NO van en documents[],
+   *  van dentro de identifying_information[].
+   */
   private static readonly DOC_TYPE_TO_BRIDGE_PURPOSE: Record<string, string> = {
-    passport:              'government_id',
-    national_id_front:     'government_id',
-    national_id_back:      'government_id',
-    drivers_license:       'government_id',
     proof_of_address:      'proof_of_address',
     utility_bill:          'proof_of_address',
     bank_statement:        'proof_of_address',
-    selfie:                'selfie',
-    source_of_funds:       'source_of_funds_proof',
+    source_of_funds:       'proof_of_source_of_funds',
+    tax_certificate:       'proof_of_tax_identification',
     business_formation:    'business_formation',
     ownership_information: 'ownership_information',
     operating_agreement:   'operating_agreement',
-    tax_certificate:       'tax_certificate',
+    other:                 'other',
   };
+
+  /** Tipos de documento que son de identidad y NO deben ir en documents[]. */
+  private static readonly IDENTITY_DOC_TYPES = new Set([
+    'passport', 'national_id_front', 'national_id_back',
+    'drivers_license', 'drivers_license_front', 'drivers_license_back', 'selfie',
+  ]);
 
   /** Mapa de entity_type interno → business_type de Bridge. */
   private static readonly ENTITY_TYPE_TO_BRIDGE: Record<string, string> = {
@@ -290,10 +296,16 @@ export class BridgeCustomerService {
       }),
     };
 
-    // Tax ID
-    if (person.tax_id) {
-      payload.tax_identification_number = person.tax_id;
+    // Middle name (optional Bridge field)
+    if (person.middle_name) {
+      payload.middle_name = person.middle_name;
     }
+
+    // Tax ID
+    // Moved to identifying_information according to Bridge spec
+    // if (person.tax_id) {
+    //   payload.tax_identification_number = person.tax_id;
+    // }
 
     // Nationality — H05/H09: convert to alpha-3
     if (person.nationality) {
@@ -306,15 +318,27 @@ export class BridgeCustomerService {
     }
 
     // Identifying information [] — H02
-    const identifyingInfo = this.buildIdentifyingInformation(person, person.country as string);
+    const identifyingInfo = await this.buildIdentifyingInformation(person, person.country as string, userId, 'person');
     if (identifyingInfo.length > 0) {
       payload.identifying_information = identifyingInfo;
     }
 
-    // Documents [] — H04
+    // Documents [] — H04 (P0-A: uses purposes[]/file, excludes identity docs)
     const documents = await this.buildDocumentsArray(userId, 'person');
     if (documents.length > 0) {
       payload.documents = documents;
+    }
+
+    // Source of funds & account purpose
+    if (person.source_of_funds) {
+      payload.source_of_funds = person.source_of_funds;
+    }
+    if (person.account_purpose) {
+      payload.account_purpose = person.account_purpose;
+    }
+    // P1-A: account_purpose_other required when account_purpose = 'other'
+    if (person.account_purpose === 'other' && person.account_purpose_other) {
+      payload.account_purpose_other = person.account_purpose_other;
     }
 
     // P1: High-risk / enhanced due diligence fields
@@ -324,9 +348,18 @@ export class BridgeCustomerService {
     if (person.expected_monthly_payments_usd) {
       payload.expected_monthly_payments_usd = person.expected_monthly_payments_usd;
     }
+    // AUDIT FIX — most_recent_occupation: alphanumeric code required for high-risk/restricted countries
+    if (person.most_recent_occupation) {
+      payload.most_recent_occupation = person.most_recent_occupation;
+    }
+    // AUDIT FIX — is_pep: persist PEP status for individual customers to Bridge
+    if (person.is_pep !== undefined && person.is_pep !== null) {
+      payload.is_pep = person.is_pep;
+    }
 
     return payload;
   }
+
 
   /**
    * Construye el payload para un customer business (KYB).
@@ -355,7 +388,7 @@ export class BridgeCustomerService {
       type: 'business',
       business_legal_name: business.legal_name,         // H07: business_legal_name
       email: (business.email as string) ?? (profile.email as string),
-      tax_identification_number: business.tax_id,
+      tax_identification_number: business.tax_id, // Removed in identifying_information
       registered_address: this.buildAddress({            // H06: registered_address
         address1: business.address1 as string,
         address2: business.address2 as string | undefined,
@@ -397,8 +430,19 @@ export class BridgeCustomerService {
       payload.business_description = business.business_description;
     }
 
+    // P1-B: business_industry as array of NAICS codes
+    if (business.business_industry) {
+      payload.business_industry = Array.isArray(business.business_industry)
+        ? business.business_industry
+        : [business.business_industry];
+    }
+
     if (business.account_purpose) {
       payload.account_purpose = business.account_purpose;
+    }
+    // P1-A: account_purpose_other required when account_purpose = 'other'
+    if (business.account_purpose === 'other' && business.account_purpose_other) {
+      payload.account_purpose_other = business.account_purpose_other;
     }
 
     if (business.source_of_funds) {
@@ -442,8 +486,26 @@ export class BridgeCustomerService {
       payload.signed_agreement_id = tosContractId;
     }
 
+    // Identifying information (including Tax ID)
+    const identifyingInfo: Record<string, unknown>[] = [];
+    if (business.tax_id) {
+      identifyingInfo.push({
+        type: 'other',
+        description: 'Tax Identification Number',
+        issuing_country: payload.incorporation_country ?? this.toAlpha3(business.country as string),
+        number: business.tax_id,
+      });
+      payload.identifying_information = identifyingInfo;
+    }
+
     // Associated Persons (directors + UBOs) — H03
-    const associatedPersons = await this.buildAssociatedPersons(business.id as string);
+    const fallbackEmail = (business.email as string) ?? (profile.email as string);
+    const associatedPersons = await this.buildAssociatedPersons(
+      business.id as string,
+      fallbackEmail,
+      business,  // P0-E: pass business for residential_address fallback
+      userId,
+    );
     if (associatedPersons.length > 0) {
       payload.associated_persons = associatedPersons;
     }
@@ -498,27 +560,98 @@ export class BridgeCustomerService {
 
   /**
    * Construye el array identifying_information[] que Bridge requiere.
-   * Cada elemento tiene: type, issuing_country, number, expiration_date.
-   * La imagen (image_front/image_back) se rellena posteriormente desde buildDocumentsArray.
+   * Cada elemento tiene: type, issuing_country, number, expiration.
+   * La imagen (image_front/image_back) se descarga de Supabase Storage.
    */
-  private buildIdentifyingInformation(
+  private async buildIdentifyingInformation(
     entity: Record<string, unknown>,
     issuingCountry: string,
-  ): Record<string, unknown>[] {
-    if (!entity.id_type || !entity.id_number) return [];
+    userId: string,
+    subjectType: string,
+    subjectId?: string
+  ): Promise<Record<string, unknown>[]> {
+    const result: Record<string, unknown>[] = [];
+    const countryAlpha3 = this.toAlpha3(issuingCountry);
 
-    const bridgeIdType = this.mapIdType(entity.id_type as string);
-    const item: Record<string, unknown> = {
-      type: bridgeIdType,
-      issuing_country: this.toAlpha3(issuingCountry),
-      number: entity.id_number,
-    };
+    // Documento de identidad primario
+    if (entity.id_type && entity.id_number) {
+      const bridgeIdType = this.mapIdType(entity.id_type as string);
+      const item: Record<string, unknown> = {
+        type: bridgeIdType,
+        issuing_country: countryAlpha3,
+        number: entity.id_number,
+      };
 
-    if (entity.id_expiry_date) {
-      item.expiration_date = entity.id_expiry_date;
+      if (entity.id_expiry_date) {
+        item.expiration = entity.id_expiry_date;  // P0-B: Bridge uses 'expiration', not 'expiration_date'
+      }
+
+      // Fetch images for identity document
+      let query = this.supabase
+        .from('documents')
+        .select('id, document_type, storage_path, mime_type')
+        .eq('user_id', userId)
+        .eq('subject_type', subjectType)
+        .eq('status', 'pending');
+
+      if (subjectId) {
+        query = query.eq('subject_id', subjectId);
+      }
+
+      const { data: docs } = await query;
+
+      if (docs && docs.length > 0) {
+        for (const doc of docs) {
+          // Si es el documento acorde al tipo de ID
+          if (
+            BridgeCustomerService.IDENTITY_DOC_TYPES.has(doc.document_type) &&
+            ((bridgeIdType === 'passport' && doc.document_type === 'passport') ||
+             (bridgeIdType === 'national_id' && doc.document_type.startsWith('national_id')) ||
+             (bridgeIdType === 'drivers_license' && doc.document_type.startsWith('drivers_license')))
+          ) {
+            const base64Content = await this.downloadDocumentAsBase64(doc.storage_path, doc.mime_type);
+            if (base64Content) {
+              if (doc.document_type.includes('back')) {
+                item.image_back = base64Content;
+              } else {
+                item.image_front = base64Content;
+              }
+            }
+          }
+        }
+      }
+
+      result.push(item);
     }
 
-    return [item];
+    // P0-D: Tax ID se debe enviar como un elemento de identifying_information
+    if (entity.tax_id) {
+      result.push({
+        type: 'other',
+        description: 'Tax Identification Number',
+        issuing_country: countryAlpha3,
+        number: entity.tax_id,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Helper para descargar y convertir documentos a base64 Data-URI
+   */
+  private async downloadDocumentAsBase64(storagePath: string, mimeType: string): Promise<string | null> {
+    const { data: fileData, error } = await this.supabase.storage
+      .from(BridgeCustomerService.STORAGE_BUCKET)
+      .download(storagePath);
+
+    if (error || !fileData) {
+      this.logger.warn(`No se pudo descargar documento: ${error?.message}`);
+      return null;
+    }
+
+    const buffer = Buffer.from(await fileData.arrayBuffer());
+    return `data:${mimeType};base64,${buffer.toString('base64')}`;
   }
 
   // ───────────────────────────────────────
@@ -533,37 +666,48 @@ export class BridgeCustomerService {
   private async buildDocumentsArray(
     userId: string,
     subjectType: string,
+    subjectId?: string
   ): Promise<Record<string, unknown>[]> {
-    const { data: docs, error } = await this.supabase
+    let query = this.supabase
       .from('documents')
       .select('id, document_type, storage_path, mime_type')
       .eq('user_id', userId)
       .eq('subject_type', subjectType)
       .eq('status', 'pending');
 
+    if (subjectId) {
+      query = query.eq('subject_id', subjectId);
+    }
+
+    const { data: docs, error } = await query;
+
     if (error || !docs || docs.length === 0) return [];
 
     const result: Record<string, unknown>[] = [];
 
     for (const doc of docs) {
+      // P0-A: Identity document types go in identifying_information[], not documents[]
+      if (BridgeCustomerService.IDENTITY_DOC_TYPES.has(doc.document_type)) {
+        continue;
+      }
+
       try {
-        const { data: fileData, error: downloadError } = await this.supabase.storage
-          .from(BridgeCustomerService.STORAGE_BUCKET)
-          .download(doc.storage_path);
+        const base64Content = await this.downloadDocumentAsBase64(doc.storage_path, doc.mime_type);
+        if (!base64Content) continue;
 
-        if (downloadError || !fileData) {
-          this.logger.warn(`No se pudo descargar documento ${doc.id}: ${downloadError?.message}`);
-          continue;
-        }
-
-        const buffer = Buffer.from(await fileData.arrayBuffer());
-        const base64Content = `data:${doc.mime_type};base64,${buffer.toString('base64')}`;
         const bridgePurpose = BridgeCustomerService.DOC_TYPE_TO_BRIDGE_PURPOSE[doc.document_type] ?? 'other';
 
-        result.push({
-          purpose: bridgePurpose,
-          data: base64Content,
-        });
+        // P0-A: Bridge requires { purposes: string[], file: string }
+        const item: Record<string, unknown> = {
+          purposes: [bridgePurpose],   // P0-A: array, not singular string
+          file: base64Content,         // P0-A: 'file', not 'data'
+        };
+
+        if (bridgePurpose === 'other') {
+          item.description = `Document of type ${doc.document_type}`;
+        }
+
+        result.push(item);
       } catch (err) {
         this.logger.warn(`Error procesando documento ${doc.id}: ${err}`);
       }
@@ -580,11 +724,37 @@ export class BridgeCustomerService {
    * Lee directores y UBOs desde la BD y construye el array
    * associated_persons[] que Bridge requiere para KYB.
    * H12: has_control y has_ownership son inferidos de las tablas.
+   * P0-E: residential_address always included (fallback to business registered address).
    */
   private async buildAssociatedPersons(
     businessId: string,
+    fallbackEmail: string,
+    business: Record<string, unknown>,
+    userId: string
   ): Promise<Record<string, unknown>[]> {
     const persons: Record<string, unknown>[] = [];
+
+    // Helper: build residential_address with fallback to business address
+    const buildPersonAddress = (entity: Record<string, unknown>): Record<string, unknown> => {
+      const hasOwnAddress = entity.address1 && entity.city && entity.country;
+      if (hasOwnAddress) {
+        return this.buildAddress({
+          address1: entity.address1 as string,
+          city: entity.city as string,
+          country: entity.country as string,
+        });
+      }
+      // P0-E: Fallback to business registered address
+      if (business && business.address1 && business.city && business.country) {
+        return this.buildAddress({
+          address1: business.address1 as string,
+          city: business.city as string,
+          country: business.country as string,
+        });
+      }
+      // Last resort: minimal address to avoid Bridge rejection
+      return this.buildAddress({ address1: 'N/A', city: 'N/A', country: 'BOL' });
+    };
 
     // Directores
     const { data: directors } = await this.supabase
@@ -601,9 +771,14 @@ export class BridgeCustomerService {
           has_ownership: false,
           is_signer: dir.is_signer ?? false,
           is_director: true,
+          is_pep: dir.is_pep ?? false,
+          // P0-E: residential_address always present
+          residential_address: buildPersonAddress(dir),
         };
 
-        if (dir.email)    person.email    = dir.email;
+        if (dir.email || fallbackEmail) {
+          person.email = dir.email || fallbackEmail;
+        }
         if (dir.phone)    person.phone    = dir.phone;
         if (dir.date_of_birth) person.birth_date = dir.date_of_birth;
         if (dir.position) person.title    = dir.position;  // position → title
@@ -612,16 +787,8 @@ export class BridgeCustomerService {
           person.nationality = this.toAlpha3(dir.nationality as string);
         }
 
-        if (dir.address1 || dir.city || dir.country) {
-          person.residential_address = this.buildAddress({
-            address1: dir.address1 as string ?? '',
-            city: dir.city as string ?? '',
-            country: dir.country as string ?? '',
-          });
-        }
-
         // Identifying information
-        const idInfo = this.buildIdentifyingInformation(dir, dir.country as string ?? '');
+        const idInfo = await this.buildIdentifyingInformation(dir, dir.country as string ?? '', userId, 'director', dir.id as string);
         if (idInfo.length > 0) person.identifying_information = idInfo;
 
         persons.push(person);
@@ -640,8 +807,9 @@ export class BridgeCustomerService {
           first_name: ubo.first_name,
           last_name: ubo.last_name,
           has_ownership: true,                         // H12: UBO implica ownership
-          has_control:   false,
-          is_signer:     false,
+          has_control:   ubo.has_control ?? false,     // Usar el valor persistido dinámicamente
+          is_signer:     ubo.is_signer ?? false,
+          is_pep:        ubo.is_pep ?? false,
         };
 
         if (ubo.ownership_percent !== undefined) {
@@ -656,19 +824,11 @@ export class BridgeCustomerService {
           person.nationality = this.toAlpha3(ubo.nationality as string);
         }
 
-        if (ubo.address1 || ubo.city || ubo.country) {
-          person.residential_address = this.buildAddress({
-            address1: ubo.address1 as string ?? '',
-            address2: ubo.address2 as string | undefined,
-            city: ubo.city as string ?? '',
-            state: ubo.state as string | undefined,
-            postal_code: ubo.postal_code as string | undefined,
-            country: ubo.country as string ?? '',
-          });
-        }
+        // P0-E: residential_address always present
+        person.residential_address = buildPersonAddress(ubo);
 
         // Identifying information
-        const idInfo = this.buildIdentifyingInformation(ubo, ubo.country as string ?? '');
+        const idInfo = await this.buildIdentifyingInformation(ubo, ubo.country as string ?? '', userId, 'ubo', ubo.id as string);
         if (idInfo.length > 0) person.identifying_information = idInfo;
 
         persons.push(person);

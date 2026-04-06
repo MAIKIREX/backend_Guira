@@ -92,27 +92,34 @@ export class CreateDirectorDto {
   @IsString()
   phone?: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty()
   @IsString()
-  address1?: string;
+  @IsNotEmpty()
+  address1: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty()
   @IsString()
-  city?: string;
+  @IsNotEmpty()
+  city: string;
 
   /**
    * H05 — Updated to accept alpha-3. BridgeCustomerService converts.
    */
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: 'MEX',
     description: 'ISO 3166-1 alpha-3 country code',
   })
-  @IsOptional()
   @IsString()
   @Length(2, 3)
-  country?: string;
+  country: string;
+
+  /**
+   * Fuga B — Bridge requires PEP status for all associated_persons including directors.
+   * Stored in business_directors.is_pep (NOT NULL DEFAULT false).
+   */
+  @ApiProperty({ example: false, description: 'Persona Políticamente Expuesta (PEP)' })
+  @IsBoolean()
+  is_pep: boolean;
 }
 
 export class CreateUboDto {
@@ -187,20 +194,20 @@ export class CreateUboDto {
   @IsString()
   phone?: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty()
   @IsString()
-  address1?: string;
+  @IsNotEmpty()
+  address1: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   address2?: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty()
   @IsString()
-  city?: string;
+  @IsNotEmpty()
+  city: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -215,16 +222,28 @@ export class CreateUboDto {
   /**
    * H05 — Updated to accept alpha-3. BridgeCustomerService converts.
    */
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: 'MEX',
     description: 'ISO 3166-1 alpha-3 country code',
   })
-  @IsOptional()
   @IsString()
   @Length(2, 3)
-  country?: string;
+  country: string;
 
   @ApiProperty({ example: false })
   @IsBoolean()
   is_pep: boolean;
+
+  /**
+   * Fuga A — Control prong: indicates whether the UBO also exerts operational
+   * control over the business (FinCEN Control Prong).
+   * Stored in business_ubos.has_control (NOT NULL DEFAULT false).
+   */
+  @ApiPropertyOptional({
+    example: false,
+    description: 'El UBO también tiene control operacional sobre la empresa (FinCEN Control Prong)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  has_control?: boolean;
 }
