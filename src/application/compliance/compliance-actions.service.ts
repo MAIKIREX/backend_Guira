@@ -362,13 +362,26 @@ export class ComplianceActionsService {
           .from('kyc_applications')
           .update({ status: 'approved', approved_at: new Date().toISOString() })
           .eq('id', subjectId)
-          .select('user_id')
+          .select('user_id, person_id')
           .single();
 
         if (kyc?.user_id) {
+          // Sincronizar full_name desde la tabla `people`
+          const profileUpdate: Record<string, any> = { onboarding_status: 'approved' };
+          if (kyc.person_id) {
+            const { data: person } = await this.supabase
+              .from('people')
+              .select('first_name, last_name')
+              .eq('id', kyc.person_id)
+              .maybeSingle();
+            if (person?.first_name) {
+              profileUpdate.full_name = [person.first_name, person.last_name].filter(Boolean).join(' ').trim();
+            }
+          }
+
           await this.supabase
             .from('profiles')
-            .update({ onboarding_status: 'approved' })
+            .update(profileUpdate)
             .eq('id', kyc.user_id);
 
           // Registra en Bridge (crea bridge_customer + bridge_kyc_link)
@@ -387,13 +400,26 @@ export class ComplianceActionsService {
           .from('kyb_applications')
           .update({ status: 'approved', approved_at: new Date().toISOString() })
           .eq('id', subjectId)
-          .select('requester_user_id')
+          .select('requester_user_id, business_id')
           .single();
 
         if (kyb?.requester_user_id) {
+          // Sincronizar full_name desde la tabla `businesses`
+          const profileUpdate: Record<string, any> = { onboarding_status: 'approved' };
+          if (kyb.business_id) {
+            const { data: business } = await this.supabase
+              .from('businesses')
+              .select('legal_name')
+              .eq('id', kyb.business_id)
+              .maybeSingle();
+            if (business?.legal_name) {
+              profileUpdate.full_name = business.legal_name.trim();
+            }
+          }
+
           await this.supabase
             .from('profiles')
-            .update({ onboarding_status: 'approved' })
+            .update(profileUpdate)
             .eq('id', kyb.requester_user_id);
 
           try {
