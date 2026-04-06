@@ -37,10 +37,14 @@ export class CreateDirectorDto {
   @IsBoolean()
   is_signer: boolean;
 
-  @ApiPropertyOptional({ example: '1975-03-10' })
-  @IsOptional()
+  /**
+   * FIX N-05 — Bridge AssociatedPerson schema marks birth_date as REQUIRED.
+   * Changed from @IsOptional() to required.
+   */
+  @ApiProperty({ example: '1975-03-10' })
   @IsDateString()
-  date_of_birth?: string;
+  @IsNotEmpty()
+  date_of_birth: string;
 
   /**
    * H09 — Updated to accept alpha-3 (3 chars). BridgeCustomerService converts.
@@ -79,13 +83,13 @@ export class CreateDirectorDto {
   id_expiry_date?: string;
 
   /**
-   * H03 — Bridge requires email for associated_persons. Kept optional for
-   * backward compatibility but validation enforces format when provided.
+   * FIX N-05 — Bridge AssociatedPerson schema marks email as REQUIRED.
+   * Changed from @IsOptional() to required.
    */
-  @ApiPropertyOptional({ example: 'carlos@empresa.com' })
-  @IsOptional()
+  @ApiProperty({ example: 'carlos@empresa.com' })
   @IsEmail()
-  email?: string;
+  @IsNotEmpty()
+  email: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -140,10 +144,14 @@ export class CreateUboDto {
   @Max(100)
   ownership_percent: number;
 
-  @ApiPropertyOptional({ example: '1980-08-22' })
-  @IsOptional()
+  /**
+   * FIX N-05 — Bridge AssociatedPerson schema marks birth_date as REQUIRED.
+   * Changed from @IsOptional() to required.
+   */
+  @ApiProperty({ example: '1980-08-22' })
   @IsDateString()
-  date_of_birth?: string;
+  @IsNotEmpty()
+  date_of_birth: string;
 
   @ApiPropertyOptional({
     example: 'MEX',
@@ -183,11 +191,14 @@ export class CreateUboDto {
   @IsString()
   tax_id?: string;
 
-  /** H03 — Bridge requires email for associated_persons. */
-  @ApiPropertyOptional()
-  @IsOptional()
+  /**
+   * FIX N-05 — Bridge AssociatedPerson schema marks email as REQUIRED.
+   * Changed from @IsOptional() to required.
+   */
+  @ApiProperty({ example: 'ana@empresa.com' })
   @IsEmail()
-  email?: string;
+  @IsNotEmpty()
+  email: string;
 
   @ApiPropertyOptional()
   @IsOptional()

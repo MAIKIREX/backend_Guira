@@ -388,7 +388,8 @@ export class BridgeCustomerService {
       type: 'business',
       business_legal_name: business.legal_name,         // H07: business_legal_name
       email: (business.email as string) ?? (profile.email as string),
-      tax_identification_number: business.tax_id, // Removed in identifying_information
+      // FIX D-06: tax_id is sent ONLY inside identifying_information[] below.
+      // Removed: tax_identification_number from root — Bridge v0 does not accept it here.
       registered_address: this.buildAddress({            // H06: registered_address
         address1: business.address1 as string,
         address2: business.address2 as string | undefined,
@@ -467,6 +468,32 @@ export class BridgeCustomerService {
     }
     if (business.high_risk_activities && (business.high_risk_activities as unknown[]).length > 0) {
       payload.high_risk_activities = business.high_risk_activities;
+      // FIX N-06: high_risk_activities_explanation is REQUIRED when high_risk_activities
+      // contains entries other than 'none_of_the_above'.
+      const hasRealRisk = (business.high_risk_activities as string[]).some(
+        (a) => a !== 'none_of_the_above',
+      );
+      if (hasRealRisk && business.high_risk_activities_explanation) {
+        payload.high_risk_activities_explanation = business.high_risk_activities_explanation;
+      }
+    }
+
+    // FIX N-04: acting_as_intermediary — required for high-risk customers
+    if (business.acting_as_intermediary !== undefined) {
+      payload.acting_as_intermediary = business.acting_as_intermediary;
+    }
+
+    if (business.operates_in_prohibited_countries !== undefined) {
+      payload.operates_in_prohibited_countries = business.operates_in_prohibited_countries;
+    }
+
+    // FIX N-03: expected_monthly_payments_usd for business is an integer (not string enum)
+    if (business.expected_monthly_payments_usd !== undefined && business.expected_monthly_payments_usd !== null) {
+      payload.expected_monthly_payments_usd = Number(business.expected_monthly_payments_usd);
+    }
+
+    if (business.source_of_funds_description) {
+      payload.source_of_funds_description = business.source_of_funds_description;
     }
 
     // P2: Physical address (operational location, different from registered)

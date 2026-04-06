@@ -8,9 +8,9 @@ import {
   IsEmail,
   Length,
   IsEnum,
+  IsNumber,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { SourceOfFundsEnum, AccountPurposeEnum } from './create-person.dto';
 
 /**
  * Bridge-accepted values for business_type.
@@ -24,6 +24,46 @@ export enum BusinessTypeEnum {
   PARTNERSHIP  = 'partnership',
   SOLE_PROP    = 'sole_prop',
   TRUST        = 'trust',
+}
+
+/**
+ * Bridge-accepted values for account_purpose (BUSINESS).
+ * FIX D-02/N-02: These are DIFFERENT from individual AccountPurposeEnum.
+ * Source: customer.md UpdateBusinessCustomerPayload.account_purpose enum.
+ */
+export enum BusinessAccountPurposeEnum {
+  CHARITABLE_DONATIONS                = 'charitable_donations',
+  ECOMMERCE_RETAIL_PAYMENTS           = 'ecommerce_retail_payments',
+  INVESTMENT_PURPOSES                 = 'investment_purposes',
+  OTHER                               = 'other',
+  PAYMENTS_TO_FRIENDS_FAMILY_ABROAD   = 'payments_to_friends_or_family_abroad',
+  PAYROLL                             = 'payroll',
+  PERSONAL_OR_LIVING_EXPENSES         = 'personal_or_living_expenses',
+  PROTECT_WEALTH                      = 'protect_wealth',
+  PURCHASE_GOODS_AND_SERVICES         = 'purchase_goods_and_services',
+  RECEIVE_PAYMENTS_GOODS_SERVICES     = 'receive_payments_for_goods_and_services',
+  TAX_OPTIMIZATION                    = 'tax_optimization',
+  THIRD_PARTY_MONEY_TRANSMISSION      = 'third_party_money_transmission',
+  TREASURY_MANAGEMENT                 = 'treasury_management',
+}
+
+/**
+ * Bridge-accepted values for source_of_funds (BUSINESS).
+ * FIX D-01: These are DIFFERENT from individual SourceOfFundsEnum.
+ * Source: customer.md UpdateBusinessCustomerPayload.source_of_funds enum.
+ */
+export enum BusinessSourceOfFundsEnum {
+  BUSINESS_LOANS          = 'business_loans',
+  GRANTS                  = 'grants',
+  INTER_COMPANY_FUNDS     = 'inter_company_funds',
+  INVESTMENT_PROCEEDS     = 'investment_proceeds',
+  LEGAL_SETTLEMENT        = 'legal_settlement',
+  OWNERS_CAPITAL          = 'owners_capital',
+  PENSION_RETIREMENT      = 'pension_retirement',
+  SALE_OF_ASSETS          = 'sale_of_assets',
+  SALES_GOODS_SERVICES    = 'sales_of_goods_and_services',
+  THIRD_PARTY_FUNDS       = 'third_party_funds',
+  TREASURY_RESERVES       = 'treasury_reserves',
 }
 
 export class CreateBusinessDto {
@@ -136,29 +176,36 @@ export class CreateBusinessDto {
   @IsString()
   business_description?: string;
 
-  @ApiPropertyOptional({ example: 'fintech' })
+  @ApiPropertyOptional({ example: ['fintech'] })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   business_industry?: string[];
 
-  /** H10 — enforced Bridge enum */
-  @ApiPropertyOptional({ enum: AccountPurposeEnum })
+  @ApiPropertyOptional({ example: 50000 })
   @IsOptional()
-  @IsEnum(AccountPurposeEnum)
-  account_purpose?: AccountPurposeEnum;
+  @IsNumber()
+  expected_monthly_payments_usd?: number;
 
-  /** H10 — enforced Bridge enum */
-  @ApiPropertyOptional({ enum: SourceOfFundsEnum })
+  @ApiPropertyOptional({ enum: BusinessAccountPurposeEnum })
   @IsOptional()
-  @IsEnum(SourceOfFundsEnum)
-  source_of_funds?: SourceOfFundsEnum;
+  @IsEnum(BusinessAccountPurposeEnum)
+  account_purpose?: BusinessAccountPurposeEnum;
 
-  /** Required when account_purpose = 'other' */
+  @ApiPropertyOptional({ enum: BusinessSourceOfFundsEnum })
+  @IsOptional()
+  @IsEnum(BusinessSourceOfFundsEnum)
+  source_of_funds?: BusinessSourceOfFundsEnum;
+
   @ApiPropertyOptional({ example: 'Custom purpose description' })
   @IsOptional()
   @IsString()
   account_purpose_other?: string;
+
+  @ApiPropertyOptional({ example: 'Description of funds' })
+  @IsOptional()
+  @IsString()
+  source_of_funds_description?: string;
 
   @ApiPropertyOptional({ example: false })
   @IsOptional()
@@ -170,18 +217,28 @@ export class CreateBusinessDto {
   @IsBoolean()
   uses_bridge_for_money_services?: boolean;
 
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  acting_as_intermediary?: boolean;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  operates_in_prohibited_countries?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   compliance_explanation?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  high_risk_activities_explanation?: string;
+
   // ── P1: High-risk / Enhanced Due Diligence ──────────────────────────
 
-  /**
-   * P1 — Bridge high-risk field.
-   * Estimated annual revenue of the business.
-   * Updated to match Bridge API OpenAPI spec exact enum values.
-   */
   @ApiPropertyOptional({
     enum: ['0_99999', '100000_999999', '1000000_9999999', '10000000_49999999', '50000000_249999999', '250000000_plus'],
   })
@@ -189,11 +246,6 @@ export class CreateBusinessDto {
   @IsEnum(['0_99999', '100000_999999', '1000000_9999999', '10000000_49999999', '50000000_249999999', '250000000_plus'])
   estimated_annual_revenue_usd?: '0_99999' | '100000_999999' | '1000000_9999999' | '10000000_49999999' | '50000000_249999999' | '250000000_plus';
 
-  /**
-   * P1 — Bridge high-risk field.
-   * Array of activity codes from the Bridge high_risk_activities enum.
-   * Updated to match Bridge API OpenAPI spec exact enum values.
-   */
   @ApiPropertyOptional({ example: ['money_services', 'gambling'] })
   @IsOptional()
   @IsArray()
@@ -210,10 +262,6 @@ export class CreateBusinessDto {
 
   // ── P2: Physical / Operational Address ─────────────────────────────
 
-  /**
-   * P2 — Operational address if different from the registered legal address.
-   * Bridge field: physical_address. Sent only when physical_city + physical_country are present.
-   */
   @ApiPropertyOptional({ example: 'Calle Industria 55' })
   @IsOptional()
   @IsString()
