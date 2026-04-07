@@ -936,19 +936,29 @@ export class BridgeCustomerService {
         .insert({
           user_id: userId,
           label: 'Principal',
-          currency: 'usd',
+          currency: 'USD',   // normalizado a mayúsculas — igual que initializeWalletsForUser
         })
         .select('id')
         .single();
 
       if (wallet) {
-        await this.supabase.from('balances').insert({
-          user_id: userId,
-          currency: 'usd',
-          amount: 0,
-          available_amount: 0,
-          reserved_amount: 0,
-        });
+        // Verificar si ya existe balance USD antes de insertar (evita duplicado)
+        const { data: existingBalance } = await this.supabase
+          .from('balances')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('currency', 'USD')
+          .maybeSingle();
+
+        if (!existingBalance) {
+          await this.supabase.from('balances').insert({
+            user_id: userId,
+            currency: 'USD',
+            amount: 0,
+            available_amount: 0,
+            reserved_amount: 0,
+          });
+        }
       }
     } catch (err) {
       this.logger.warn(`Error inicializando wallet para ${userId}: ${err}`);

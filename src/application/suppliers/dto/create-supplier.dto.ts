@@ -5,8 +5,13 @@ import {
   IsEmail,
   IsObject,
   MaxLength,
+  MinLength,
+  IsEnum,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { BeneficiaryAddressDto } from '../../bridge/dto/create-virtual-account.dto';
 
 export class CreateSupplierDto {
   @ApiProperty({ example: 'Acme Logistics S.A.' })
@@ -25,28 +30,131 @@ export class CreateSupplierDto {
   @IsNotEmpty()
   currency: string;
 
-  @ApiProperty({ example: 'spei', enum: ['ach', 'wire', 'sepa', 'spei', 'pix'] })
+  @ApiProperty({ example: 'spei', enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'crypto'] })
   @IsString()
   @IsNotEmpty()
   payment_rail: string;
-
-  @ApiProperty({
-    example: { clabe: '012345678901234567', bank_name: 'BBVA México' },
-    description: 'Detalles bancarios del proveedor (CLABE, IBAN, routing, etc.)',
-  })
-  @IsObject()
-  bank_details: Record<string, unknown>;
-
-  @ApiPropertyOptional({ example: 'pagos@acme.com.mx' })
-  @IsOptional()
-  @IsEmail()
-  contact_email?: string;
 
   @ApiPropertyOptional({ example: 'Proveedor principal de logística' })
   @IsOptional()
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @ApiPropertyOptional({ example: 'pagos@acme.com.mx' })
+  @IsOptional()
+  @IsEmail()
+  contact_email?: string;
+
+  @ApiPropertyOptional({ example: 'BBVA México' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  bank_name?: string;
+
+  // ── ACH / Wire ──
+  @ApiPropertyOptional({ example: '1210002481111' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  account_number?: string;
+
+  @ApiPropertyOptional({ example: '021000021' })
+  @IsOptional()
+  @IsString()
+  @MinLength(9)
+  @MaxLength(9)
+  routing_number?: string;
+
+  @ApiPropertyOptional({ enum: ['checking', 'savings'] })
+  @IsOptional()
+  @IsEnum(['checking', 'savings'])
+  checking_or_savings?: 'checking' | 'savings';
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BeneficiaryAddressDto)
+  address?: BeneficiaryAddressDto;
+
+  // ── SEPA / IBAN ──
+  @ApiPropertyOptional({ example: 'DE89370400440532013000' })
+  @IsOptional()
+  @IsString()
+  iban?: string;
+
+  @ApiPropertyOptional({ example: 'COBADEFFXXX' })
+  @IsOptional()
+  @IsString()
+  swift_bic?: string;
+
+  @ApiPropertyOptional({ example: 'NLD' })
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(3)
+  iban_country?: string;
+
+  @ApiPropertyOptional({ enum: ['individual', 'business'] })
+  @IsOptional()
+  @IsEnum(['individual', 'business'])
+  account_owner_type?: 'individual' | 'business';
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  first_name?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  last_name?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  business_name?: string;
+
+  // ── SPEI (México) ──
+  @ApiPropertyOptional({ example: '014180655500000007' })
+  @IsOptional()
+  @IsString()
+  @MinLength(18)
+  @MaxLength(18)
+  clabe?: string;
+
+  // ── PIX (Brasil) ──
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  pix_key?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  br_code?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  document_number?: string;
+
+  // ── Bre-B (Colombia) ──
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  bre_b_key?: string;
+
+  // ── Crypto Wallet ──
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  wallet_address?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  wallet_network?: string;
 }
 
 export class UpdateSupplierDto {
@@ -73,16 +181,113 @@ export class UpdateSupplierDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsObject()
-  bank_details?: Record<string, unknown>;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsEmail()
+  @IsString()
   contact_email?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  bank_name?: string;
+
+  // ACH / Wire
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  account_number?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  routing_number?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsEnum(['checking', 'savings'])
+  checking_or_savings?: 'checking' | 'savings';
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BeneficiaryAddressDto)
+  address?: BeneficiaryAddressDto;
+
+  // SEPA
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  iban?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  swift_bic?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  iban_country?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsEnum(['individual', 'business'])
+  account_owner_type?: 'individual' | 'business';
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  first_name?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  last_name?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  business_name?: string;
+
+  // SPEI
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  clabe?: string;
+
+  // PIX
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  pix_key?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  br_code?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  document_number?: string;
+
+  // Bre-B
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  bre_b_key?: string;
+
+  // Crypto
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  wallet_address?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  wallet_network?: string;
 }

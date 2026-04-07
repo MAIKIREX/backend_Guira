@@ -1,6 +1,4 @@
 import {
-  IsString,
-  IsNotEmpty,
   IsOptional,
   IsEnum,
   IsUUID,
@@ -27,13 +25,20 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  * - brl → br_code (PIX)
  * - gbp → sort_code + account_number (FPS, Beta)
  */
-const SUPPORTED_SOURCE_CURRENCIES = ['usd', 'eur', 'mxn', 'brl', 'gbp'] as const;
+const SUPPORTED_SOURCE_CURRENCIES = ['usd', 'eur', 'mxn', 'brl', 'gbp', 'cop'] as const;
 
 /**
  * Redes blockchain de destino soportadas por Bridge.
  */
 const SUPPORTED_DESTINATION_RAILS = [
   'ethereum', 'polygon', 'solana', 'base', 'arbitrum', 'optimism', 'stellar',
+] as const;
+
+/**
+ * Monedas crypto de destino soportadas por Bridge.
+ */
+const SUPPORTED_DESTINATION_CURRENCIES = [
+  'usdc', 'usdt', 'usdb', 'dai', 'pyusd', 'eurc',
 ] as const;
 
 export class CreateVirtualAccountDto {
@@ -47,9 +52,14 @@ export class CreateVirtualAccountDto {
   })
   source_currency: string;
 
-  @ApiProperty({ example: 'usdc', description: 'Moneda destino de conversión (ej: usdc, usdt)' })
-  @IsString()
-  @IsNotEmpty()
+  @ApiProperty({
+    example: 'usdc',
+    enum: SUPPORTED_DESTINATION_CURRENCIES,
+    description: 'Moneda crypto destino de conversión. Bridge soporta: usdc, usdt, usdb, dai, pyusd, eurc',
+  })
+  @IsEnum(SUPPORTED_DESTINATION_CURRENCIES, {
+    message: `destination_currency debe ser una de: ${SUPPORTED_DESTINATION_CURRENCIES.join(', ')}`,
+  })
   destination_currency: string;
 
   @ApiProperty({

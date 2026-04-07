@@ -69,10 +69,6 @@ export class WalletsController {
   }
 }
 
-// ─────────────────────────────────────────────────
-//  Rutas admin: /admin/wallets/...
-// ─────────────────────────────────────────────────
-
 @ApiTags('Admin — Wallets')
 @ApiBearerAuth('supabase-jwt')
 @Controller('admin/wallets')
@@ -96,5 +92,21 @@ export class AdminWalletsController {
       dto.reason,
       actor.id,
     );
+  }
+
+  @Post('initialize/:userId')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({
+    summary: 'Re-inicializar wallets de un usuario aprobado',
+    description:
+      'Útil cuando el webhook de aprobación KYC/KYB falló y las wallets en Bridge no se crearon. ' +
+      'Requiere que el usuario tenga bridge_customer_id en su perfil.',
+  })
+  @ApiResponse({ status: 200, description: 'Wallets inicializadas correctamente' })
+  @ApiResponse({ status: 404, description: 'Usuario o bridge_customer_id no encontrado' })
+  initializeWallets(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+  ) {
+    return this.walletsService.initializeClientWallets(userId);
   }
 }

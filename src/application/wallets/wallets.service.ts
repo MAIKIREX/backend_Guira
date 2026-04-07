@@ -24,9 +24,9 @@ export class WalletsService {
   //  Endpoints de usuario
   // ───────────────────────────────────────────────
 
-  /** Lista wallets activas del usuario. */
+  /** Lista wallets activas del usuario junto con su balance. */
   async findAllByUser(userId: string) {
-    const { data, error } = await this.supabase
+    const { data: wallets, error } = await this.supabase
       .from('wallets')
       .select('id, currency, address, network, provider_key, label, is_active, created_at')
       .eq('user_id', userId)
@@ -34,7 +34,45 @@ export class WalletsService {
       .order('created_at', { ascending: true });
 
     if (error) throw new BadRequestException(error.message);
-    return data ?? [];
+    if (!wallets || wallets.length === 0) return [];
+
+    // Obtener balances para enriquecer cada wallet
+    const { data: balances } = await this.supabase
+      .from('balances')
+      .select('currency, amount, available_amount, reserved_amount')
+      .eq('user_id', userId);
+
+    const balanceMap = new Map<string, { amount: number; available_amount: number; reserved_amount: number }>(
+      (balances ?? []).map((b) => [
+        b.currency?.toUpperCase(),
+        {
+          amount: parseFloat(b.amount ?? '0') || 0,
+          available_amount: parseFloat(b.available_amount ?? '0') || 0,
+          reserved_amount: parseFloat(b.reserved_amount ?? '0') || 0,
+        },
+      ]),
+    );
+
+    return wallets.map((w) => {
+      const bal = balanceMap.get(w.currency?.toUpperCase()) ?? {
+        amount: 0,
+        available_amount: 0,
+        reserved_amount: 0,
+      };
+      return {
+        id: w.id,
+        currency: w.currency,
+        address: w.address,
+        network: w.network,
+        provider: w.provider_key ?? 'bridge',
+        label: w.label,
+        is_active: w.is_active,
+        created_at: w.created_at,
+        balance: bal.amount,
+        available_balance: bal.available_amount,
+        reserved_balance: bal.reserved_amount,
+      };
+    });
   }
 
   /** Obtiene wallet específica verificando propiedad. */
@@ -100,15 +138,34 @@ export class WalletsService {
 
   /**
    * Inicializa las wallets de un cliente aprobado.
+   * Lee el bridge_customer_id del perfil del usuario si no se provee.
    * Lee la configuración de wallets desde app_settings.
    * Crea wallets en Bridge API y guarda los datos en la DB.
    */
   async initializeClientWallets(
     userId: string,
-    bridgeCustomerId: string,
-  ): Promise<void> {
+    bridgeCustomerId?: string,
+  ): Promise<{ initialized: number; message: string }> {
+    // Si no se provee, leer del perfil
+    let customerId = bridgeCustomerId ?? null;
+    if (!customerId) {
+      const { data: profile } = await this.supabase
+        .from('profiles')
+        .select('bridge_customer_id')
+        .eq('id', userId)
+        .single();
+      customerId = profile?.bridge_customer_id ?? null;
+    }
+
+    if (!customerId) {
+      throw new NotFoundException(
+        `El usuario ${userId} no tiene bridge_customer_id — no se pueden crear wallets en Bridge.`,
+      );
+    }
+
     // Leer configuración desde app_settings
     const walletConfigs = await this.getWalletConfigs();
+    let initialized = 0;
 
     for (const wc of walletConfigs) {
       // Verificar duplicados
@@ -125,7 +182,7 @@ export class WalletsService {
 
       // Crear en Bridge API
       const bridgeWallet = await this.createBridgeWallet(
-        bridgeCustomerId,
+        customerId,
         wc.currency,
         wc.network,
       );
@@ -141,6 +198,8 @@ export class WalletsService {
         label: `${wc.currency.toUpperCase()} (${wc.network})`,
         is_active: true,
       });
+
+      initialized++;
     }
 
     // Inicializar balances
@@ -150,8 +209,13 @@ export class WalletsService {
     );
 
     this.logger.log(
-      `Wallets inicializados para usuario ${userId}: ${walletConfigs.length} configuraciones`,
+      `Wallets inicializados para usuario ${userId}: ${initialized} nuevas de ${walletConfigs.length} configuraciones`,
     );
+
+    return {
+      initialized,
+      message: `${initialized} wallet(s) inicializadas correctamente para el usuario ${userId}.`,
+    };
   }
 
   /**

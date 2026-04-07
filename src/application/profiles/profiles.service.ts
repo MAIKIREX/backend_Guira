@@ -37,7 +37,7 @@ export class ProfilesService {
   }
 
   /**
-   * Actualiza campos editables del perfil del usuario (full_name, phone, avatar_url).
+   * Actualiza el avatar visual del perfil del usuario (avatar_url).
    */
   async update(
     userId: string,
@@ -45,7 +45,7 @@ export class ProfilesService {
   ): Promise<ProfileResponseDto> {
     const { data, error } = await this.supabase
       .from('profiles')
-      .update({ ...dto, updated_at: new Date().toISOString() })
+      .update({ avatar_url: dto.avatar_url, updated_at: new Date().toISOString() })
       .eq('id', userId)
       .select()
       .single();
