@@ -152,6 +152,10 @@ export class BridgeService {
         br_code: (sdi.br_code as string) ?? null,
         sort_code: (sdi.sort_code as string) ?? null,
         payment_rails: (sdi.payment_rails as string[]) ?? null,
+        // Titular de la cuenta: presente en EUR (IBAN), MXN (CLABE), BRL (PIX), GBP (FPS) y COP (Bre-B)
+        account_holder_name: (sdi.account_holder_name as string) ?? null,
+        // Mensaje de depósito: específico de COP/Bre-B — el cliente DEBE incluirlo en la transferencia
+        deposit_message: (sdi.deposit_message as string) ?? null,
         // Fee
         developer_fee_percent: devFeePercent ? parseFloat(devFeePercent) : null,
         status: 'active',

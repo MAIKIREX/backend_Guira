@@ -26,14 +26,26 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  * - mxn → CLABE (SPEI)
  * - brl → br_code (PIX)
  * - gbp → sort_code + account_number (FPS, Beta)
+ * - cop → bre_b_key + deposit_message (Bre-B)
  */
 const SUPPORTED_SOURCE_CURRENCIES = ['usd', 'eur', 'mxn', 'brl', 'gbp', 'cop'] as const;
 
 /**
- * Redes blockchain de destino soportadas por Bridge.
+ * Redes blockchain de destino soportadas por Bridge (OfframpChain).
+ * Ref: https://apidocs.bridge.xyz → CreateVirtualAccount schema
  */
 const SUPPORTED_DESTINATION_RAILS = [
-  'ethereum', 'polygon', 'solana', 'base', 'arbitrum', 'optimism', 'stellar',
+  'arbitrum',
+  'avalanche_c_chain',
+  'base',
+  'celo',
+  'ethereum',
+  'optimism',
+  'polygon',
+  'solana',
+  'stellar',
+  'tempo',
+  'tron',
 ] as const;
 
 /**
@@ -67,7 +79,9 @@ export class CreateVirtualAccountDto {
   @ApiProperty({
     example: 'ethereum',
     enum: SUPPORTED_DESTINATION_RAILS,
-    description: 'Red blockchain de destino. Bridge soporta: ethereum, polygon, solana, base, arbitrum, optimism, stellar',
+    description:
+      'Red blockchain de destino (Bridge OfframpChain). Soporta: ' +
+      'arbitrum, avalanche_c_chain, base, celo, ethereum, optimism, polygon, solana, stellar, tempo, tron',
   })
   @IsEnum(SUPPORTED_DESTINATION_RAILS, {
     message: `destination_payment_rail debe ser una de: ${SUPPORTED_DESTINATION_RAILS.join(', ')}`,
