@@ -253,6 +253,25 @@ export class BridgeService {
       bridgePayload.bank_name = dto.bank_name;
     }
 
+    // Helper inline: convierte código de país alpha-2 → alpha-3 (ISO 3166-1)
+    // Bridge requiere alpha-3 en todos los campos "country" de direcciones.
+    const toAlpha3 = (code: string | undefined): string | undefined => {
+      if (!code) return undefined;
+      if (code.length === 3) return code.toUpperCase(); // ya está en alpha-3
+      const map: Record<string, string> = {
+        US: 'USA', MX: 'MEX', BR: 'BRA', CO: 'COL', AR: 'ARG', CL: 'CHL',
+        PE: 'PER', EC: 'ECU', BO: 'BOL', PY: 'PRY', UY: 'URY', VE: 'VEN',
+        DE: 'DEU', FR: 'FRA', ES: 'ESP', IT: 'ITA', NL: 'NLD', GB: 'GBR',
+        PT: 'PRT', BE: 'BEL', AT: 'AUT', CH: 'CHE', SE: 'SWE', NO: 'NOR',
+        DK: 'DNK', FI: 'FIN', PL: 'POL', IE: 'IRL', CZ: 'CZE', HU: 'HUN',
+        RO: 'ROU', SK: 'SVK', HR: 'HRV', BG: 'BGR', LT: 'LTU', LV: 'LVA',
+        EE: 'EST', SI: 'SVN', LU: 'LUX', MT: 'MLT', CY: 'CYP', GR: 'GRC',
+        CN: 'CHN', JP: 'JPN', KR: 'KOR', IN: 'IND', SG: 'SGP', AU: 'AUS',
+        NZ: 'NZL', CA: 'CAN', ZA: 'ZAF', NG: 'NGA', KE: 'KEN', GH: 'GHA',
+      };
+      return map[code.toUpperCase()] ?? code.toUpperCase();
+    };
+
     // ── Campos específicos según payment rail ──
     if (dto.payment_rail === 'ach' || dto.payment_rail === 'wire') {
       // US: datos dentro del objeto `account`
@@ -274,7 +293,7 @@ export class BridgeService {
           ...(dto.address.postal_code
             ? { postal_code: dto.address.postal_code }
             : {}),
-          country: dto.address.country,
+          country: toAlpha3(dto.address.country), // ← FIX: alpha-2 → alpha-3
         };
       }
     } else if (dto.payment_rail === 'sepa') {
@@ -308,7 +327,7 @@ export class BridgeService {
           ...(dto.address.postal_code
             ? { postal_code: dto.address.postal_code }
             : {}),
-          country: dto.address.country,
+          country: toAlpha3(dto.address.country), // ← FIX: alpha-2 → alpha-3
         };
       }
     } else if (dto.payment_rail === 'spei') {
@@ -340,7 +359,7 @@ export class BridgeService {
           ...(dto.address.postal_code
             ? { postal_code: dto.address.postal_code }
             : {}),
-          country: dto.address.country,
+          country: toAlpha3(dto.address.country), // ← FIX: alpha-2 → alpha-3
         };
       }
     } else if (dto.payment_rail === 'pix') {
@@ -384,7 +403,7 @@ export class BridgeService {
           ...(dto.address.postal_code
             ? { postal_code: dto.address.postal_code }
             : {}),
-          country: dto.address.country,
+          country: toAlpha3(dto.address.country), // ← FIX: alpha-2 → alpha-3
         };
       }
     } else if (dto.payment_rail === 'bre_b') {

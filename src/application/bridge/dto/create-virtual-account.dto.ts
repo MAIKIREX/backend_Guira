@@ -3,6 +3,8 @@ import {
   IsEnum,
   IsUUID,
   IsNumber,
+  IsString,
+  IsNotEmpty,
   Min,
   Max,
   MaxLength,
