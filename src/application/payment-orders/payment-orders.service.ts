@@ -436,17 +436,29 @@ export class PaymentOrdersService {
     userId: string,
     dto: CreateInterbankOrderDto,
   ) {
-    // Verificar VA existe
-    if (dto.virtual_account_id) {
+    // Verificar o Inferir VA
+    let vaId = dto.virtual_account_id;
+    if (!vaId) {
+      const { data: va } = await this.supabase
+        .from('bridge_virtual_accounts')
+        .select('id')
+        .eq('user_id', userId)
+        .single();
+      
+      if (!va) {
+        throw new NotFoundException('Virtual Account no encontrada para el usuario');
+      }
+      vaId = va.id;
+    } else {
       const { data: va } = await this.supabase
         .from('bridge_virtual_accounts')
         .select('id, bridge_virtual_account_id')
-        .eq('id', dto.virtual_account_id)
+        .eq('id', vaId)
         .eq('user_id', userId)
         .single();
 
       if (!va)
-        throw new NotFoundException('Virtual Account no encontrada');
+        throw new NotFoundException('Virtual Account provista no encontrada');
     }
 
     const wallet = await this.getUserWallet(userId);

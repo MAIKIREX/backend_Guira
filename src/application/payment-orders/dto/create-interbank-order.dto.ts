@@ -105,6 +105,7 @@ export class CreateInterbankOrderDto {
   // ── world_to_wallet: VA existente ──
   @ApiPropertyOptional()
   @ValidateIf((o) => o.flow_type === 'world_to_wallet')
+  @IsOptional()
   @IsUUID()
   virtual_account_id?: string;
 
