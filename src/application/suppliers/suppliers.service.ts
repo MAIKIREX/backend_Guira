@@ -58,6 +58,7 @@ export class SuppliersService {
 
     const bank_details = isFiat
       ? {
+          bank_name: dto.bank_name,
           account_number: dto.account_number,
           routing_number: dto.routing_number,
           checking_or_savings: dto.checking_or_savings,
@@ -67,6 +68,8 @@ export class SuppliersService {
           pix_key: dto.pix_key,
           br_code: dto.br_code,
           bre_b_key: dto.bre_b_key,
+          bank_address: dto.address?.street_line_1,
+          bank_country: dto.country,
         }
       : {
           wallet_address: dto.wallet_address,
@@ -104,27 +107,42 @@ export class SuppliersService {
   async findAll(userId: string) {
     const { data, error } = await this.supabase
       .from('suppliers')
-      .select('*')
+      .select('*, bridge_external_accounts ( bank_name, country )')
       .eq('user_id', userId)
       .eq('is_active', true)
       .order('name');
 
     if (error) throw new BadRequestException(error.message);
-    return data ?? [];
+    return (data ?? []).map((supplier) => this.mapBridgeDetailsToBankDetails(supplier));
   }
 
   /** Detalle de un proveedor. */
   async findOne(supplierId: string, userId: string) {
     const { data, error } = await this.supabase
       .from('suppliers')
-      .select('*')
+      .select('*, bridge_external_accounts ( bank_name, country )')
       .eq('id', supplierId)
       .eq('user_id', userId)
       .single();
 
     if (error || !data)
       throw new NotFoundException('Proveedor no encontrado');
-    return data;
+    return this.mapBridgeDetailsToBankDetails(data);
+  }
+
+  private mapBridgeDetailsToBankDetails(supplier: any) {
+    if (supplier.bridge_external_accounts) {
+      if (!supplier.bank_details) supplier.bank_details = {};
+      const { bank_name, country } = supplier.bridge_external_accounts;
+      if (bank_name && !supplier.bank_details.bank_name) {
+        supplier.bank_details.bank_name = bank_name;
+      }
+      if (country && !supplier.bank_details.bank_country) {
+        supplier.bank_details.bank_country = country;
+      }
+    }
+    delete supplier.bridge_external_accounts;
+    return supplier;
   }
 
   /** Actualiza un proveedor. */
