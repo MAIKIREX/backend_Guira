@@ -65,6 +65,7 @@ export class PsavService {
       type: 'bank',
       bank_name: account.bank_name,
       account_number: account.account_number,
+      routing_number: account.routing_number,
       account_holder: account.account_holder,
       qr_url: account.qr_url,
       currency: account.currency,
@@ -91,6 +92,7 @@ export class PsavService {
     currency: string;
     bank_name?: string;
     account_number?: string;
+    routing_number?: string;
     account_holder?: string;
     qr_url?: string;
     crypto_address?: string;
@@ -116,6 +118,7 @@ export class PsavService {
       name: string;
       bank_name: string;
       account_number: string;
+      routing_number: string;
       account_holder: string;
       qr_url: string;
       crypto_address: string;
