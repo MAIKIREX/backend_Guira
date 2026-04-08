@@ -163,6 +163,18 @@ export class PaymentOrdersService {
       throw new NotFoundException('Cuenta externa de destino no encontrada');
     }
 
+    // Obtener el número completo del JSON bank_details en la tabla 'suppliers'
+    const { data: supplier } = await this.supabase
+      .from('suppliers')
+      .select('bank_details')
+      .eq('bridge_external_account_id', dto.external_account_id)
+      .single();
+
+    const fullAccountNumber = supplier?.bank_details?.account_number 
+      ?? extAccount.account_last_4 
+      ?? extAccount.iban 
+      ?? extAccount.swift_bic;
+
     // Obtener cuenta PSAV para depósito en BOB
     const psavAccount = await this.psavService.getDepositAccount(
       'bank_bo',
@@ -199,7 +211,7 @@ export class PaymentOrdersService {
         external_account_id: dto.external_account_id,
         destination_bank_name: extAccount.bank_name,
         destination_account_holder: extAccount.account_name ?? extAccount.first_name ?? extAccount.business_name,
-        destination_account_number: extAccount.account_last_4 ?? extAccount.iban ?? extAccount.swift_bic,
+        destination_account_number: fullAccountNumber,
         exchange_rate_applied: rateData.effective_rate,
         amount_destination: parseFloat(
           (net_amount * rateData.effective_rate).toFixed(2),
