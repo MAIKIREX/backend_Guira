@@ -111,6 +111,11 @@ export class CreateInterbankOrderDto {
   virtual_account_id?: string;
 
   // ── Campos comunes ──
+  @ApiPropertyOptional({ description: 'ID del proveedor seleccionado por el usuario' })
+  @IsOptional()
+  @IsUUID()
+  supplier_id?: string;
+
   @ApiProperty({ example: 'Pago a proveedor — Factura #2026-001' })
   @IsString()
   @IsNotEmpty()
