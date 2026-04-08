@@ -37,8 +37,9 @@ export class CreateInterbankOrderDto {
 
   @ApiPropertyOptional({ example: 'usd' })
   @ValidateIf((o) =>
-    ['bolivia_to_world', 'world_to_bolivia'].includes(o.flow_type),
+    ['bolivia_to_world', 'world_to_bolivia', 'wallet_to_wallet', 'bolivia_to_wallet'].includes(o.flow_type),
   )
+  @IsOptional()
   @IsString()
   destination_currency?: string;
 

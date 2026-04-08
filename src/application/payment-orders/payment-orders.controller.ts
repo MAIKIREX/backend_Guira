@@ -219,7 +219,7 @@ export class AdminPaymentOrdersController {
   }
 
   @Post(':id/complete')
-  @Roles('admin', 'super_admin')
+  @Roles('staff', 'admin', 'super_admin')
   @ApiOperation({ summary: 'Completar orden (sent → completed)' })
   completeOrder(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -230,7 +230,7 @@ export class AdminPaymentOrdersController {
   }
 
   @Post(':id/fail')
-  @Roles('admin', 'super_admin')
+  @Roles('staff', 'admin', 'super_admin')
   @ApiOperation({ summary: 'Fallar una orden (cualquier estado → failed)' })
   failOrder(
     @Param('id', new ParseUUIDPipe()) id: string,

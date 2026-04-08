@@ -250,7 +250,7 @@ export class PaymentOrdersService {
         destination_type: 'crypto_address',
         destination_address: dto.destination_address,
         destination_network: dto.destination_network,
-        destination_currency: dto.source_currency?.toUpperCase() ?? 'USDT',
+        destination_currency: dto.destination_currency?.toUpperCase() ?? dto.source_currency?.toUpperCase() ?? 'USDT',
         business_purpose: dto.business_purpose,
         supporting_document_url: dto.supporting_document_url,
         notes: dto.notes,
@@ -352,7 +352,7 @@ export class PaymentOrdersService {
         destination_type: 'crypto_address',
         destination_address: dto.destination_address,
         destination_network: dto.destination_network,
-        destination_currency: 'USDC',
+        destination_currency: dto.destination_currency?.toUpperCase() ?? 'USDC',
         exchange_rate_applied: rateData.effective_rate,
         amount_destination: parseFloat(
           (net_amount * rateData.effective_rate).toFixed(2),
@@ -382,6 +382,14 @@ export class PaymentOrdersService {
     userId: string,
     dto: CreateInterbankOrderDto,
   ) {
+    // Obtener cuenta PSAV para depósito en USD (el usuario deposita USD)
+    const psavAccount = await this.psavService.getDepositAccount(
+      'bank_us',
+      'USD',
+    );
+    const depositInstructions =
+      this.psavService.formatDepositInstructions(psavAccount);
+
     const { fee_amount, net_amount } = await this.feesService.calculateFee(
       userId,
       'interbank_bo_in',
@@ -412,6 +420,7 @@ export class PaymentOrdersService {
         amount_destination: parseFloat(
           (net_amount * rateData.effective_rate).toFixed(2),
         ),
+        psav_deposit_instructions: depositInstructions,
         business_purpose: dto.business_purpose,
         supporting_document_url: dto.supporting_document_url,
         notes: dto.notes,
