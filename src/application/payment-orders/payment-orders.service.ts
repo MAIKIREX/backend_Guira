@@ -280,18 +280,32 @@ export class PaymentOrdersService {
 
     // Ejecutar transfer vía Bridge API
     try {
+      // Obtener bridge_customer_id del usuario (requerido por Bridge)
+      const { data: profile } = await this.supabase
+        .from('profiles')
+        .select('bridge_customer_id')
+        .eq('id', userId)
+        .single();
+
+      if (!profile?.bridge_customer_id) {
+        throw new Error(
+          'El usuario no tiene bridge_customer_id asignado. Debe completar el KYC.',
+        );
+      }
+
       const idempotencyKey = `po_w2w_${order.id}`;
       const bridgeResult = await this.bridgeApi.post<Record<string, unknown>>(
         '/v0/transfers',
         {
+          on_behalf_of: profile.bridge_customer_id,
           source: {
-            payment_rail: dto.source_currency?.toLowerCase() ?? 'usdc',
+            payment_rail: dto.source_network?.toLowerCase() ?? 'polygon',
             currency: dto.source_currency?.toLowerCase() ?? 'usdc',
             from_address: dto.source_address,
           },
           destination: {
-            payment_rail: dto.source_currency?.toLowerCase() ?? 'usdc',
-            currency: dto.source_currency?.toLowerCase() ?? 'usdc',
+            payment_rail: dto.destination_network?.toLowerCase() ?? 'polygon',
+            currency: dto.destination_currency?.toLowerCase() ?? 'usdc',
             to_address: dto.destination_address,
           },
           amount: net_amount.toString(),
@@ -300,16 +314,20 @@ export class PaymentOrdersService {
       );
 
       const transferId = (bridgeResult?.id ?? null) as string | null;
+      const sourceDepositInstructions = bridgeResult?.source_deposit_instructions ?? null;
+
       await this.supabase
         .from('payment_orders')
         .update({
-          status: 'processing',
+          status: 'waiting_deposit',
           bridge_transfer_id: transferId,
+          bridge_source_deposit_instructions: sourceDepositInstructions,
         })
         .eq('id', order.id);
 
-      order.status = 'processing';
+      order.status = 'waiting_deposit';
       order.bridge_transfer_id = transferId;
+      order.bridge_source_deposit_instructions = sourceDepositInstructions;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.supabase
