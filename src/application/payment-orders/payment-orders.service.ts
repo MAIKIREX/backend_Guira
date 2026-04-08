@@ -484,10 +484,11 @@ export class PaymentOrdersService {
   ) {
     // Verificar o Inferir VA
     let vaId = dto.virtual_account_id;
+    let vaData: any;
     if (!vaId) {
       const { data: va } = await this.supabase
         .from('bridge_virtual_accounts')
-        .select('id')
+        .select('*')
         .eq('user_id', userId)
         .single();
       
@@ -495,16 +496,18 @@ export class PaymentOrdersService {
         throw new NotFoundException('Virtual Account no encontrada para el usuario');
       }
       vaId = va.id;
+      vaData = va;
     } else {
       const { data: va } = await this.supabase
         .from('bridge_virtual_accounts')
-        .select('id, bridge_virtual_account_id')
+        .select('*')
         .eq('id', vaId)
         .eq('user_id', userId)
         .single();
 
       if (!va)
         throw new NotFoundException('Virtual Account provista no encontrada');
+      vaData = va;
     }
 
     const wallet = await this.getUserWallet(userId);
@@ -515,6 +518,15 @@ export class PaymentOrdersService {
       'bridge',
       dto.amount,
     );
+
+    const depositInstructions = {
+      type: 'bank',
+      label: 'Tu Virtual Account',
+      bank_name: vaData.bank_name || 'Banco de VA',
+      account_holder: vaData.account_holder_name || vaData.beneficiary_name || 'Guira',
+      account_number: `ACC: ${vaData.account_number || ''} | Routing: ${vaData.routing_number || ''}`,
+      currency: vaData.destination_currency || 'USD',
+    };
 
     const { data: order, error } = await this.supabase
       .from('payment_orders')
@@ -534,6 +546,7 @@ export class PaymentOrdersService {
         business_purpose: dto.business_purpose,
         supporting_document_url: dto.supporting_document_url,
         notes: dto.notes,
+        psav_deposit_instructions: depositInstructions,
         status: 'waiting_deposit',
       })
       .select()
