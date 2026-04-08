@@ -154,7 +154,7 @@ export class PaymentOrdersService {
     // Validar external_account existe y pertenece al usuario
     const { data: extAccount, error: extErr } = await this.supabase
       .from('bridge_external_accounts')
-      .select('id, account_type, currency')
+      .select('*')
       .eq('id', dto.external_account_id)
       .eq('user_id', userId)
       .single();
@@ -197,6 +197,9 @@ export class PaymentOrdersService {
         destination_type: 'external_account',
         destination_currency: dto.destination_currency ?? extAccount.currency,
         external_account_id: dto.external_account_id,
+        destination_bank_name: extAccount.bank_name,
+        destination_account_holder: extAccount.account_name ?? extAccount.first_name ?? extAccount.business_name,
+        destination_account_number: extAccount.account_last_4 ?? extAccount.iban ?? extAccount.swift_bic,
         exchange_rate_applied: rateData.effective_rate,
         amount_destination: parseFloat(
           (net_amount * rateData.effective_rate).toFixed(2),
