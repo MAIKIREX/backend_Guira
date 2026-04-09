@@ -752,17 +752,9 @@ export class WebhooksService {
   private async handleTransferPaymentProcessed(
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const data = (payload?.event_object || payload?.data) as Record<string, unknown>;
-    const transferId = data?.id as string;
-    if (!transferId) return;
-
-    await this.supabase
-      .from('bridge_transfers')
-      .update({
-        bridge_state: 'payment_processed',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('bridge_transfer_id', transferId);
+    // Redirigido a handleTransferComplete para finalizar automáticamente
+    // órdenes de pago, ya que Bridge a menudo frena el ciclo en payment_processed.
+    await this.handleTransferComplete(payload, 'payment_processed');
   }
 
   // ═══════════════════════════════════════════════
@@ -772,6 +764,7 @@ export class WebhooksService {
 
   private async handleTransferComplete(
     payload: Record<string, unknown>,
+    bridgeState: string = 'complete',
   ): Promise<void> {
     const data = (payload?.event_object || payload?.data) as Record<string, unknown>;
     const bridgeTransferId = data?.id as string;
@@ -783,7 +776,7 @@ export class WebhooksService {
     const { data: transfer } = await this.supabase
       .from('bridge_transfers')
       .update({
-        bridge_state: 'complete',
+        bridge_state: bridgeState,
         status: 'completed',
         completed_at: new Date().toISOString(),
         receipt_initial_amount: receipt?.initial_amount ?? null,
@@ -819,7 +812,7 @@ export class WebhooksService {
       .from('payment_orders')
       .select('id, user_id, wallet_id, flow_type, amount, fee_amount, currency')
       .eq('bridge_transfer_id', bridgeTransferId)
-      .eq('status', 'processing')
+      .in('status', ['waiting_deposit', 'processing', 'deposit_received']) // FIXED: Agregados estados pre-processing para flujos automatizados
       .maybeSingle();
 
     if (paymentOrder) {
