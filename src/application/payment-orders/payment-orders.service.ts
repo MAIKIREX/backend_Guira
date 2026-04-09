@@ -679,6 +679,7 @@ export class PaymentOrdersService {
 
     // 1. Llamada a Bridge Transfer API
     let bridgeTransfer: Record<string, unknown>;
+    const idempotencyKey = `crypto-ramp-${userId}-${wallet.id}-${dto.amount}-${Date.now()}`;
     try {
       bridgeTransfer = await this.bridgeApi.post<Record<string, unknown>>(
         '/v0/transfers',
@@ -696,6 +697,7 @@ export class PaymentOrdersService {
           },
           amount: dto.amount.toString(),
         },
+        idempotencyKey,
       );
     } catch (err: any) {
       this.logger.error('Error llamando a Bridge Transfer API:', err);
