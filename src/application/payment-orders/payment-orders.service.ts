@@ -443,7 +443,7 @@ export class PaymentOrdersService {
         flow_category: 'interbank',
         requires_psav: true,
         amount: dto.amount,
-        currency: dto.destination_currency?.toUpperCase() ?? 'USD',
+        currency: 'USD', // world_to_bolivia: el usuario deposita USD
         fee_amount,
         net_amount,
         destination_type: 'bank_bo',
