@@ -1,15 +1,34 @@
-import { 
-  Controller, Get, Post, Patch, Body, Param, Query, 
-  UseGuards, ParseUUIDPipe, DefaultValuePipe, ParseIntPipe 
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  ParseUUIDPipe,
+  DefaultValuePipe,
+  ParseIntPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import type { User } from '@supabase/supabase-js';
 
 import { SupportService } from './support.service';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import { RolesGuard } from '../../core/guards/roles.guard';
 import { Roles } from '../../core/decorators/roles.decorator';
-import { CreateTicketDto, AssignTicketDto, ResolveTicketDto, UpdateTicketStatusDto } from './dto/support.dto';
+import {
+  CreateTicketDto,
+  AssignTicketDto,
+  ResolveTicketDto,
+  UpdateTicketStatusDto,
+} from './dto/support.dto';
 
 // ── ENDPOINTS DE USUARIO ──────────────────────────────────────────
 
@@ -37,7 +56,10 @@ export class SupportController {
   @Get(':id')
   @ApiBearerAuth('supabase-jwt')
   @ApiOperation({ summary: 'Ver detalle de un ticket' })
-  getTicket(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() user: User) {
+  getTicket(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: User,
+  ) {
     return this.supportService.getTicket(id, user.id);
   }
 }
@@ -65,7 +87,7 @@ export class AdminSupportController {
     const filters: Record<string, string> = {};
     if (status) filters.status = status;
     if (assignedTo) filters.assigned_to = assignedTo;
-    
+
     return this.supportService.getAllTickets(filters, page ?? 1);
   }
 
@@ -73,7 +95,7 @@ export class AdminSupportController {
   @Roles('staff', 'admin', 'super_admin')
   @ApiOperation({ summary: 'Asignar un ticket a un agente' })
   assignTicket(
-    @Param('id', new ParseUUIDPipe()) id: string, 
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: AssignTicketDto,
     @CurrentUser() user: User,
   ) {
@@ -84,7 +106,7 @@ export class AdminSupportController {
   @Roles('staff', 'admin', 'super_admin')
   @ApiOperation({ summary: 'Cambiar el estado de un ticket' })
   updateStatus(
-    @Param('id', new ParseUUIDPipe()) id: string, 
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateTicketStatusDto,
     @CurrentUser() user: User,
   ) {
@@ -95,7 +117,7 @@ export class AdminSupportController {
   @Roles('staff', 'admin', 'super_admin')
   @ApiOperation({ summary: 'Marcar ticket como resuelto' })
   resolveTicket(
-    @Param('id', new ParseUUIDPipe()) id: string, 
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: ResolveTicketDto,
     @CurrentUser() user: User,
   ) {

@@ -1,13 +1,35 @@
 import {
-  Controller, Get, Post, Body, Param, Query,
-  Patch, UseGuards, ParseUUIDPipe,
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  Patch,
+  UseGuards,
+  ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import type { User } from '@supabase/supabase-js';
 import { ComplianceService } from './compliance.service';
 import { ComplianceActionsService } from './compliance-actions.service';
-import { RegisterDocumentDto, GetDocumentUploadUrlDto } from './dto/document.dto';
-import { ApproveReviewDto, RejectReviewDto, RequestChangesDto, AddCommentDto, AssignReviewDto, SetLimitsDto } from './dto/admin-compliance.dto';
+import {
+  RegisterDocumentDto,
+  GetDocumentUploadUrlDto,
+} from './dto/document.dto';
+import {
+  ApproveReviewDto,
+  RejectReviewDto,
+  RequestChangesDto,
+  AddCommentDto,
+  AssignReviewDto,
+  SetLimitsDto,
+} from './dto/admin-compliance.dto';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import { RolesGuard } from '../../core/guards/roles.guard';
 import { Roles } from '../../core/decorators/roles.decorator';
@@ -21,14 +43,22 @@ export class ComplianceController {
   // ── Documentos ────────────────────────────────────────────────────
 
   @Post('documents/upload-url')
-  @ApiOperation({ summary: 'Obtener URL firmada para subir documento a Storage' })
-  getUploadUrl(@CurrentUser() user: User, @Body() dto: GetDocumentUploadUrlDto) {
+  @ApiOperation({
+    summary: 'Obtener URL firmada para subir documento a Storage',
+  })
+  getUploadUrl(
+    @CurrentUser() user: User,
+    @Body() dto: GetDocumentUploadUrlDto,
+  ) {
     return this.complianceService.getDocumentUploadUrl(user.id, dto);
   }
 
   @Post('documents')
   @ApiOperation({ summary: 'Registrar documento tras subirlo a Storage' })
-  registerDocument(@CurrentUser() user: User, @Body() dto: RegisterDocumentDto) {
+  registerDocument(
+    @CurrentUser() user: User,
+    @Body() dto: RegisterDocumentDto,
+  ) {
     return this.complianceService.registerDocument(user.id, dto);
   }
 
@@ -97,7 +127,9 @@ export class AdminComplianceController {
 
   @Get('reviews/:id')
   @Roles('staff', 'admin', 'super_admin')
-  @ApiOperation({ summary: 'Obtener detalle de review (comentarios e historial)' })
+  @ApiOperation({
+    summary: 'Obtener detalle de review (comentarios e historial)',
+  })
   getReviewDetail(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.actionsService.getReviewDetail(id);
   }
@@ -135,14 +167,21 @@ export class AdminComplianceController {
     @Body() dto: AddCommentDto,
     @CurrentUser() actor: User,
   ) {
-    return this.actionsService.addComment(id, actor.id, dto.body, dto.is_internal);
+    return this.actionsService.addComment(
+      id,
+      actor.id,
+      dto.body,
+      dto.is_internal,
+    );
   }
 
   // ── DECISIONES (INMUTABLES) ───────────────────────────────────────
 
   @Post('reviews/:id/approve')
   @Roles('staff', 'admin', 'super_admin')
-  @ApiOperation({ summary: 'Aprobar review (ejecuta flujo dependiendo del subject)' })
+  @ApiOperation({
+    summary: 'Aprobar review (ejecuta flujo dependiendo del subject)',
+  })
   approveReview(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: ApproveReviewDto,
@@ -153,7 +192,9 @@ export class AdminComplianceController {
 
   @Post('reviews/:id/reject')
   @Roles('staff', 'admin', 'super_admin')
-  @ApiOperation({ summary: 'Rechazar review (cancela operaciones/verificaciones)' })
+  @ApiOperation({
+    summary: 'Rechazar review (cancela operaciones/verificaciones)',
+  })
   rejectReview(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: RejectReviewDto,
@@ -164,13 +205,20 @@ export class AdminComplianceController {
 
   @Post('reviews/:id/request-changes')
   @Roles('staff', 'admin', 'super_admin')
-  @ApiOperation({ summary: 'Solicitar correcciones al cliente (review permanece abierto)' })
+  @ApiOperation({
+    summary: 'Solicitar correcciones al cliente (review permanece abierto)',
+  })
   requestChanges(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: RequestChangesDto,
     @CurrentUser() actor: User,
   ) {
-    return this.actionsService.requestChanges(id, actor.id, dto.reason, dto.required_actions);
+    return this.actionsService.requestChanges(
+      id,
+      actor.id,
+      dto.reason,
+      dto.required_actions,
+    );
   }
 }
 

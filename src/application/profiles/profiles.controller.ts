@@ -20,10 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { ProfilesService } from './profiles.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import {
-  FreezeAccountDto,
-  ActivateAccountDto,
-} from './dto/freeze-account.dto';
+import { FreezeAccountDto, ActivateAccountDto } from './dto/freeze-account.dto';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
 import { RolesGuard } from '../../core/guards/roles.guard';
@@ -117,7 +114,8 @@ export class AdminProfilesController {
     return this.profilesService.findAll(page, Math.min(limit, 100), {
       role,
       onboarding_status: onboardingStatus,
-      is_frozen: isFrozen === 'true' ? true : isFrozen === 'false' ? false : undefined,
+      is_frozen:
+        isFrozen === 'true' ? true : isFrozen === 'false' ? false : undefined,
     });
   }
 

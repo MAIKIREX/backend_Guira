@@ -102,11 +102,15 @@ export class AdminWalletsController {
       'Útil cuando el webhook de aprobación KYC/KYB falló y las wallets en Bridge no se crearon. ' +
       'Requiere que el usuario tenga bridge_customer_id en su perfil.',
   })
-  @ApiResponse({ status: 200, description: 'Wallets inicializadas correctamente' })
-  @ApiResponse({ status: 404, description: 'Usuario o bridge_customer_id no encontrado' })
-  initializeWallets(
-    @Param('userId', new ParseUUIDPipe()) userId: string,
-  ) {
+  @ApiResponse({
+    status: 200,
+    description: 'Wallets inicializadas correctamente',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Usuario o bridge_customer_id no encontrado',
+  })
+  initializeWallets(@Param('userId', new ParseUUIDPipe()) userId: string) {
     return this.walletsService.initializeClientWallets(userId);
   }
 }

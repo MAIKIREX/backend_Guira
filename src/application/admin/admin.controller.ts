@@ -1,8 +1,22 @@
-import { 
-  Controller, Get, Post, Patch, Body, Param, Query, 
-  UseGuards, ParseUUIDPipe, DefaultValuePipe, ParseIntPipe 
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  ParseUUIDPipe,
+  DefaultValuePipe,
+  ParseIntPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import type { User } from '@supabase/supabase-js';
 
 import { AdminService } from './admin.service';
@@ -77,9 +91,9 @@ export class AdminController {
   @Roles('super_admin')
   @ApiOperation({ summary: 'Actualizar un setting existente' })
   updateSetting(
-    @Param('key') key: string, 
-    @Body() dto: UpdateSettingDto, 
-    @CurrentUser() user: User
+    @Param('key') key: string,
+    @Body() dto: UpdateSettingDto,
+    @CurrentUser() user: User,
   ) {
     return this.adminService.updateSetting(key, dto, user.id);
   }
@@ -126,7 +140,9 @@ export class AdminController {
 
   @Post('reconciliation/run')
   @Roles('admin', 'super_admin')
-  @ApiOperation({ summary: 'Ejecutar proceso manual de reconciliación financiera' })
+  @ApiOperation({
+    summary: 'Ejecutar proceso manual de reconciliación financiera',
+  })
   runReconciliation(@CurrentUser() user: User) {
     return this.reconciliationService.runReconciliation(user.id);
   }
@@ -135,13 +151,17 @@ export class AdminController {
   @Roles('admin', 'super_admin')
   @ApiOperation({ summary: 'Historial de procesos de reconciliación' })
   @ApiQuery({ name: 'page', required: false })
-  getReconciliations(@Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number) {
+  getReconciliations(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+  ) {
     return this.reconciliationService.getReconciliationHistory(page);
   }
 
   @Get('reconciliation/:id')
   @Roles('admin', 'super_admin')
-  @ApiOperation({ summary: 'Detalle e informe de discrepancias de una reconciliación' })
+  @ApiOperation({
+    summary: 'Detalle e informe de discrepancias de una reconciliación',
+  })
   getReconciliationDetail(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.reconciliationService.getReconciliationDetail(id);
   }

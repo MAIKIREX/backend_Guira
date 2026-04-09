@@ -8,13 +8,15 @@ import { SupabaseAuthGuard } from './guards/supabase-auth.guard';
 
 @Module({
   imports: [
-    CoreConfigModule,       // Variables de entorno + validación Joi
-    SupabaseModule,         // Cliente Supabase (service_role) — global
+    CoreConfigModule, // Variables de entorno + validación Joi
+    SupabaseModule, // Cliente Supabase (service_role) — global
     ScheduleModule.forRoot(), // CRON jobs con @nestjs/schedule
-    ThrottlerModule.forRoot([{
-      ttl: 60000, 
-      limit: 100, // global limit 100 req per minute
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100, // global limit 100 req per minute
+      },
+    ]),
   ],
   providers: [
     // Guard global: protección contra DdoS/Abuso rate limit

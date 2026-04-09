@@ -42,7 +42,11 @@ export class LedgerController {
   @ApiQuery({ name: 'to', required: false, description: 'ISO date end' })
   @ApiQuery({ name: 'type', required: false, enum: ['credit', 'debit'] })
   @ApiQuery({ name: 'currency', required: false })
-  @ApiQuery({ name: 'status', required: false, enum: ['pending', 'settled', 'failed', 'reversed'] })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['pending', 'settled', 'failed', 'reversed'],
+  })
   @ApiResponse({ status: 200, description: 'Historial paginado' })
   getHistory(
     @CurrentUser() user: AuthenticatedUser,

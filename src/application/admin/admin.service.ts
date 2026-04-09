@@ -1,4 +1,9 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
 import { UpdateSettingDto, CreateSettingDto } from './dto/admin.dto';
@@ -47,7 +52,11 @@ export class AdminService {
 
     const { data, error } = await this.supabase
       .from('app_settings')
-      .update({ value: dto.value, updated_by: actorId, updated_at: new Date().toISOString() })
+      .update({
+        value: dto.value,
+        updated_by: actorId,
+        updated_at: new Date().toISOString(),
+      })
       .eq('key', key)
       .select()
       .single();
@@ -96,14 +105,17 @@ export class AdminService {
     const offset = (page - 1) * limit;
     let query = this.supabase
       .from('audit_logs')
-      .select('*, profiles!audit_logs_performed_by_fkey(email, full_name)', { count: 'exact' })
+      .select('*, profiles!audit_logs_performed_by_fkey(email, full_name)', {
+        count: 'exact',
+      })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (filters.performed_by) query = query.eq('performed_by', filters.performed_by);
+    if (filters.performed_by)
+      query = query.eq('performed_by', filters.performed_by);
     if (filters.action) query = query.eq('action', filters.action);
     if (filters.table_name) query = query.eq('table_name', filters.table_name);
-    
+
     // from_date / to_date could be added manually via query options
 
     const { data, count, error } = await query;

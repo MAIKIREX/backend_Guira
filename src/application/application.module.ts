@@ -41,5 +41,3 @@ import { ExchangeRatesModule } from './exchange-rates/exchange-rates.module';
   ],
 })
 export class ApplicationModule {}
-
-

@@ -10,16 +10,23 @@ export class ReconciliationService {
 
   async runReconciliation(initiatedBy: string): Promise<string> {
     const startTime = Date.now();
-    
-    // 1. Crear registro de run
-    const { data: run, error: runError } = await this.supabase.from('reconciliation_runs').insert({
-      initiated_by: initiatedBy,
-      run_type: 'MANUAL_FULL',
-      status: 'running',
-      started_at: new Date().toISOString(),
-    }).select('id').single();
 
-    if (runError || !run) throw new BadRequestException(`No se pudo iniciar la reconciliación: ${runError?.message}`);
+    // 1. Crear registro de run
+    const { data: run, error: runError } = await this.supabase
+      .from('reconciliation_runs')
+      .insert({
+        initiated_by: initiatedBy,
+        run_type: 'MANUAL_FULL',
+        status: 'running',
+        started_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+
+    if (runError || !run)
+      throw new BadRequestException(
+        `No se pudo iniciar la reconciliación: ${runError?.message}`,
+      );
 
     // 2. Obtener todos los usuarios con wallets activas
     const { data: users } = await this.supabase
@@ -30,22 +37,27 @@ export class ReconciliationService {
     const discrepancies: any[] = [];
     let usersChecked = 0;
 
-    for (const wallet of (users ?? [])) {
+    for (const wallet of users ?? []) {
       try {
         // 3. Obtener entradas del ledger totales (Crédito - Débito)
-        const { data: ledgerCredit } = await this.supabase.from('ledger_entries')
+        const { data: ledgerCredit } = await this.supabase
+          .from('ledger_entries')
           .select('amount')
           .eq('wallet_id', wallet.id)
           .eq('type', 'credit')
           .eq('status', 'settled');
-        const creditSum = ledgerCredit?.reduce((acc, curr) => acc + Number(curr.amount), 0) ?? 0;
+        const creditSum =
+          ledgerCredit?.reduce((acc, curr) => acc + Number(curr.amount), 0) ??
+          0;
 
-        const { data: ledgerDebit } = await this.supabase.from('ledger_entries')
+        const { data: ledgerDebit } = await this.supabase
+          .from('ledger_entries')
           .select('amount')
           .eq('wallet_id', wallet.id)
           .eq('type', 'debit')
           .eq('status', 'settled');
-        const debitSum = ledgerDebit?.reduce((acc, curr) => acc + Number(curr.amount), 0) ?? 0;
+        const debitSum =
+          ledgerDebit?.reduce((acc, curr) => acc + Number(curr.amount), 0) ?? 0;
 
         const ledgerTotal = creditSum - debitSum;
 
@@ -77,15 +89,18 @@ export class ReconciliationService {
     }
 
     // 5. Actualizar resultado
-    await this.supabase.from('reconciliation_runs').update({
-      status: 'completed',
-      users_checked: usersChecked,
-      discrepancies_found: discrepancies.length,
-      discrepancies_detail: discrepancies.length > 0 ? discrepancies : null,
-      completed_at: new Date().toISOString(),
-      duration_ms: Date.now() - startTime,
-      requires_manual_review: discrepancies.length > 0,
-    }).eq('id', run.id);
+    await this.supabase
+      .from('reconciliation_runs')
+      .update({
+        status: 'completed',
+        users_checked: usersChecked,
+        discrepancies_found: discrepancies.length,
+        discrepancies_detail: discrepancies.length > 0 ? discrepancies : null,
+        completed_at: new Date().toISOString(),
+        duration_ms: Date.now() - startTime,
+        requires_manual_review: discrepancies.length > 0,
+      })
+      .eq('id', run.id);
 
     return run.id;
   }
@@ -109,7 +124,8 @@ export class ReconciliationService {
       .eq('id', runId)
       .single();
 
-    if (error || !data) throw new BadRequestException('Reconciliación no encontrada');
+    if (error || !data)
+      throw new BadRequestException('Reconciliación no encontrada');
     return data;
   }
 }

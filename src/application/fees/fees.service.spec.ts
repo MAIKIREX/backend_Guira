@@ -35,15 +35,15 @@ describe('FeesService', () => {
     mockSupabase.maybeSingle.mockResolvedValueOnce({
       data: {
         fee_type: 'fixed',
-        fee_fixed: 2.50,
+        fee_fixed: 2.5,
       },
       error: null,
     }); // cliente override
 
     const result = await service.calculateFee('user-id', 'payout', 'ach', 100);
 
-    expect(result.fee_amount).toBe(2.50);
-    expect(result.net_amount).toBe(97.50);
+    expect(result.fee_amount).toBe(2.5);
+    expect(result.net_amount).toBe(97.5);
   });
 
   it('debe usar el global param si el cliente no tiene override (percent fee)', async () => {
@@ -58,8 +58,8 @@ describe('FeesService', () => {
 
     const result = await service.calculateFee('user-id', 'payout', 'ach', 1000);
 
-    expect(result.fee_amount).toBe(15.00); // 1.5% de 1000
-    expect(result.net_amount).toBe(985.00);
+    expect(result.fee_amount).toBe(15.0); // 1.5% de 1000
+    expect(result.net_amount).toBe(985.0);
   });
 
   it('debe respetar el min_fee y max_fee del global configs si aplica', async () => {
@@ -76,17 +76,28 @@ describe('FeesService', () => {
     });
 
     // Envío muy poco: 100 * 1% = 1. Como min = 10 -> fee será 10.
-    const resultMin = await service.calculateFee('user-id', 'payout', 'ach', 100);
+    const resultMin = await service.calculateFee(
+      'user-id',
+      'payout',
+      'ach',
+      100,
+    );
     expect(resultMin.fee_amount).toBe(10);
     expect(resultMin.net_amount).toBe(90);
 
     mockSupabase.maybeSingle.mockResolvedValueOnce({ data: null, error: null });
     mockSupabase.maybeSingle.mockResolvedValueOnce({
-      data: { fee_type: 'percent', fee_percent: 1, min_fee: 10, max_fee: 50 }, error: null
+      data: { fee_type: 'percent', fee_percent: 1, min_fee: 10, max_fee: 50 },
+      error: null,
     });
-    
+
     // Envío mucho: 100,000 * 1% = 1,000. Como max = 50 -> fee será 50.
-    const resultMax = await service.calculateFee('user-id', 'payout', 'ach', 100000);
+    const resultMax = await service.calculateFee(
+      'user-id',
+      'payout',
+      'ach',
+      100000,
+    );
     expect(resultMax.fee_amount).toBe(50);
     expect(resultMax.net_amount).toBe(99950);
   });

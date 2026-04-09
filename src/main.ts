@@ -8,10 +8,9 @@ import type { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 
 async function bootstrap() {
-  // IMPORTANTE: Habilitamos rawBody para poder verificar firmas RSA/SHA256 
+  // IMPORTANTE: Habilitamos rawBody para poder verificar firmas RSA/SHA256
   // de Bridge Webhooks sin interferir con FileInterceptor (Multer) o uploads.
   const app = await NestFactory.create(AppModule, { rawBody: true });
-
 
   // Prefijo global de la API
   const prefix = process.env.PATH_SUBDOMAIN || 'api';
@@ -52,7 +51,8 @@ async function bootstrap() {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
-        description: 'Token JWT de Supabase Auth (Authorization: Bearer <token>)',
+        description:
+          'Token JWT de Supabase Auth (Authorization: Bearer <token>)',
       },
       'supabase-jwt',
     )

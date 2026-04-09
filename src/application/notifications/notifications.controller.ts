@@ -1,5 +1,19 @@
-import { Controller, Get, Patch, Param, Query, ParseUUIDPipe, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Patch,
+  Param,
+  Query,
+  ParseUUIDPipe,
+  DefaultValuePipe,
+  ParseIntPipe,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import type { User } from '@supabase/supabase-js';
 import { NotificationsService } from './notifications.service';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';

@@ -37,7 +37,12 @@ export class CreateInterbankOrderDto {
 
   @ApiPropertyOptional({ example: 'usd' })
   @ValidateIf((o) =>
-    ['bolivia_to_world', 'world_to_bolivia', 'wallet_to_wallet', 'bolivia_to_wallet'].includes(o.flow_type),
+    [
+      'bolivia_to_world',
+      'world_to_bolivia',
+      'wallet_to_wallet',
+      'bolivia_to_wallet',
+    ].includes(o.flow_type),
   )
   @IsOptional()
   @IsString()
@@ -111,7 +116,9 @@ export class CreateInterbankOrderDto {
   virtual_account_id?: string;
 
   // ── Campos comunes ──
-  @ApiPropertyOptional({ description: 'ID del proveedor seleccionado por el usuario' })
+  @ApiPropertyOptional({
+    description: 'ID del proveedor seleccionado por el usuario',
+  })
   @IsOptional()
   @IsUUID()
   supplier_id?: string;

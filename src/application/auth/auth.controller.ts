@@ -89,7 +89,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Solicitar restablecimiento de contraseña',
-    description: 'Envía un correo con un enlace para restablecer la contraseña a la cuenta asociada.',
+    description:
+      'Envía un correo con un enlace para restablecer la contraseña a la cuenta asociada.',
   })
   @ApiResponse({ status: 200, description: 'Correo enviado (si existe)' })
   @ApiResponse({ status: 429, description: 'Demasiados intentos' })
@@ -102,7 +103,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Restablecer contraseña',
-    description: 'Actualiza la contraseña del usuario. Requiere estar autenticado con el token especial recibido por correo.',
+    description:
+      'Actualiza la contraseña del usuario. Requiere estar autenticado con el token especial recibido por correo.',
   })
   @ApiResponse({ status: 200, description: 'Contraseña actualizada' })
   @ApiResponse({ status: 401, description: 'Token inválido o expirado' })

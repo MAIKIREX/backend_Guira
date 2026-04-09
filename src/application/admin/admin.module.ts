@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { ReconciliationService } from './reconciliation.service';
-import { AdminController, PublicSettingsController, ActivityController } from './admin.controller';
+import {
+  AdminController,
+  PublicSettingsController,
+  ActivityController,
+} from './admin.controller';
 
 @Module({
   controllers: [AdminController, PublicSettingsController, ActivityController],

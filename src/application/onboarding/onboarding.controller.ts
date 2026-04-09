@@ -80,7 +80,10 @@ export class OnboardingController {
     schema: {
       type: 'object',
       properties: {
-        tos_contract_id: { type: 'string', description: 'ID del contrato ToS de Bridge (opcional)' },
+        tos_contract_id: {
+          type: 'string',
+          description: 'ID del contrato ToS de Bridge (opcional)',
+        },
       },
     },
   })
@@ -111,7 +114,9 @@ export class OnboardingController {
   }
 
   @Get('kyb/business')
-  @ApiOperation({ summary: 'Obtener datos de la empresa con directores y UBOs' })
+  @ApiOperation({
+    summary: 'Obtener datos de la empresa con directores y UBOs',
+  })
   getBusiness(@CurrentUser() user: AuthenticatedUser) {
     return this.onboardingService.getBusiness(user.id);
   }
@@ -136,10 +141,7 @@ export class OnboardingController {
 
   @Post('kyb/business/ubos')
   @ApiOperation({ summary: 'Añadir beneficiario final (UBO) a la empresa' })
-  addUbo(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: CreateUboDto,
-  ) {
+  addUbo(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateUboDto) {
     return this.onboardingService.addUbo(user.id, dto);
   }
 
@@ -232,11 +234,15 @@ export class OnboardingController {
     },
   })
   @ApiResponse({ status: 201, description: 'Documento subido' })
-  @ApiResponse({ status: 400, description: 'Tipo de archivo no permitido o excede 10MB' })
+  @ApiResponse({
+    status: 400,
+    description: 'Tipo de archivo no permitido o excede 10MB',
+  })
   uploadDocument(
     @CurrentUser() user: AuthenticatedUser,
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { document_type: string; subject_type: string; subject_id?: string },
+    @Body()
+    body: { document_type: string; subject_type: string; subject_id?: string },
   ) {
     return this.onboardingService.uploadDocument(
       user.id,

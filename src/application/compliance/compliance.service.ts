@@ -1,11 +1,14 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
-import { RegisterDocumentDto, GetDocumentUploadUrlDto } from './dto/document.dto';
+import {
+  RegisterDocumentDto,
+  GetDocumentUploadUrlDto,
+} from './dto/document.dto';
 
 /**
  * ComplianceService — Lectura de estado de compliance para el usuario.
- * 
+ *
  * NOTA: La lógica de creación/submit de KYC/KYB vive exclusivamente en
  * OnboardingService para evitar duplicación. Este servicio se limita a:
  * - Documentos (upload URLs, registro, listado)
@@ -28,7 +31,10 @@ export class ComplianceService {
       .createSignedUploadUrl(path);
 
     if (error) throw new Error(error.message);
-    return { upload_url: data.signedUrl, storage_path: `${dto.bucket}/${path}` };
+    return {
+      upload_url: data.signedUrl,
+      storage_path: `${dto.bucket}/${path}`,
+    };
   }
 
   /** Registra un documento en la BD tras haberlo subido a Storage */

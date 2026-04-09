@@ -30,7 +30,10 @@ export class CreateSupplierDto {
   @IsNotEmpty()
   currency: string;
 
-  @ApiProperty({ example: 'spei', enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'crypto'] })
+  @ApiProperty({
+    example: 'spei',
+    enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'crypto'],
+  })
   @IsString()
   @IsNotEmpty()
   payment_rail: string;

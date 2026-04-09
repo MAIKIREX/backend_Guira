@@ -40,8 +40,13 @@ export class BridgeController {
   // ── Virtual Accounts ──────────────────
 
   @Post('virtual-accounts')
-  @ApiOperation({ summary: 'Crear Virtual Account para recepción de depósitos' })
-  @ApiResponse({ status: 201, description: 'VA creada con instrucciones bancarias' })
+  @ApiOperation({
+    summary: 'Crear Virtual Account para recepción de depósitos',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'VA creada con instrucciones bancarias',
+  })
   createVirtualAccount(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateVirtualAccountDto,
@@ -56,7 +61,9 @@ export class BridgeController {
   }
 
   @Get('virtual-accounts/:id')
-  @ApiOperation({ summary: 'Detalle de Virtual Account con instrucciones bancarias' })
+  @ApiOperation({
+    summary: 'Detalle de Virtual Account con instrucciones bancarias',
+  })
   getVirtualAccount(
     @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -103,9 +110,14 @@ export class BridgeController {
   // ── Payouts ───────────────────────────
 
   @Post('payouts')
-  @ApiOperation({ summary: 'Crear solicitud de pago (con fee + reserva de saldo)' })
+  @ApiOperation({
+    summary: 'Crear solicitud de pago (con fee + reserva de saldo)',
+  })
   @ApiResponse({ status: 201, description: 'Payout creado' })
-  @ApiResponse({ status: 400, description: 'Saldo insuficiente o límites excedidos' })
+  @ApiResponse({
+    status: 400,
+    description: 'Saldo insuficiente o límites excedidos',
+  })
   createPayout(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreatePayoutRequestDto,

@@ -1,8 +1,18 @@
-import { IsString, IsNotEmpty, IsBoolean, IsOptional, IsUUID, IsNumber, Min } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsBoolean,
+  IsOptional,
+  IsUUID,
+  IsNumber,
+  Min,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class ApproveReviewDto {
-  @ApiProperty({ example: 'KYC validado satisfactoriamente contra base de datos OFAC.' })
+  @ApiProperty({
+    example: 'KYC validado satisfactoriamente contra base de datos OFAC.',
+  })
   @IsString()
   @IsNotEmpty()
   reason: string;
@@ -16,12 +26,16 @@ export class RejectReviewDto {
 }
 
 export class RequestChangesDto {
-  @ApiProperty({ example: 'Por favor suba una fotografía más nítida del pasaporte.' })
+  @ApiProperty({
+    example: 'Por favor suba una fotografía más nítida del pasaporte.',
+  })
   @IsString()
   @IsNotEmpty()
   reason: string;
 
-  @ApiPropertyOptional({ description: 'Lista de campos o documentos específicos a corregir' })
+  @ApiPropertyOptional({
+    description: 'Lista de campos o documentos específicos a corregir',
+  })
   @IsOptional()
   required_actions?: string[];
 }

@@ -10,12 +10,15 @@ import appConfig from './app/app.config';
       isGlobal: true,
       // En producción (Render/cloud) las vars se inyectan como env del sistema.
       // Solo cargamos el archivo .env.local en entornos locales de desarrollo.
-      envFilePath: process.env.NODE_ENV === 'production' ? undefined : '.env.local',
+      envFilePath:
+        process.env.NODE_ENV === 'production' ? undefined : '.env.local',
       load: [appConfig],
       expandVariables: true,
       validationSchema: Joi.object({
         // App
-        NODE_ENV: Joi.string().valid('development', 'test', 'production').default('development'),
+        NODE_ENV: Joi.string()
+          .valid('development', 'test', 'production')
+          .default('development'),
         PORT: Joi.number().default(3000),
         PATH_SUBDOMAIN: Joi.string().default('api'),
         URL_FRONTEND: Joi.string().allow('').default(''),
@@ -32,7 +35,10 @@ import appConfig from './app/app.config';
           then: Joi.string().required(),
           otherwise: Joi.string().allow('').default(''),
         }),
-        BRIDGE_API_URL: Joi.string().uri().allow('').default('https://api.bridge.xyz'),
+        BRIDGE_API_URL: Joi.string()
+          .uri()
+          .allow('')
+          .default('https://api.bridge.xyz'),
         // En producción esta key es OBLIGATORIA para verificar firmas de webhooks
         BRIDGE_WEBHOOK_PUBLIC_KEY: Joi.when('NODE_ENV', {
           is: 'production',

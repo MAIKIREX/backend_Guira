@@ -38,7 +38,9 @@ export class AppController {
       version: process.env.npm_package_version ?? '1.0.0',
       services: {
         database: error ? 'unreachable' : 'connected',
-        bridge_api: this.config.get('app.bridgeApiKey') ? 'configured' : 'not_configured',
+        bridge_api: this.config.get('app.bridgeApiKey')
+          ? 'configured'
+          : 'not_configured',
       },
     };
   }

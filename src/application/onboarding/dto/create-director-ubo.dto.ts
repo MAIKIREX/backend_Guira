@@ -121,7 +121,10 @@ export class CreateDirectorDto {
    * Fuga B — Bridge requires PEP status for all associated_persons including directors.
    * Stored in business_directors.is_pep (NOT NULL DEFAULT false).
    */
-  @ApiProperty({ example: false, description: 'Persona Políticamente Expuesta (PEP)' })
+  @ApiProperty({
+    example: false,
+    description: 'Persona Políticamente Expuesta (PEP)',
+  })
   @IsBoolean()
   is_pep: boolean;
 }
@@ -252,7 +255,8 @@ export class CreateUboDto {
    */
   @ApiPropertyOptional({
     example: false,
-    description: 'El UBO también tiene control operacional sobre la empresa (FinCEN Control Prong)',
+    description:
+      'El UBO también tiene control operacional sobre la empresa (FinCEN Control Prong)',
   })
   @IsOptional()
   @IsBoolean()

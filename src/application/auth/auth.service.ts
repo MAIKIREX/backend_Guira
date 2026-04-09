@@ -27,10 +27,10 @@ export class AuthService {
    */
   async register(dto: RegisterDto): Promise<AuthResponseDto> {
     // Verificar si el email ya existe
-    const { data: existingUsers } =
-      await this.supabase.auth.admin.listUsers();
+    const { data: existingUsers } = await this.supabase.auth.admin.listUsers();
 
-    const users = (existingUsers as { users?: { email?: string }[] })?.users ?? [];
+    const users =
+      (existingUsers as { users?: { email?: string }[] })?.users ?? [];
     const emailExists = users.some(
       (u) => u.email?.toLowerCase() === dto.email.toLowerCase(),
     );
@@ -51,9 +51,7 @@ export class AuthService {
 
     if (error) {
       this.logger.error(`Error creando usuario: ${error.message}`);
-      throw new ConflictException(
-        error.message ?? 'Error al crear la cuenta',
-      );
+      throw new ConflictException(error.message ?? 'Error al crear la cuenta');
     }
 
     // Actualizar full_name en profiles (el trigger solo inserta email y role)
@@ -117,9 +115,11 @@ export class AuthService {
   /**
    * Renueva la sesión usando un refresh token.
    */
-  async refreshToken(
-    refreshToken: string,
-  ): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+  async refreshToken(refreshToken: string): Promise<{
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+  }> {
     const { data, error } = await this.supabase.auth.refreshSession({
       refresh_token: refreshToken,
     });
@@ -159,19 +159,25 @@ export class AuthService {
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
     // Usamos el cliente regular (no admin) para resetPasswordForEmail
     // para que use las plantillas de email configuradas en el proyecto
-    const { error } = await this.supabase.auth.resetPasswordForEmail(dto.email, {
-      redirectTo: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/reset-password`,
-    });
+    const { error } = await this.supabase.auth.resetPasswordForEmail(
+      dto.email,
+      {
+        redirectTo: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/reset-password`,
+      },
+    );
 
     if (error) {
-      this.logger.error(`Error en forgot password para ${dto.email}: ${error.message}`);
-      // Nunca confirmamos si el email existe o no por seguridad, 
+      this.logger.error(
+        `Error en forgot password para ${dto.email}: ${error.message}`,
+      );
+      // Nunca confirmamos si el email existe o no por seguridad,
       // pero si el error es de rate limit etc, lo manejamos.
       // Retornamos éxito de todas formas si no es un error de sistema crítico.
     }
 
     return {
-      message: 'Si el correo está registrado, recibirás instrucciones para restablecer tu contraseña.',
+      message:
+        'Si el correo está registrado, recibirás instrucciones para restablecer tu contraseña.',
     };
   }
 
@@ -180,19 +186,26 @@ export class AuthService {
    * con el token enviado a su correo electrónico.
    * Requiere el ID del usuario (extraído del token) y la nueva contraseña.
    */
-  async resetPassword(userId: string, dto: ResetPasswordDto): Promise<{ message: string }> {
+  async resetPassword(
+    userId: string,
+    dto: ResetPasswordDto,
+  ): Promise<{ message: string }> {
     // Usamos updateUser usando la sesión de supabase
-    // Dado que estamos en el backend con Guards personalizados, la forma más segura 
+    // Dado que estamos en el backend con Guards personalizados, la forma más segura
     // es usar el API admin para actualizar el usuario directamente, ya que el middleware
     // de SupabaseAuthGuard ya validó la autenticidad de la petición con el token JWT
-    
+
     const { error } = await this.supabase.auth.admin.updateUserById(userId, {
       password: dto.new_password,
     });
 
     if (error) {
-      this.logger.error(`Error reseteando contraseña para ${userId}: ${error.message}`);
-      throw new InternalServerErrorException('No se pudo restablecer la contraseña. Intente nuevamente.');
+      this.logger.error(
+        `Error reseteando contraseña para ${userId}: ${error.message}`,
+      );
+      throw new InternalServerErrorException(
+        'No se pudo restablecer la contraseña. Intente nuevamente.',
+      );
     }
 
     return { message: 'Contraseña actualizada exitosamente' };

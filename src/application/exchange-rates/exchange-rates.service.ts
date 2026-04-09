@@ -12,7 +12,8 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 @Injectable()
 export class ExchangeRatesService {
   private readonly logger = new Logger(ExchangeRatesService.name);
-  private readonly EXTERNAL_API_URL = 'https://api-mdp-2.onrender.com/api/forex/exchange-rate/all?asset=USDT';
+  private readonly EXTERNAL_API_URL =
+    'https://api-mdp-2.onrender.com/api/forex/exchange-rate/all?asset=USDT';
 
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
@@ -23,13 +24,15 @@ export class ExchangeRatesService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async handleCronSyncRates() {
-    this.logger.log('Iniciando cron job: Sincronización automática de exchange rates...');
+    this.logger.log(
+      'Iniciando cron job: Sincronización automática de exchange rates...',
+    );
     await this.syncExternalRates('system-cron');
   }
 
   /**
    * Sincroniza desde el API externo (Binance P2P history).
-   * BUY: Tasa a la que el usuario compra USDT dando BOB (1 USDT = X BOB). 
+   * BUY: Tasa a la que el usuario compra USDT dando BOB (1 USDT = X BOB).
    *      Para nuestro par BOB_USD, multiplicador = 1 / X.
    * SELL: Tasa a la que el usuario vende USDT por BOB (1 USDT = Y BOB).
    *       Para nuestro par USD_BOB, multiplicador = Y.
@@ -38,7 +41,9 @@ export class ExchangeRatesService {
     try {
       const response = await fetch(this.EXTERNAL_API_URL);
       if (!response.ok) {
-        throw new Error(`Error en la API externa: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `Error en la API externa: ${response.status} ${response.statusText}`,
+        );
       }
 
       const payload = await response.json();
@@ -49,7 +54,9 @@ export class ExchangeRatesService {
       const sellRateBobPerUsd = payload?.sell?.data?.result?.exchangeRate;
 
       if (!buyRateBobPerUsd || !sellRateBobPerUsd) {
-        throw new Error('Payload inválido desde el API externo (exchange rates faltantes).');
+        throw new Error(
+          'Payload inválido desde el API externo (exchange rates faltantes).',
+        );
       }
 
       // 1. De BOB a USD (User da BOB, recibe USD)
@@ -65,25 +72,35 @@ export class ExchangeRatesService {
       await this.updateRateInternal('USD_BOB', usdToBobRate, actorId);
       await this.updateRateInternal('USDC_BOB', usdToBobRate, actorId);
 
-      this.logger.log('Sincronización de tasas de cambio completada exitosamente.');
-      return { 
+      this.logger.log(
+        'Sincronización de tasas de cambio completada exitosamente.',
+      );
+      return {
         message: 'Tasas sincronizadas correctamente',
         buy_rate_bob_usd: bobToUsdRate,
-        sell_rate_usd_bob: usdToBobRate
+        sell_rate_usd_bob: usdToBobRate,
       };
     } catch (error) {
-      this.logger.error(`Falló la sincronización de tasas de cambio: ${(error as Error).message}`);
-      throw new BadRequestException('No se pudo establecer conexión con el proveedor de tipos de cambio.');
+      this.logger.error(
+        `Falló la sincronización de tasas de cambio: ${(error as Error).message}`,
+      );
+      throw new BadRequestException(
+        'No se pudo establecer conexión con el proveedor de tipos de cambio.',
+      );
     }
   }
 
   /**
    * Método interno helper para updates estandarizados sin parámetros de spread
    */
-  private async updateRateInternal(pair: string, rate: number, actorId: string) {
+  private async updateRateInternal(
+    pair: string,
+    rate: number,
+    actorId: string,
+  ) {
     try {
       const old = await this.getRate(pair);
-      
+
       await this.supabase
         .from('exchange_rates_config')
         .update({
@@ -102,7 +119,9 @@ export class ExchangeRatesService {
         source: actorId.includes('system') ? 'system' : 'admin_panel',
       });
     } catch (e) {
-      this.logger.warn(`El par ${pair} no está inicializado en la base de datos o hubo un error: ${(e as Error).message}`);
+      this.logger.warn(
+        `El par ${pair} no está inicializado en la base de datos o hubo un error: ${(e as Error).message}`,
+      );
     }
   }
 
@@ -121,9 +140,7 @@ export class ExchangeRatesService {
       .single();
 
     if (error || !data) {
-      throw new NotFoundException(
-        `Tipo de cambio no configurado para ${pair}`,
-      );
+      throw new NotFoundException(`Tipo de cambio no configurado para ${pair}`);
     }
 
     const baseRate = parseFloat(data.rate);

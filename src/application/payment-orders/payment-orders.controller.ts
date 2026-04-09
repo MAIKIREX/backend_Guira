@@ -176,9 +176,7 @@ export class AdminPaymentOrdersController {
       flow_type,
       flow_category,
       requires_psav:
-        requires_psav !== undefined
-          ? requires_psav === 'true'
-          : undefined,
+        requires_psav !== undefined ? requires_psav === 'true' : undefined,
       user_id,
       from_date,
       to_date,
@@ -267,7 +265,9 @@ export class AdminPaymentOrdersController {
 
   @Post('exchange-rates/sync')
   @Roles('admin', 'super_admin')
-  @ApiOperation({ summary: 'Sincronizar tipos de cambio manualmente desde el mercado P2P' })
+  @ApiOperation({
+    summary: 'Sincronizar tipos de cambio manualmente desde el mercado P2P',
+  })
   syncExternalRates(@CurrentUser() user: AuthenticatedUser) {
     return this.exchangeRatesService.syncExternalRates(user.id);
   }

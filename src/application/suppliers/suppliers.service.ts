@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
-import { CreateSupplierDto, UpdateSupplierDto } from './dto/create-supplier.dto';
+import {
+  CreateSupplierDto,
+  UpdateSupplierDto,
+} from './dto/create-supplier.dto';
 import { BridgeService } from '../bridge/bridge.service';
 
 @Injectable()
@@ -78,7 +81,9 @@ export class SuppliersService {
 
     // Limpiar nulos/undefined visualmente
     Object.keys(bank_details).forEach(
-      (k) => bank_details[k as keyof typeof bank_details] === undefined && delete bank_details[k as keyof typeof bank_details]
+      (k) =>
+        bank_details[k as keyof typeof bank_details] === undefined &&
+        delete bank_details[k as keyof typeof bank_details],
     );
 
     const { data, error } = await this.supabase
@@ -113,7 +118,9 @@ export class SuppliersService {
       .order('name');
 
     if (error) throw new BadRequestException(error.message);
-    return (data ?? []).map((supplier) => this.mapBridgeDetailsToBankDetails(supplier));
+    return (data ?? []).map((supplier) =>
+      this.mapBridgeDetailsToBankDetails(supplier),
+    );
   }
 
   /** Detalle de un proveedor. */
@@ -125,8 +132,7 @@ export class SuppliersService {
       .eq('user_id', userId)
       .single();
 
-    if (error || !data)
-      throw new NotFoundException('Proveedor no encontrado');
+    if (error || !data) throw new NotFoundException('Proveedor no encontrado');
     return this.mapBridgeDetailsToBankDetails(data);
   }
 
@@ -146,11 +152,7 @@ export class SuppliersService {
   }
 
   /** Actualiza un proveedor. */
-  async update(
-    supplierId: string,
-    userId: string,
-    dto: UpdateSupplierDto,
-  ) {
+  async update(supplierId: string, userId: string, dto: UpdateSupplierDto) {
     // Verificar propiedad
     await this.findOne(supplierId, userId);
 

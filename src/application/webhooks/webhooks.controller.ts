@@ -54,7 +54,9 @@ export class WebhooksController {
     const providerEventId = (payload?.event_id as string) ?? null;
     const eventType = (payload?.event_type as string) ?? 'unknown';
 
-    this.logger.log(`📨 Bridge webhook recibido: ${eventType} (${providerEventId})`);
+    this.logger.log(
+      `📨 Bridge webhook recibido: ${eventType} (${providerEventId})`,
+    );
 
     await this.webhooksService.sinkEvent({
       provider: 'bridge',

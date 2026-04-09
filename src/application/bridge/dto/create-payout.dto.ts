@@ -24,7 +24,10 @@ export class CreatePayoutRequestDto {
   @IsUUID()
   supplier_id?: string;
 
-  @ApiProperty({ example: 'wire', enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'crypto'] })
+  @ApiProperty({
+    example: 'wire',
+    enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'crypto'],
+  })
   @IsString()
   @IsNotEmpty()
   payment_rail: string;

@@ -15,18 +15,18 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  * Updated to Bridge API OpenAPI spec (replaces previous Guira-specific enum).
  */
 export enum SourceOfFundsEnum {
-  SALARY                   = 'salary',
-  SAVINGS                  = 'savings',
-  COMPANY_FUNDS            = 'company_funds',
-  INVESTMENTS_LOANS        = 'investments_loans',
-  GOVERNMENT_BENEFITS      = 'government_benefits',
-  PENSION_RETIREMENT       = 'pension_retirement',
-  INHERITANCE              = 'inheritance',
-  GIFTS                    = 'gifts',
-  SALE_OF_ASSETS           = 'sale_of_assets_real_estate',
-  ECOMMERCE_RESELLER       = 'ecommerce_reseller',
-  SOMEONE_ELSES_FUNDS      = 'someone_elses_funds',
-  GAMBLING_PROCEEDS        = 'gambling_proceeds',
+  SALARY = 'salary',
+  SAVINGS = 'savings',
+  COMPANY_FUNDS = 'company_funds',
+  INVESTMENTS_LOANS = 'investments_loans',
+  GOVERNMENT_BENEFITS = 'government_benefits',
+  PENSION_RETIREMENT = 'pension_retirement',
+  INHERITANCE = 'inheritance',
+  GIFTS = 'gifts',
+  SALE_OF_ASSETS = 'sale_of_assets_real_estate',
+  ECOMMERCE_RESELLER = 'ecommerce_reseller',
+  SOMEONE_ELSES_FUNDS = 'someone_elses_funds',
+  GAMBLING_PROCEEDS = 'gambling_proceeds',
 }
 
 /**
@@ -35,16 +35,16 @@ export enum SourceOfFundsEnum {
  */
 export enum AccountPurposeEnum {
   PAYMENTS_TO_FRIENDS_OR_FAMILY_ABROAD = 'payments_to_friends_or_family_abroad',
-  PERSONAL_OR_LIVING_EXPENSES          = 'personal_or_living_expenses',
-  RECEIVE_SALARY                       = 'receive_salary',
-  PURCHASE_GOODS_AND_SERVICES          = 'purchase_goods_and_services',
-  RECEIVE_PAYMENT_FOR_FREELANCING      = 'receive_payment_for_freelancing',
-  INVESTMENT_PURPOSES                  = 'investment_purposes',
-  OPERATING_A_COMPANY                  = 'operating_a_company',
-  ECOMMERCE_RETAIL_PAYMENTS            = 'ecommerce_retail_payments',
-  CHARITABLE_DONATIONS                 = 'charitable_donations',
-  PROTECT_WEALTH                       = 'protect_wealth',
-  OTHER                                = 'other',
+  PERSONAL_OR_LIVING_EXPENSES = 'personal_or_living_expenses',
+  RECEIVE_SALARY = 'receive_salary',
+  PURCHASE_GOODS_AND_SERVICES = 'purchase_goods_and_services',
+  RECEIVE_PAYMENT_FOR_FREELANCING = 'receive_payment_for_freelancing',
+  INVESTMENT_PURPOSES = 'investment_purposes',
+  OPERATING_A_COMPANY = 'operating_a_company',
+  ECOMMERCE_RETAIL_PAYMENTS = 'ecommerce_retail_payments',
+  CHARITABLE_DONATIONS = 'charitable_donations',
+  PROTECT_WEALTH = 'protect_wealth',
+  OTHER = 'other',
 }
 
 export class CreatePersonDto {
@@ -186,26 +186,57 @@ export class CreatePersonDto {
    * P1 — Bridge high-risk field.
    * Updated to match Bridge API OpenAPI spec (homemaker added, other removed).
    */
-  @ApiPropertyOptional({ enum: ['employed', 'self_employed', 'unemployed', 'student', 'retired', 'homemaker'] })
+  @ApiPropertyOptional({
+    enum: [
+      'employed',
+      'self_employed',
+      'unemployed',
+      'student',
+      'retired',
+      'homemaker',
+    ],
+  })
   @IsOptional()
-  @IsEnum(['employed', 'self_employed', 'unemployed', 'student', 'retired', 'homemaker'])
-  employment_status?: 'employed' | 'self_employed' | 'unemployed' | 'student' | 'retired' | 'homemaker';
+  @IsEnum([
+    'employed',
+    'self_employed',
+    'unemployed',
+    'student',
+    'retired',
+    'homemaker',
+  ])
+  employment_status?:
+    | 'employed'
+    | 'self_employed'
+    | 'unemployed'
+    | 'student'
+    | 'retired'
+    | 'homemaker';
 
   /**
    * P1 — Bridge high-risk field.
    * Updated to match Bridge API OpenAPI spec enum values.
    */
-  @ApiPropertyOptional({ enum: ['0_4999', '5000_9999', '10000_49999', '50000_plus'] })
+  @ApiPropertyOptional({
+    enum: ['0_4999', '5000_9999', '10000_49999', '50000_plus'],
+  })
   @IsOptional()
   @IsEnum(['0_4999', '5000_9999', '10000_49999', '50000_plus'])
-  expected_monthly_payments_usd?: '0_4999' | '5000_9999' | '10000_49999' | '50000_plus';
+  expected_monthly_payments_usd?:
+    | '0_4999'
+    | '5000_9999'
+    | '10000_49999'
+    | '50000_plus';
 
   /**
    * Bridge field — alphanumeric occupation code from Bridge occupation list.
    * Required for high-risk customers and restricted countries.
    * Ref: https://apidocs.bridge.xyz/platform/customers/compliance/sof-eu-most-recent-occupation-list
    */
-  @ApiPropertyOptional({ example: '222111', description: 'Bridge occupation code (alphanumeric)' })
+  @ApiPropertyOptional({
+    example: '222111',
+    description: 'Bridge occupation code (alphanumeric)',
+  })
   @IsOptional()
   @IsString()
   most_recent_occupation?: string;

@@ -41,7 +41,7 @@ export class BridgeService {
     if (dto.destination_wallet_id && dto.destination_address) {
       throw new BadRequestException(
         'No puedes especificar destination_wallet_id y destination_address al mismo tiempo. ' +
-        'Usa destination_wallet_id para fondear tu wallet en Guira, o destination_address para enviar a una wallet externa (Binance, MetaMask, etc.).',
+          'Usa destination_wallet_id para fondear tu wallet en Guira, o destination_address para enviar a una wallet externa (Binance, MetaMask, etc.).',
       );
     }
 
@@ -122,7 +122,8 @@ export class BridgeService {
     );
 
     // ── Extraer TODOS los campos de source_deposit_instructions ──
-    const sdi = (bridgeVA.source_deposit_instructions as Record<string, unknown>) ?? {};
+    const sdi =
+      (bridgeVA.source_deposit_instructions as Record<string, unknown>) ?? {};
     const bridgeDest = (bridgeVA.destination as Record<string, unknown>) ?? {};
 
     // Guardar en DB con todos los campos de la respuesta de Bridge
@@ -135,7 +136,8 @@ export class BridgeService {
         source_currency: dto.source_currency.toLowerCase(),
         destination_currency: dto.destination_currency.toLowerCase(),
         destination_payment_rail: dto.destination_payment_rail,
-        destination_address: (bridgeDest.address as string) ?? destinationAddress ?? null,
+        destination_address:
+          (bridgeDest.address as string) ?? destinationAddress ?? null,
         destination_wallet_id: dto.destination_wallet_id ?? null,
         is_external_sweep: isExternalSweep,
         external_destination_label: dto.destination_label ?? null,
@@ -263,15 +265,60 @@ export class BridgeService {
       if (!code) return undefined;
       if (code.length === 3) return code.toUpperCase(); // ya está en alpha-3
       const map: Record<string, string> = {
-        US: 'USA', MX: 'MEX', BR: 'BRA', CO: 'COL', AR: 'ARG', CL: 'CHL',
-        PE: 'PER', EC: 'ECU', BO: 'BOL', PY: 'PRY', UY: 'URY', VE: 'VEN',
-        DE: 'DEU', FR: 'FRA', ES: 'ESP', IT: 'ITA', NL: 'NLD', GB: 'GBR',
-        PT: 'PRT', BE: 'BEL', AT: 'AUT', CH: 'CHE', SE: 'SWE', NO: 'NOR',
-        DK: 'DNK', FI: 'FIN', PL: 'POL', IE: 'IRL', CZ: 'CZE', HU: 'HUN',
-        RO: 'ROU', SK: 'SVK', HR: 'HRV', BG: 'BGR', LT: 'LTU', LV: 'LVA',
-        EE: 'EST', SI: 'SVN', LU: 'LUX', MT: 'MLT', CY: 'CYP', GR: 'GRC',
-        CN: 'CHN', JP: 'JPN', KR: 'KOR', IN: 'IND', SG: 'SGP', AU: 'AUS',
-        NZ: 'NZL', CA: 'CAN', ZA: 'ZAF', NG: 'NGA', KE: 'KEN', GH: 'GHA',
+        US: 'USA',
+        MX: 'MEX',
+        BR: 'BRA',
+        CO: 'COL',
+        AR: 'ARG',
+        CL: 'CHL',
+        PE: 'PER',
+        EC: 'ECU',
+        BO: 'BOL',
+        PY: 'PRY',
+        UY: 'URY',
+        VE: 'VEN',
+        DE: 'DEU',
+        FR: 'FRA',
+        ES: 'ESP',
+        IT: 'ITA',
+        NL: 'NLD',
+        GB: 'GBR',
+        PT: 'PRT',
+        BE: 'BEL',
+        AT: 'AUT',
+        CH: 'CHE',
+        SE: 'SWE',
+        NO: 'NOR',
+        DK: 'DNK',
+        FI: 'FIN',
+        PL: 'POL',
+        IE: 'IRL',
+        CZ: 'CZE',
+        HU: 'HUN',
+        RO: 'ROU',
+        SK: 'SVK',
+        HR: 'HRV',
+        BG: 'BGR',
+        LT: 'LTU',
+        LV: 'LVA',
+        EE: 'EST',
+        SI: 'SVN',
+        LU: 'LUX',
+        MT: 'MLT',
+        CY: 'CYP',
+        GR: 'GRC',
+        CN: 'CHN',
+        JP: 'JPN',
+        KR: 'KOR',
+        IN: 'IND',
+        SG: 'SGP',
+        AU: 'AUS',
+        NZ: 'NZL',
+        CA: 'CAN',
+        ZA: 'ZAF',
+        NG: 'NGA',
+        KE: 'KEN',
+        GH: 'GHA',
       };
       return map[code.toUpperCase()] ?? code.toUpperCase();
     };
@@ -315,7 +362,8 @@ export class BridgeService {
           if (dto.first_name) bridgePayload.first_name = dto.first_name;
           if (dto.last_name) bridgePayload.last_name = dto.last_name;
         } else if (dto.account_owner_type === 'business') {
-          if (dto.business_name) bridgePayload.business_name = dto.business_name;
+          if (dto.business_name)
+            bridgePayload.business_name = dto.business_name;
         }
       }
 
@@ -347,7 +395,8 @@ export class BridgeService {
           if (dto.first_name) bridgePayload.first_name = dto.first_name;
           if (dto.last_name) bridgePayload.last_name = dto.last_name;
         } else if (dto.account_owner_type === 'business') {
-          if (dto.business_name) bridgePayload.business_name = dto.business_name;
+          if (dto.business_name)
+            bridgePayload.business_name = dto.business_name;
         }
       }
 
@@ -391,7 +440,8 @@ export class BridgeService {
           if (dto.first_name) bridgePayload.first_name = dto.first_name;
           if (dto.last_name) bridgePayload.last_name = dto.last_name;
         } else if (dto.account_owner_type === 'business') {
-          if (dto.business_name) bridgePayload.business_name = dto.business_name;
+          if (dto.business_name)
+            bridgePayload.business_name = dto.business_name;
         }
       }
 
@@ -425,11 +475,17 @@ export class BridgeService {
     );
 
     // Extraer datos de respuesta de Bridge (la estructura varía por rail)
-    const bridgeAccount = bridgeEA.account as Record<string, unknown> | undefined;
+    const bridgeAccount = bridgeEA.account as
+      | Record<string, unknown>
+      | undefined;
     const bridgeIban = bridgeEA.iban as Record<string, unknown> | undefined;
     const bridgeClabe = bridgeEA.clabe as Record<string, unknown> | undefined;
-    const bridgePixKey = bridgeEA.pix_key as Record<string, unknown> | undefined;
-    const bridgeBrCode = bridgeEA.br_code as Record<string, unknown> | undefined;
+    const bridgePixKey = bridgeEA.pix_key as
+      | Record<string, unknown>
+      | undefined;
+    const bridgeBrCode = bridgeEA.br_code as
+      | Record<string, unknown>
+      | undefined;
 
     // ── Guardar en DB ──
     const { data, error } = await this.supabase
@@ -446,8 +502,15 @@ export class BridgeService {
           (bridgeClabe?.last_4 as string) ??
           (bridgePixKey?.account_preview as string)?.slice(-4) ??
           (bridgeBrCode?.account_preview as string)?.slice(-4) ??
-          (dto.account_number ?? dto.iban ?? dto.clabe ?? dto.pix_key ?? dto.br_code ?? dto.bre_b_key ?? '')
-            .slice(-4),
+          (
+            dto.account_number ??
+            dto.iban ??
+            dto.clabe ??
+            dto.pix_key ??
+            dto.br_code ??
+            dto.bre_b_key ??
+            ''
+          ).slice(-4),
         currency: dto.currency.toLowerCase(),
         payment_rail: dto.payment_rail,
         account_type: dto.checking_or_savings ?? null,
@@ -593,7 +656,8 @@ export class BridgeService {
       .eq('id', payoutRequestId)
       .single();
 
-    if (reqErr || !req) throw new NotFoundException('Payout request no encontrado');
+    if (reqErr || !req)
+      throw new NotFoundException('Payout request no encontrado');
 
     // Obtener wallet address
     const { data: wallet } = await this.supabase
@@ -715,7 +779,8 @@ export class BridgeService {
       .eq('user_id', userId)
       .single();
 
-    if (error || !data) throw new NotFoundException('Payout request no encontrado');
+    if (error || !data)
+      throw new NotFoundException('Payout request no encontrado');
     return data;
   }
 
@@ -730,7 +795,9 @@ export class BridgeService {
 
     if (!req) throw new NotFoundException('Payout pendiente no encontrado');
 
-    const bridgeCustomerId = (req.profiles as unknown as { bridge_customer_id: string })?.bridge_customer_id;
+    const bridgeCustomerId = (
+      req.profiles as unknown as { bridge_customer_id: string }
+    )?.bridge_customer_id;
 
     await this.supabase.from('audit_logs').insert({
       actor_id: actorId,
@@ -760,7 +827,11 @@ export class BridgeService {
 
     await this.supabase
       .from('payout_requests')
-      .update({ status: 'rejected', notes: reason, updated_at: new Date().toISOString() })
+      .update({
+        status: 'rejected',
+        notes: reason,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', payoutId);
 
     await this.supabase.from('audit_logs').insert({
@@ -797,7 +868,8 @@ export class BridgeService {
       .eq('user_id', userId)
       .single();
 
-    if (error || !data) throw new NotFoundException('Transferencia no encontrada');
+    if (error || !data)
+      throw new NotFoundException('Transferencia no encontrada');
     return data;
   }
 
@@ -872,12 +944,9 @@ export class BridgeService {
       .eq('id', userId)
       .single();
 
-    if (error || !profile)
-      throw new NotFoundException('Perfil no encontrado');
-    if (!profile.is_active)
-      throw new ForbiddenException('Cuenta inactiva');
-    if (profile.is_frozen)
-      throw new ForbiddenException('Cuenta congelada');
+    if (error || !profile) throw new NotFoundException('Perfil no encontrado');
+    if (!profile.is_active) throw new ForbiddenException('Cuenta inactiva');
+    if (profile.is_frozen) throw new ForbiddenException('Cuenta congelada');
     if (
       profile.onboarding_status !== 'approved' ||
       !profile.bridge_customer_id

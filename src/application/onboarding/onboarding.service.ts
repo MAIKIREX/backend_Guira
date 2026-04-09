@@ -41,9 +41,7 @@ export class OnboardingService {
     // Validar edad ≥ 18
     const age = this.calculateAge(dto.date_of_birth);
     if (age < 18) {
-      throw new BadRequestException(
-        'El solicitante debe ser mayor de 18 años',
-      );
+      throw new BadRequestException('El solicitante debe ser mayor de 18 años');
     }
 
     // Verificar si ya existe
@@ -257,10 +255,7 @@ export class OnboardingService {
     });
 
     // Notificar al staff
-    await this.notifyStaff(
-      userId,
-      'Nueva solicitud KYC pendiente de revisión',
-    );
+    await this.notifyStaff(userId, 'Nueva solicitud KYC pendiente de revisión');
 
     this.logger.log(`KYC application ${app.id} submitted by user ${userId}`);
     return data;
@@ -492,10 +487,7 @@ export class OnboardingService {
       priority: 'normal',
     });
 
-    await this.notifyStaff(
-      userId,
-      'Nueva solicitud KYB pendiente de revisión',
-    );
+    await this.notifyStaff(userId, 'Nueva solicitud KYB pendiente de revisión');
 
     this.logger.log(`KYB application ${app.id} submitted by user ${userId}`);
     return data;
@@ -596,7 +588,9 @@ export class OnboardingService {
   async listDocuments(userId: string, subjectType?: string) {
     let query = this.supabase
       .from('documents')
-      .select('id, document_type, subject_type, file_name, mime_type, file_size_bytes, status, created_at')
+      .select(
+        'id, document_type, subject_type, file_name, mime_type, file_size_bytes, status, created_at',
+      )
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -656,7 +650,7 @@ export class OnboardingService {
     const today = new Date();
     let age = today.getFullYear() - dob.getFullYear();
     const m = today.getMonth() - dob.getMonth();
-    if (m < 0  || (m === 0 && today.getDate() < dob.getDate())) {
+    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
       age--;
     }
     return age;

@@ -28,7 +28,9 @@ export class WalletsService {
   async findAllByUser(userId: string) {
     const { data: wallets, error } = await this.supabase
       .from('wallets')
-      .select('id, currency, address, network, provider_key, label, is_active, created_at')
+      .select(
+        'id, currency, address, network, provider_key, label, is_active, created_at',
+      )
       .eq('user_id', userId)
       .eq('is_active', true)
       .order('created_at', { ascending: true });
@@ -42,7 +44,10 @@ export class WalletsService {
       .select('currency, amount, available_amount, reserved_amount')
       .eq('user_id', userId);
 
-    const balanceMap = new Map<string, { amount: number; available_amount: number; reserved_amount: number }>(
+    const balanceMap = new Map<
+      string,
+      { amount: number; available_amount: number; reserved_amount: number }
+    >(
       (balances ?? []).map((b) => [
         b.currency?.toUpperCase(),
         {
@@ -92,7 +97,9 @@ export class WalletsService {
   async getBalances(userId: string) {
     const { data, error } = await this.supabase
       .from('balances')
-      .select('id, currency, amount, available_amount, pending_amount, reserved_amount, updated_at')
+      .select(
+        'id, currency, amount, available_amount, pending_amount, reserved_amount, updated_at',
+      )
       .eq('user_id', userId)
       .order('currency', { ascending: true });
 
@@ -119,12 +126,14 @@ export class WalletsService {
   async getPayinRoutes(userId: string) {
     const { data, error } = await this.supabase
       .from('payin_routes')
-      .select(`
+      .select(
+        `
         *,
         bridge_virtual_accounts (
           id, va_id, currency, status, bank_name, account_number, routing_number
         )
-      `)
+      `,
+      )
       .eq('user_id', userId)
       .eq('is_active', true);
 
@@ -279,7 +288,8 @@ export class WalletsService {
     }
 
     const newAmount = parseFloat(balance.amount) + adjustmentAmount;
-    const newAvailable = parseFloat(balance.available_amount) + adjustmentAmount;
+    const newAvailable =
+      parseFloat(balance.available_amount) + adjustmentAmount;
 
     if (newAvailable < 0) {
       throw new BadRequestException(

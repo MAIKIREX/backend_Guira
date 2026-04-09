@@ -1,4 +1,9 @@
-import { Injectable, Inject, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
 import { CreateNotificationDto } from './dto/notifications.dto';
@@ -25,7 +30,9 @@ export class NotificationsService {
     });
 
     if (error) {
-      this.logger.error(`Error enviando notificación a ${params.userId}: ${error.message}`);
+      this.logger.error(
+        `Error enviando notificación a ${params.userId}: ${error.message}`,
+      );
     }
   }
 

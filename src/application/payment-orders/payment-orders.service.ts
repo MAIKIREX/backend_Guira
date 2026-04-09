@@ -52,9 +52,7 @@ export class PaymentOrdersService {
       .single();
 
     const maxPerHour = parseInt(setting?.value ?? '5', 10);
-    const oneHourAgo = new Date(
-      Date.now() - 60 * 60 * 1000,
-    ).toISOString();
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
     const { count } = await this.supabase
       .from('payment_orders')
@@ -89,14 +87,10 @@ export class PaymentOrdersService {
     const max = parseFloat(maxSetting?.value ?? '999999');
 
     if (amount < min) {
-      throw new BadRequestException(
-        `El monto mínimo es $${min}`,
-      );
+      throw new BadRequestException(`El monto mínimo es $${min}`);
     }
     if (amount > max) {
-      throw new BadRequestException(
-        `El monto máximo es $${max}`,
-      );
+      throw new BadRequestException(`El monto máximo es $${max}`);
     }
   }
 
@@ -170,10 +164,11 @@ export class PaymentOrdersService {
       .eq('bridge_external_account_id', dto.external_account_id)
       .single();
 
-    const fullAccountNumber = supplier?.bank_details?.account_number 
-      ?? extAccount.account_last_4 
-      ?? extAccount.iban 
-      ?? extAccount.swift_bic;
+    const fullAccountNumber =
+      supplier?.bank_details?.account_number ??
+      extAccount.account_last_4 ??
+      extAccount.iban ??
+      extAccount.swift_bic;
 
     // Obtener cuenta PSAV para depósito en BOB
     const psavAccount = await this.psavService.getDepositAccount(
@@ -211,7 +206,10 @@ export class PaymentOrdersService {
         external_account_id: dto.external_account_id,
         supplier_id: dto.supplier_id ?? null,
         destination_bank_name: extAccount.bank_name,
-        destination_account_holder: extAccount.account_name ?? extAccount.first_name ?? extAccount.business_name,
+        destination_account_holder:
+          extAccount.account_name ??
+          extAccount.first_name ??
+          extAccount.business_name,
         destination_account_number: fullAccountNumber,
         exchange_rate_applied: rateData.effective_rate,
         amount_destination: parseFloat(
@@ -266,7 +264,10 @@ export class PaymentOrdersService {
         destination_type: 'crypto_address',
         destination_address: dto.destination_address,
         destination_network: dto.destination_network,
-        destination_currency: dto.destination_currency?.toUpperCase() ?? dto.source_currency?.toUpperCase() ?? 'USDT',
+        destination_currency:
+          dto.destination_currency?.toUpperCase() ??
+          dto.source_currency?.toUpperCase() ??
+          'USDT',
         supplier_id: dto.supplier_id ?? null,
         business_purpose: dto.business_purpose,
         supporting_document_url: dto.supporting_document_url,
@@ -314,7 +315,8 @@ export class PaymentOrdersService {
       );
 
       const transferId = (bridgeResult?.id ?? null) as string | null;
-      const sourceDepositInstructions = bridgeResult?.source_deposit_instructions ?? null;
+      const sourceDepositInstructions =
+        bridgeResult?.source_deposit_instructions ?? null;
 
       await this.supabase
         .from('payment_orders')
@@ -338,9 +340,7 @@ export class PaymentOrdersService {
         })
         .eq('id', order.id);
 
-      throw new BadRequestException(
-        `Error al ejecutar transfer: ${message}`,
-      );
+      throw new BadRequestException(`Error al ejecutar transfer: ${message}`);
     }
 
     this.logger.log(
@@ -491,9 +491,11 @@ export class PaymentOrdersService {
         .select('*')
         .eq('user_id', userId)
         .single();
-      
+
       if (!va) {
-        throw new NotFoundException('Virtual Account no encontrada para el usuario');
+        throw new NotFoundException(
+          'Virtual Account no encontrada para el usuario',
+        );
       }
       vaId = va.id;
       vaData = va;
@@ -523,7 +525,8 @@ export class PaymentOrdersService {
       type: 'bank',
       label: 'Tu Virtual Account',
       bank_name: vaData.bank_name || 'Banco de VA',
-      account_holder: vaData.account_holder_name || vaData.beneficiary_name || 'Guira',
+      account_holder:
+        vaData.account_holder_name || vaData.beneficiary_name || 'Guira',
       account_number: `ACC: ${vaData.account_number || ''} | Routing: ${vaData.routing_number || ''}`,
       currency: vaData.destination_currency || 'USD',
     };
@@ -662,23 +665,65 @@ export class PaymentOrdersService {
       dto.amount,
     );
 
-    // Obtener instrucciones de depósito: la liquidation address del usuario
-    let depositInstructions: Record<string, unknown> = {};
-    const { data: liqAddr } = await this.supabase
-      .from('bridge_liquidation_addresses')
-      .select('bridge_liquidation_address_id, chain, address')
-      .eq('user_id', userId)
-      .limit(1)
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('bridge_customer_id')
+      .eq('id', userId)
       .single();
 
-    if (liqAddr) {
-      depositInstructions = {
-        type: 'liquidation_address',
-        address: liqAddr.address,
-        chain: liqAddr.chain,
-        label: `Liquidation Address (${liqAddr.chain})`,
-      };
+    if (!profile?.bridge_customer_id) {
+      throw new BadRequestException(
+        'El usuario no tiene un bridge_customer_id configurado. Por favor, completa el registro.',
+      );
     }
+
+    // 1. Llamada a Bridge Transfer API
+    let bridgeTransfer: Record<string, unknown>;
+    try {
+      bridgeTransfer = await this.bridgeApi.post<Record<string, unknown>>(
+        '/v0/transfers',
+        {
+          on_behalf_of: profile.bridge_customer_id,
+          source: {
+            payment_rail: dto.source_network,
+            currency: 'usdt',
+            from_address: dto.source_address,
+          },
+          destination: {
+            payment_rail: wallet.network,
+            currency: 'usdc', // Bridge fondea USDC en billetera crypto
+            to_address: wallet.address,
+          },
+          amount: dto.amount.toString(),
+        },
+      );
+    } catch (err) {
+      this.logger.error('Error llamando a Bridge Transfer API:', err);
+      throw new BadRequestException('No se pudieron generar las instrucciones de depósito en Bridge.');
+    }
+
+    // 2. Extraer instrucciones de depósito
+    const bridgeInstr = bridgeTransfer.source_deposit_instructions as Record<string, string> | undefined;
+    const depositInstructions = {
+      type: 'bridge_transfer',
+      address: bridgeInstr?.to_address ?? bridgeInstr?.address ?? '',
+      chain: bridgeInstr?.payment_rail ?? bridgeInstr?.chain ?? dto.source_network,
+      label: `Transferencia Bridge (${dto.source_network})`,
+    };
+
+    // 3. Crear registro de puente
+    await this.supabase.from('bridge_transfers').insert({
+      user_id: userId,
+      bridge_transfer_id: bridgeTransfer.id as string,
+      amount: dto.amount,
+      net_amount: net_amount,
+      bridge_state: (bridgeTransfer.state as string) ?? 'payment_submitted',
+      status: 'pending',
+      source_payment_rail: dto.source_network,
+      destination_payment_rail: wallet.network,
+      destination_currency: wallet.currency,
+      bridge_raw_response: bridgeTransfer,
+    });
 
     const { data: order, error } = await this.supabase
       .from('payment_orders')
@@ -689,13 +734,14 @@ export class PaymentOrdersService {
         flow_category: 'wallet_ramp',
         requires_psav: false,
         amount: dto.amount,
-        currency: dto.source_address ? 'USDT' : wallet.currency,
+        currency: 'USDT',
         fee_amount,
         net_amount,
         source_address: dto.source_address,
         source_network: dto.source_network,
         destination_type: 'bridge_wallet',
         destination_currency: wallet.currency,
+        bridge_transfer_id: bridgeTransfer.id as string,
         bridge_source_deposit_instructions: depositInstructions,
         notes: dto.notes,
         status: 'waiting_deposit',
@@ -805,10 +851,7 @@ export class PaymentOrdersService {
       .single();
 
     const totalNeeded = dto.amount + fee_amount;
-    if (
-      !balance ||
-      parseFloat(balance.available_amount ?? '0') < totalNeeded
-    ) {
+    if (!balance || parseFloat(balance.available_amount ?? '0') < totalNeeded) {
       throw new BadRequestException(
         `Saldo insuficiente. Necesitas $${totalNeeded} (monto + fee) pero tienes $${balance?.available_amount ?? 0}`,
       );
@@ -893,10 +936,7 @@ export class PaymentOrdersService {
       .single();
 
     const totalNeeded = dto.amount + fee_amount;
-    if (
-      !balance ||
-      parseFloat(balance.available_amount ?? '0') < totalNeeded
-    ) {
+    if (!balance || parseFloat(balance.available_amount ?? '0') < totalNeeded) {
       throw new BadRequestException(
         `Saldo insuficiente. Necesitas $${totalNeeded} pero tienes $${balance?.available_amount ?? 0}`,
       );
@@ -953,8 +993,12 @@ export class PaymentOrdersService {
             from_address: wallet.address,
           },
           destination: {
-            payment_rail: (dto.destination_currency ?? wallet.currency).toLowerCase(),
-            currency: (dto.destination_currency ?? wallet.currency).toLowerCase(),
+            payment_rail: (
+              dto.destination_currency ?? wallet.currency
+            ).toLowerCase(),
+            currency: (
+              dto.destination_currency ?? wallet.currency
+            ).toLowerCase(),
             to_address: dto.destination_address,
           },
           amount: net_amount.toString(),
@@ -1050,10 +1094,7 @@ export class PaymentOrdersService {
       .single();
 
     const totalNeeded = dto.amount + fee_amount;
-    if (
-      !balance ||
-      parseFloat(balance.available_amount ?? '0') < totalNeeded
-    ) {
+    if (!balance || parseFloat(balance.available_amount ?? '0') < totalNeeded) {
       throw new BadRequestException(
         `Saldo insuficiente. Necesitas $${totalNeeded} pero tienes $${balance?.available_amount ?? 0}`,
       );
@@ -1162,9 +1203,7 @@ export class PaymentOrdersService {
         })
         .eq('id', order.id);
 
-      throw new BadRequestException(
-        `Error al ejecutar payout: ${message}`,
-      );
+      throw new BadRequestException(`Error al ejecutar payout: ${message}`);
     }
 
     this.logger.log(
@@ -1287,7 +1326,9 @@ export class PaymentOrdersService {
   async cancelOrder(userId: string, orderId: string) {
     const { data: order } = await this.supabase
       .from('payment_orders')
-      .select('id, user_id, status, flow_type, amount, fee_amount, currency, wallet_id')
+      .select(
+        'id, user_id, status, flow_type, amount, fee_amount, currency, wallet_id',
+      )
       .eq('id', orderId)
       .eq('user_id', userId)
       .single();
@@ -1310,8 +1351,7 @@ export class PaymentOrdersService {
 
     if (outboundFlows.includes(order.flow_type ?? '')) {
       const totalReserved =
-        parseFloat(order.amount ?? '0') +
-        parseFloat(order.fee_amount ?? '0');
+        parseFloat(order.amount ?? '0') + parseFloat(order.fee_amount ?? '0');
 
       await this.supabase.rpc('release_reserved_balance', {
         p_user_id: userId,
@@ -1352,10 +1392,7 @@ export class PaymentOrdersService {
 
     let query = this.supabase
       .from('payment_orders')
-      .select(
-        `*`,
-        { count: 'exact' },
-      )
+      .select(`*`, { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -1366,8 +1403,7 @@ export class PaymentOrdersService {
     if (filters.requires_psav !== undefined)
       query = query.eq('requires_psav', filters.requires_psav);
     if (filters.user_id) query = query.eq('user_id', filters.user_id);
-    if (filters.from_date)
-      query = query.gte('created_at', filters.from_date);
+    if (filters.from_date) query = query.gte('created_at', filters.from_date);
     if (filters.to_date) query = query.lte('created_at', filters.to_date);
 
     const { data, count, error } = await query;
@@ -1384,8 +1420,10 @@ export class PaymentOrdersService {
     const rows = allActive ?? [];
 
     return {
-      waiting_deposit: rows.filter((r) => r.status === 'waiting_deposit').length,
-      deposit_received: rows.filter((r) => r.status === 'deposit_received').length,
+      waiting_deposit: rows.filter((r) => r.status === 'waiting_deposit')
+        .length,
+      deposit_received: rows.filter((r) => r.status === 'deposit_received')
+        .length,
       processing: rows.filter((r) => r.status === 'processing').length,
       sent: rows.filter((r) => r.status === 'sent').length,
       psav_pending: rows.filter(
@@ -1396,11 +1434,7 @@ export class PaymentOrdersService {
     };
   }
 
-  async approveOrder(
-    orderId: string,
-    actorId: string,
-    dto: ApproveOrderDto,
-  ) {
+  async approveOrder(orderId: string, actorId: string, dto: ApproveOrderDto) {
     const { data: order } = await this.supabase
       .from('payment_orders')
       .select('*')
@@ -1540,11 +1574,7 @@ export class PaymentOrdersService {
     return updated;
   }
 
-  async completeOrder(
-    orderId: string,
-    actorId: string,
-    dto: CompleteOrderDto,
-  ) {
+  async completeOrder(orderId: string, actorId: string, dto: CompleteOrderDto) {
     const { data: order } = await this.supabase
       .from('payment_orders')
       .select('*')
@@ -1592,8 +1622,7 @@ export class PaymentOrdersService {
     // Off-ramp PSAV a fiat BO — asentar débito y liberar reserva
     if (order.flow_type === 'bridge_wallet_to_fiat_bo') {
       const totalReserved =
-        parseFloat(order.amount ?? '0') +
-        parseFloat(order.fee_amount ?? '0');
+        parseFloat(order.amount ?? '0') + parseFloat(order.fee_amount ?? '0');
 
       await this.supabase.from('ledger_entries').insert({
         wallet_id: order.wallet_id,
@@ -1675,8 +1704,7 @@ export class PaymentOrdersService {
 
     if (outboundFlows.includes(order.flow_type ?? '')) {
       const totalReserved =
-        parseFloat(order.amount ?? '0') +
-        parseFloat(order.fee_amount ?? '0');
+        parseFloat(order.amount ?? '0') + parseFloat(order.fee_amount ?? '0');
 
       await this.supabase
         .from('ledger_entries')

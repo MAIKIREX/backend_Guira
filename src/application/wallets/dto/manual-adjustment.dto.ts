@@ -1,4 +1,10 @@
-import { IsNumber, IsString, IsNotEmpty, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsNumber,
+  IsString,
+  IsNotEmpty,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ManualAdjustmentDto {

@@ -1,4 +1,12 @@
-import { IsEnum, IsNumber, IsString, IsNotEmpty, IsUUID, MaxLength, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsNumber,
+  IsString,
+  IsNotEmpty,
+  IsUUID,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateAdjustmentDto {

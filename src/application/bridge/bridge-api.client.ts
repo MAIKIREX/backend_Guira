@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  BadGatewayException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, BadGatewayException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 /**
@@ -54,9 +50,7 @@ export class BridgeApiClient {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error(`Bridge POST ${path} failed [${res.status}]: ${err}`);
-      throw new BadGatewayException(
-        `Bridge API error [${res.status}]: ${err}`,
-      );
+      throw new BadGatewayException(`Bridge API error [${res.status}]: ${err}`);
     }
 
     return res.json() as Promise<T>;
@@ -72,9 +66,7 @@ export class BridgeApiClient {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error(`Bridge GET ${path} failed [${res.status}]: ${err}`);
-      throw new BadGatewayException(
-        `Bridge API error [${res.status}]: ${err}`,
-      );
+      throw new BadGatewayException(`Bridge API error [${res.status}]: ${err}`);
     }
 
     return res.json() as Promise<T>;
@@ -90,12 +82,8 @@ export class BridgeApiClient {
 
     if (!res.ok) {
       const err = await res.text();
-      this.logger.error(
-        `Bridge DELETE ${path} failed [${res.status}]: ${err}`,
-      );
-      throw new BadGatewayException(
-        `Bridge API error [${res.status}]: ${err}`,
-      );
+      this.logger.error(`Bridge DELETE ${path} failed [${res.status}]: ${err}`);
+      throw new BadGatewayException(`Bridge API error [${res.status}]: ${err}`);
     }
 
     return res.json() as Promise<T>;

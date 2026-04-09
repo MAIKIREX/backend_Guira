@@ -45,7 +45,10 @@ export class ProfilesService {
   ): Promise<ProfileResponseDto> {
     const { data, error } = await this.supabase
       .from('profiles')
-      .update({ avatar_url: dto.avatar_url, updated_at: new Date().toISOString() })
+      .update({
+        avatar_url: dto.avatar_url,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', userId)
       .select()
       .single();
@@ -99,7 +102,11 @@ export class ProfilesService {
   async findAll(
     page = 1,
     limit = 20,
-    filters?: { role?: string; onboarding_status?: string; is_frozen?: boolean },
+    filters?: {
+      role?: string;
+      onboarding_status?: string;
+      is_frozen?: boolean;
+    },
   ) {
     const offset = (page - 1) * limit;
 

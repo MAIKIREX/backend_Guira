@@ -60,10 +60,7 @@ export class LedgerService {
         'wallet_id',
         // Subquery: obtener wallet_ids del usuario
         (
-          await this.supabase
-            .from('wallets')
-            .select('id')
-            .eq('user_id', userId)
+          await this.supabase.from('wallets').select('id').eq('user_id', userId)
         ).data?.map((w) => w.id) ?? [],
       )
       .order('created_at', { ascending: false })

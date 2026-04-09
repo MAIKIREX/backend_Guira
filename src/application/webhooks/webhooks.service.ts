@@ -36,7 +36,10 @@ export class WebhooksService {
     // Esta es la única oportunidad de verificar de forma fidedigna — en el CRON el
     // body ha sido re-serializado desde JSON y no coincide byte a byte con el original.
     const signatureHeader = dto.headers['x-webhook-signature'] ?? null;
-    const signatureVerified = this.verifyBridgeSignature(dto.raw_body, signatureHeader);
+    const signatureVerified = this.verifyBridgeSignature(
+      dto.raw_body,
+      signatureHeader,
+    );
 
     if (!signatureVerified) {
       this.logger.warn(
@@ -82,11 +85,16 @@ export class WebhooksService {
       .limit(10);
 
     if (stuckEvents && stuckEvents.length > 0) {
-      this.logger.warn(`🔄 Rescatando ${stuckEvents.length} evento(s) atascados en 'processing'`);
+      this.logger.warn(
+        `🔄 Rescatando ${stuckEvents.length} evento(s) atascados en 'processing'`,
+      );
       await this.supabase
         .from('webhook_events')
         .update({ status: 'pending' })
-        .in('id', stuckEvents.map((e) => e.id));
+        .in(
+          'id',
+          stuckEvents.map((e) => e.id),
+        );
     }
 
     // ── 2. Procesar eventos pendientes ───────────────────────────────────────────
@@ -116,7 +124,10 @@ export class WebhooksService {
 
     await this.supabase
       .from('webhook_events')
-      .update({ status: 'processing', processing_started_at: new Date().toISOString() })
+      .update({
+        status: 'processing',
+        processing_started_at: new Date().toISOString(),
+      })
       .eq('id', id);
 
     try {
@@ -125,8 +136,13 @@ export class WebhooksService {
       // re-serializado desde JSON (no coincide byte a byte con el original de Bridge).
       const signatureVerified = event.signature_verified as boolean;
 
-      if (!signatureVerified && this.config.get('app.nodeEnv') === 'production') {
-        this.logger.warn(`❌ Firma inválida en evento ${id} — ignorado en producción`);
+      if (
+        !signatureVerified &&
+        this.config.get('app.nodeEnv') === 'production'
+      ) {
+        this.logger.warn(
+          `❌ Firma inválida en evento ${id} — ignorado en producción`,
+        );
         await this.supabase
           .from('webhook_events')
           .update({ status: 'ignored' })
@@ -155,12 +171,20 @@ export class WebhooksService {
 
       await this.supabase
         .from('webhook_events')
-        .update({ status: newStatus, retry_count: retryCount, last_error: message })
+        .update({
+          status: newStatus,
+          retry_count: retryCount,
+          last_error: message,
+        })
         .eq('id', id);
 
       // Si falla 5 veces → notificar admin
       if (retryCount >= 5) {
-        await this.notifyAdminWebhookFailed(id, event.event_type as string, message);
+        await this.notifyAdminWebhookFailed(
+          id,
+          event.event_type as string,
+          message,
+        );
       }
     }
   }
@@ -220,7 +244,9 @@ export class WebhooksService {
         break;
 
       default:
-        this.logger.warn(`⚠️ Evento Bridge sin handler: ${eventType} — registrado pero no procesado`);
+        this.logger.warn(
+          `⚠️ Evento Bridge sin handler: ${eventType} — registrado pero no procesado`,
+        );
     }
   }
 
@@ -230,8 +256,12 @@ export class WebhooksService {
   //  si a\u00fan no está guardado (el approveReview ya lo guarda, esto es idempotente).
   // ═══════════════════════════════════════════════
 
-  private async handleCustomerCreated(payload: Record<string, unknown>): Promise<void> {
-    const eventObject = payload.event_object as Record<string, unknown> | undefined;
+  private async handleCustomerCreated(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const eventObject = payload.event_object as
+      | Record<string, unknown>
+      | undefined;
     const customerId = eventObject?.id as string | undefined;
     const email = eventObject?.email as string | undefined;
 
@@ -248,7 +278,9 @@ export class WebhooksService {
       .maybeSingle();
 
     if (!profile) {
-      this.logger.warn(`customer.created: no se encontró profile para email ${email}`);
+      this.logger.warn(
+        `customer.created: no se encontró profile para email ${email}`,
+      );
       return;
     }
 
@@ -257,7 +289,9 @@ export class WebhooksService {
         .from('profiles')
         .update({ bridge_customer_id: customerId })
         .eq('id', profile.id);
-      this.logger.log(`customer.created: bridge_customer_id ${customerId} guardado para user ${profile.id}`);
+      this.logger.log(
+        `customer.created: bridge_customer_id ${customerId} guardado para user ${profile.id}`,
+      );
     }
   }
 
@@ -267,8 +301,12 @@ export class WebhooksService {
   //  actualizamos el perfil y \u2014 si llega a active \u2014 inicializamos wallets.
   // ═══════════════════════════════════════════════
 
-  private async handleCustomerUpdated(payload: Record<string, unknown>): Promise<void> {
-    const eventObject = payload.event_object as Record<string, unknown> | undefined;
+  private async handleCustomerUpdated(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const eventObject = payload.event_object as
+      | Record<string, unknown>
+      | undefined;
     const customerId = eventObject?.id as string | undefined;
     const email = eventObject?.email as string | undefined;
     const newStatus = payload.event_object_status as string | undefined;
@@ -277,7 +315,9 @@ export class WebhooksService {
 
     // Solo actuar en transiciones a 'active' (customer completamente verificado)
     if (newStatus !== 'active') {
-      this.logger.log(`customer.updated: status=${newStatus} para customer ${customerId} — sin acción`);
+      this.logger.log(
+        `customer.updated: status=${newStatus} para customer ${customerId} — sin acción`,
+      );
       return;
     }
 
@@ -288,14 +328,17 @@ export class WebhooksService {
       .maybeSingle();
 
     if (!profile) {
-      this.logger.warn(`customer.updated: no se encontró profile para email ${email}`);
+      this.logger.warn(
+        `customer.updated: no se encontró profile para email ${email}`,
+      );
       return;
     }
 
     // Actualizar bridge_customer_id y onboarding_status si es necesario
     const updates: Record<string, unknown> = {};
     if (!profile.bridge_customer_id) updates.bridge_customer_id = customerId;
-    if (profile.onboarding_status !== 'approved') updates.onboarding_status = 'approved';
+    if (profile.onboarding_status !== 'approved')
+      updates.onboarding_status = 'approved';
 
     if (Object.keys(updates).length > 0) {
       await this.supabase.from('profiles').update(updates).eq('id', profile.id);
@@ -304,7 +347,9 @@ export class WebhooksService {
     // Inicializar wallets si no existen aún
     await this.initializeWalletsForUser(profile.id, customerId);
 
-    this.logger.log(`customer.updated: customer ${customerId} → active, wallets inicializadas para user ${profile.id}`);
+    this.logger.log(
+      `customer.updated: customer ${customerId} → active, wallets inicializadas para user ${profile.id}`,
+    );
   }
 
   // ═══════════════════════════════════════════════
@@ -313,13 +358,19 @@ export class WebhooksService {
   //  Usa event_object (no data). Ejecuta la lógica de aprobación completa.
   // ═══════════════════════════════════════════════
 
-  private async handleKycLinkStatusTransitioned(payload: Record<string, unknown>): Promise<void> {
-    const eventObject = payload.event_object as Record<string, unknown> | undefined;
+  private async handleKycLinkStatusTransitioned(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const eventObject = payload.event_object as
+      | Record<string, unknown>
+      | undefined;
     const kycStatus = eventObject?.kyc_status as string | undefined;
 
     // Solo actuar si el KYC fue aprobado
     if (kycStatus !== 'approved') {
-      this.logger.log(`kyc_link.updated.status_transitioned: kyc_status=${kycStatus} — sin acción`);
+      this.logger.log(
+        `kyc_link.updated.status_transitioned: kyc_status=${kycStatus} — sin acción`,
+      );
       return;
     }
 
@@ -328,7 +379,9 @@ export class WebhooksService {
     const customerType = (eventObject?.type as string) ?? 'individual';
 
     if (!customerId) {
-      this.logger.warn('kyc_link.updated.status_transitioned: payload sin customer_id');
+      this.logger.warn(
+        'kyc_link.updated.status_transitioned: payload sin customer_id',
+      );
       return;
     }
 
@@ -352,7 +405,9 @@ export class WebhooksService {
     }
 
     if (!profile) {
-      this.logger.warn(`kyc_link.updated.status_transitioned: no se encontró profile para customer ${customerId}`);
+      this.logger.warn(
+        `kyc_link.updated.status_transitioned: no se encontró profile para customer ${customerId}`,
+      );
       return;
     }
 
@@ -362,13 +417,21 @@ export class WebhooksService {
     if (customerType === 'business') {
       await this.supabase
         .from('kyb_applications')
-        .update({ status: 'approved', approved_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .update({
+          status: 'approved',
+          approved_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
         .eq('user_id', userId)
         .in('status', ['submitted', 'under_review', 'pending']);
     } else {
       await this.supabase
         .from('kyc_applications')
-        .update({ status: 'approved', approved_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .update({
+          status: 'approved',
+          approved_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
         .eq('user_id', userId)
         .in('status', ['submitted', 'under_review', 'pending']);
     }
@@ -401,15 +464,18 @@ export class WebhooksService {
       description: `Verificación ${typeLabel} confirmada por Bridge webhook — customer: ${customerId}`,
     });
 
-    this.logger.log(`✅ kyc_link aprobado para customer ${customerId} (user ${userId})`);
+    this.logger.log(
+      `✅ kyc_link aprobado para customer ${customerId} (user ${userId})`,
+    );
   }
 
   // ═══════════════════════════════════════════════
   //  HANDLER: funds_received (REFACTORIZADO)
   // ═══════════════════════════════════════════════
 
-
-  private async handleFundsReceived(payload: Record<string, unknown>): Promise<void> {
+  private async handleFundsReceived(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
     const data = payload?.data as Record<string, unknown>;
     if (!data) throw new Error('Payload sin data');
 
@@ -421,7 +487,9 @@ export class WebhooksService {
     // 1. Buscar VA — incluyendo flags de external sweep
     const { data: va, error: vaErr } = await this.supabase
       .from('bridge_virtual_accounts')
-      .select('id, user_id, destination_wallet_id, source_currency, developer_fee_percent, is_external_sweep, destination_address, external_destination_label')
+      .select(
+        'id, user_id, destination_wallet_id, source_currency, developer_fee_percent, is_external_sweep, destination_address, external_destination_label',
+      )
       .eq('bridge_virtual_account_id', vaId)
       .single();
 
@@ -440,7 +508,7 @@ export class WebhooksService {
 
     // 3. Calcular fee (aplica en ambos escenarios)
     const devFeePercent = parseFloat(va.developer_fee_percent ?? '0') || 1.0;
-    const feeAmount = parseFloat((amount * devFeePercent / 100).toFixed(2));
+    const feeAmount = parseFloat(((amount * devFeePercent) / 100).toFixed(2));
     const netAmount = parseFloat((amount - feeAmount).toFixed(2));
 
     // ═══════════════════════════════════════════════════════════
@@ -452,11 +520,27 @@ export class WebhooksService {
       // Los fondos fueron enviados por Bridge a una wallet FUERA de Guira.
       // Guira no controla ese dinero, así que:
       //   Credit (+$990) + Debit (-$990) = Balance neto $0.00
-      await this.handleExternalSweepDeposit(va, amount, feeAmount, netAmount, currency, senderName, payload);
+      await this.handleExternalSweepDeposit(
+        va,
+        amount,
+        feeAmount,
+        netAmount,
+        currency,
+        senderName,
+        payload,
+      );
     } else {
       // ── CASO A: Fondeo Interno (Wallet de Guira) ─────────────
       // Los fondos se quedan en la plataforma → incrementar balance
-      await this.handleInternalDeposit(va, amount, feeAmount, netAmount, currency, senderName, payload);
+      await this.handleInternalDeposit(
+        va,
+        amount,
+        feeAmount,
+        netAmount,
+        currency,
+        senderName,
+        payload,
+      );
     }
   }
 
@@ -554,8 +638,10 @@ export class WebhooksService {
     payload: Record<string, unknown>,
   ): Promise<void> {
     const userId = va.user_id as string;
-    const externalAddr = (va.destination_address as string) ?? 'Externa desconocida';
-    const externalLabel = (va.external_destination_label as string) ?? externalAddr;
+    const externalAddr =
+      (va.destination_address as string) ?? 'Externa desconocida';
+    const externalLabel =
+      (va.external_destination_label as string) ?? externalAddr;
 
     // Wallet de referencia interna (para el asiento contable aunque los fondos no se queden)
     const { data: refWallet } = await this.supabase
@@ -566,7 +652,8 @@ export class WebhooksService {
       .limit(1)
       .single();
 
-    if (!refWallet) throw new Error(`Wallet de referencia no encontrada para user ${userId}`);
+    if (!refWallet)
+      throw new Error(`Wallet de referencia no encontrada para user ${userId}`);
     const refWalletId = refWallet.id;
 
     // 1. INSERT payment_order con status 'swept_external'
@@ -643,7 +730,9 @@ export class WebhooksService {
   //  HANDLER: transfer.payment_processed
   // ═══════════════════════════════════════════════
 
-  private async handleTransferPaymentProcessed(payload: Record<string, unknown>): Promise<void> {
+  private async handleTransferPaymentProcessed(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
     const data = payload?.data as Record<string, unknown>;
     const transferId = data?.id as string;
     if (!transferId) return;
@@ -662,7 +751,9 @@ export class WebhooksService {
   //  [GAP 1 FIX] UPDATE ledger pending→settled, NO crear nuevo
   // ═══════════════════════════════════════════════
 
-  private async handleTransferComplete(payload: Record<string, unknown>): Promise<void> {
+  private async handleTransferComplete(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
     const data = payload?.data as Record<string, unknown>;
     const bridgeTransferId = data?.id as string;
     if (!bridgeTransferId) throw new Error('transfer.complete sin transfer ID');
@@ -689,7 +780,8 @@ export class WebhooksService {
       .select('id, user_id, payout_request_id, amount')
       .single();
 
-    if (!transfer) throw new Error(`Bridge transfer no encontrada: ${bridgeTransferId}`);
+    if (!transfer)
+      throw new Error(`Bridge transfer no encontrada: ${bridgeTransferId}`);
 
     // 2. UPDATE payout_requests
     if (transfer.payout_request_id) {
@@ -778,7 +870,9 @@ export class WebhooksService {
   //  Libera reserved_amount + notifica
   // ═══════════════════════════════════════════════
 
-  private async handleTransferFailed(payload: Record<string, unknown>): Promise<void> {
+  private async handleTransferFailed(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
     const data = payload?.data as Record<string, unknown>;
     const bridgeTransferId = data?.id as string;
     if (!bridgeTransferId) throw new Error('transfer.failed sin transfer ID');
@@ -796,7 +890,8 @@ export class WebhooksService {
       .select('id, user_id, payout_request_id, amount, destination_currency')
       .single();
 
-    if (!transfer) throw new Error(`Bridge transfer no encontrada: ${bridgeTransferId}`);
+    if (!transfer)
+      throw new Error(`Bridge transfer no encontrada: ${bridgeTransferId}`);
 
     // 2. UPDATE payout_requests
     let payoutAmount = parseFloat(transfer.amount ?? '0');
@@ -814,7 +909,8 @@ export class WebhooksService {
         .single();
 
       if (payout) {
-        payoutAmount = parseFloat(payout.amount) + parseFloat(payout.fee_amount ?? '0');
+        payoutAmount =
+          parseFloat(payout.amount) + parseFloat(payout.fee_amount ?? '0');
         currency = payout.currency;
       }
     }
@@ -898,7 +994,9 @@ export class WebhooksService {
   //  [GAP 2 FIX] Mismo evento para KYC y KYB
   // ═══════════════════════════════════════════════
 
-  private async handleKycApproved(payload: Record<string, unknown>): Promise<void> {
+  private async handleKycApproved(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
     const data = payload?.data as Record<string, unknown>;
     const kycLinkId = data?.id as string;
     if (!kycLinkId) throw new Error('kyc_link.approved sin link ID');
@@ -977,7 +1075,9 @@ export class WebhooksService {
   //  HANDLER: liquidation_address.payment_completed
   // ═══════════════════════════════════════════════
 
-  private async handleLiquidationPayment(payload: Record<string, unknown>): Promise<void> {
+  private async handleLiquidationPayment(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
     const data = payload?.data as Record<string, unknown>;
     const addressId = data?.liquidation_address_id as string;
     const amount = parseFloat((data?.amount as string) ?? '0');
@@ -990,7 +1090,8 @@ export class WebhooksService {
       .eq('bridge_liquidation_address_id', addressId)
       .single();
 
-    if (!addr) throw new Error(`Liquidation address no encontrada: ${addressId}`);
+    if (!addr)
+      throw new Error(`Liquidation address no encontrada: ${addressId}`);
 
     // Obtener wallet
     const { data: wallet } = await this.supabase
@@ -1001,7 +1102,8 @@ export class WebhooksService {
       .limit(1)
       .single();
 
-    if (!wallet) throw new Error(`Wallet no encontrada para user ${addr.user_id}`);
+    if (!wallet)
+      throw new Error(`Wallet no encontrada para user ${addr.user_id}`);
 
     // INSERT ledger_entry (credit, settled)
     await this.supabase.from('ledger_entries').insert({
@@ -1073,15 +1175,14 @@ export class WebhooksService {
       // Anti-replay: rechazar eventos de más de 10 minutos
       const eventAge = Date.now() / 1000 - parseInt(timestamp, 10);
       if (eventAge > 600) {
-        this.logger.warn(`Evento Bridge demasiado antiguo (${Math.round(eventAge)}s) — posible replay attack`);
+        this.logger.warn(
+          `Evento Bridge demasiado antiguo (${Math.round(eventAge)}s) — posible replay attack`,
+        );
         return false;
       }
 
       // Construir el mensaje que Bridge firmó: "<timestamp>.<rawBody>"
-      const message = Buffer.concat([
-        Buffer.from(`${timestamp}.`),
-        rawBody,
-      ]);
+      const message = Buffer.concat([Buffer.from(`${timestamp}.`), rawBody]);
 
       // Generar digest SHA256 del mensaje
       const digest = crypto.createHash('sha256').update(message).digest();
@@ -1190,7 +1291,9 @@ export class WebhooksService {
       }
 
       // Inicializar balances (siempre incluir USD como fiat base)
-      const currencies = [...new Set([...configs.map((c) => c.currency.toUpperCase()), 'USD'])];
+      const currencies = [
+        ...new Set([...configs.map((c) => c.currency.toUpperCase()), 'USD']),
+      ];
       for (const currency of currencies) {
         const { data: existing } = await this.supabase
           .from('balances')
@@ -1211,7 +1314,9 @@ export class WebhooksService {
         }
       }
 
-      this.logger.log(`Wallets inicializadas para user ${userId}: ${configs.length} configuraciones`);
+      this.logger.log(
+        `Wallets inicializadas para user ${userId}: ${configs.length} configuraciones`,
+      );
     } catch (err) {
       this.logger.error(`Error inicializando wallets para ${userId}: ${err}`);
     }

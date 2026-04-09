@@ -12,7 +12,10 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateFeeDto {
-  @ApiProperty({ example: 'payout', enum: ['deposit', 'payout', 'transfer', 'fx_conversion'] })
+  @ApiProperty({
+    example: 'payout',
+    enum: ['deposit', 'payout', 'transfer', 'fx_conversion'],
+  })
   @IsString()
   @IsNotEmpty()
   operation_type: string;

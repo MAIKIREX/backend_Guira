@@ -1,4 +1,10 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
 import { BridgeService } from '../bridge/bridge.service';
@@ -26,7 +32,8 @@ export class ComplianceActionsService {
       .order('opened_at', { ascending: true });
 
     if (filters.priority) query = query.eq('priority', filters.priority);
-    if (filters.assigned_to) query = query.eq('assigned_to', filters.assigned_to);
+    if (filters.assigned_to)
+      query = query.eq('assigned_to', filters.assigned_to);
 
     const { data, error } = await query;
     if (error) throw new BadRequestException(error.message);
@@ -38,13 +45,25 @@ export class ComplianceActionsService {
 
         try {
           if (review.subject_type === 'kyc_applications') {
-            const { data: kyc } = await this.supabase.from('kyc_applications').select('user_id').eq('id', review.subject_id).single();
+            const { data: kyc } = await this.supabase
+              .from('kyc_applications')
+              .select('user_id')
+              .eq('id', review.subject_id)
+              .single();
             userId = kyc?.user_id || null;
           } else if (review.subject_type === 'kyb_applications') {
-            const { data: kyb } = await this.supabase.from('kyb_applications').select('requester_user_id').eq('id', review.subject_id).single();
+            const { data: kyb } = await this.supabase
+              .from('kyb_applications')
+              .select('requester_user_id')
+              .eq('id', review.subject_id)
+              .single();
             userId = kyb?.requester_user_id || null;
           } else if (review.subject_type === 'payout_request') {
-            const { data: pay } = await this.supabase.from('payout_requests').select('user_id').eq('id', review.subject_id).single();
+            const { data: pay } = await this.supabase
+              .from('payout_requests')
+              .select('user_id')
+              .eq('id', review.subject_id)
+              .single();
             userId = pay?.user_id || null;
           }
         } catch (err) {
@@ -53,11 +72,19 @@ export class ComplianceActionsService {
 
         let profileData: Record<string, any> | null = null;
         if (userId) {
-          const { data: prof } = await this.supabase.from('profiles').select('email, full_name, role').eq('id', userId).maybeSingle();
+          const { data: prof } = await this.supabase
+            .from('profiles')
+            .select('email, full_name, role')
+            .eq('id', userId)
+            .maybeSingle();
           if (prof) {
             let businessName = null;
             if (review.subject_type === 'kyb_applications') {
-              const { data: biz } = await this.supabase.from('businesses').select('legal_name').eq('user_id', userId).maybeSingle();
+              const { data: biz } = await this.supabase
+                .from('businesses')
+                .select('legal_name')
+                .eq('user_id', userId)
+                .maybeSingle();
               businessName = biz?.legal_name;
             }
 
@@ -84,18 +111,33 @@ export class ComplianceActionsService {
         let appUpdatedAt = review.opened_at;
         try {
           if (review.subject_type === 'kyc_applications') {
-            const { data: kyc } = await this.supabase.from('kyc_applications').select('status, updated_at').eq('id', review.subject_id).single();
-            if (kyc) { appStatus = kyc.status; appUpdatedAt = kyc.updated_at; }
+            const { data: kyc } = await this.supabase
+              .from('kyc_applications')
+              .select('status, updated_at')
+              .eq('id', review.subject_id)
+              .single();
+            if (kyc) {
+              appStatus = kyc.status;
+              appUpdatedAt = kyc.updated_at;
+            }
           } else if (review.subject_type === 'kyb_applications') {
-            const { data: kyb } = await this.supabase.from('kyb_applications').select('status, updated_at').eq('id', review.subject_id).single();
-            if (kyb) { appStatus = kyb.status; appUpdatedAt = kyb.updated_at; }
+            const { data: kyb } = await this.supabase
+              .from('kyb_applications')
+              .select('status, updated_at')
+              .eq('id', review.subject_id)
+              .single();
+            if (kyb) {
+              appStatus = kyb.status;
+              appUpdatedAt = kyb.updated_at;
+            }
           }
         } catch (e) {}
 
         return {
           ...review,
           user_id: userId,
-          type: review.subject_type === 'kyb_applications' ? 'company' : 'personal',
+          type:
+            review.subject_type === 'kyb_applications' ? 'company' : 'personal',
           application_status: appStatus,
           updated_at: appUpdatedAt,
           profiles: profileData,
@@ -173,7 +215,12 @@ export class ComplianceActionsService {
 
   // ── COMMENTS ──────────────────────────────────────────────────────
 
-  async addComment(reviewId: string, authorId: string, body: string, isInternal = true) {
+  async addComment(
+    reviewId: string,
+    authorId: string,
+    body: string,
+    isInternal = true,
+  ) {
     const { data, error } = await this.supabase
       .from('compliance_review_comments')
       .insert({
@@ -199,7 +246,8 @@ export class ComplianceActionsService {
       .single();
 
     if (!review) throw new NotFoundException('Review no encontrado');
-    if (review.status === 'closed') throw new BadRequestException('El review ya está cerrado');
+    if (review.status === 'closed')
+      throw new BadRequestException('El review ya está cerrado');
 
     // 1. Inmutable Event
     await this.supabase.from('compliance_review_events').insert({
@@ -216,7 +264,12 @@ export class ComplianceActionsService {
       .eq('id', reviewId);
 
     // 3. Aplicar aprobación
-    await this.applyApprovalToSubject(review.subject_type, review.subject_id, actorId, reason);
+    await this.applyApprovalToSubject(
+      review.subject_type,
+      review.subject_id,
+      actorId,
+      reason,
+    );
 
     // 4. Audit Log
     await this.supabase.from('audit_logs').insert({
@@ -240,7 +293,8 @@ export class ComplianceActionsService {
       .single();
 
     if (!review) throw new NotFoundException('Review no encontrado');
-    if (review.status === 'closed') throw new BadRequestException('El review ya está cerrado');
+    if (review.status === 'closed')
+      throw new BadRequestException('El review ya está cerrado');
 
     // 1. Inmutable Event
     await this.supabase.from('compliance_review_events').insert({
@@ -257,7 +311,12 @@ export class ComplianceActionsService {
       .eq('id', reviewId);
 
     // 3. Aplicar rechazo
-    await this.applyRejectionToSubject(review.subject_type, review.subject_id, actorId, reason);
+    await this.applyRejectionToSubject(
+      review.subject_type,
+      review.subject_id,
+      actorId,
+      reason,
+    );
 
     // 4. Audit Log
     await this.supabase.from('audit_logs').insert({
@@ -273,7 +332,12 @@ export class ComplianceActionsService {
     return { message: 'Review rechazado' };
   }
 
-  async requestChanges(reviewId: string, actorId: string, reason: string, requiredActions?: string[]) {
+  async requestChanges(
+    reviewId: string,
+    actorId: string,
+    reason: string,
+    requiredActions?: string[],
+  ) {
     const { data: review } = await this.supabase
       .from('compliance_reviews')
       .select('subject_type, subject_id, status')
@@ -281,7 +345,8 @@ export class ComplianceActionsService {
       .single();
 
     if (!review) throw new NotFoundException('Review no encontrado');
-    if (review.status === 'closed') throw new BadRequestException('El review ya está cerrado');
+    if (review.status === 'closed')
+      throw new BadRequestException('El review ya está cerrado');
 
     // 1. Evento inmutable de la decisión (NEEDS_CHANGES)
     await this.supabase.from('compliance_review_events').insert({
@@ -314,10 +379,18 @@ export class ComplianceActionsService {
     // 4. Notificar al cliente
     let userIdNotified: string | null = null;
     if (review.subject_type === 'kyc_applications') {
-      const { data } = await this.supabase.from('kyc_applications').select('user_id').eq('id', review.subject_id).single();
+      const { data } = await this.supabase
+        .from('kyc_applications')
+        .select('user_id')
+        .eq('id', review.subject_id)
+        .single();
       userIdNotified = data?.user_id;
     } else if (review.subject_type === 'kyb_applications') {
-      const { data } = await this.supabase.from('kyb_applications').select('requester_user_id').eq('id', review.subject_id).single();
+      const { data } = await this.supabase
+        .from('kyb_applications')
+        .select('requester_user_id')
+        .eq('id', review.subject_id)
+        .single();
       userIdNotified = data?.requester_user_id;
     }
 
@@ -367,7 +440,9 @@ export class ComplianceActionsService {
 
         if (kyc?.user_id) {
           // Sincronizar full_name desde la tabla `people`
-          const profileUpdate: Record<string, any> = { onboarding_status: 'approved' };
+          const profileUpdate: Record<string, any> = {
+            onboarding_status: 'approved',
+          };
           if (kyc.person_id) {
             const { data: person } = await this.supabase
               .from('people')
@@ -375,7 +450,10 @@ export class ComplianceActionsService {
               .eq('id', kyc.person_id)
               .maybeSingle();
             if (person?.first_name) {
-              profileUpdate.full_name = [person.first_name, person.last_name].filter(Boolean).join(' ').trim();
+              profileUpdate.full_name = [person.first_name, person.last_name]
+                .filter(Boolean)
+                .join(' ')
+                .trim();
             }
           }
 
@@ -387,7 +465,9 @@ export class ComplianceActionsService {
           // Registra en Bridge (crea bridge_customer + bridge_kyc_link)
           // BridgeCustomerService manejará la llamada y DB.
           try {
-            await this.bridgeCustomerService.registerCustomerInBridge(kyc.user_id);
+            await this.bridgeCustomerService.registerCustomerInBridge(
+              kyc.user_id,
+            );
           } catch (err) {
             this.logger.error(`Error registrando cliente en Bridge: ${err}`);
             // No revertimos approval local, el staff lo gestionará por logs
@@ -405,7 +485,9 @@ export class ComplianceActionsService {
 
         if (kyb?.requester_user_id) {
           // Sincronizar full_name desde la tabla `businesses`
-          const profileUpdate: Record<string, any> = { onboarding_status: 'approved' };
+          const profileUpdate: Record<string, any> = {
+            onboarding_status: 'approved',
+          };
           if (kyb.business_id) {
             const { data: business } = await this.supabase
               .from('businesses')
@@ -423,7 +505,9 @@ export class ComplianceActionsService {
             .eq('id', kyb.requester_user_id);
 
           try {
-            await this.bridgeCustomerService.registerCustomerInBridge(kyb.requester_user_id);
+            await this.bridgeCustomerService.registerCustomerInBridge(
+              kyb.requester_user_id,
+            );
           } catch (err) {
             this.logger.error(`Error registrando negocio en Bridge: ${err}`);
           }
@@ -451,7 +535,7 @@ export class ComplianceActionsService {
           .update({ status: 'rejected' })
           .eq('id', subjectId);
         break;
-      
+
       case 'kyb_applications':
         await this.supabase
           .from('kyb_applications')
@@ -468,13 +552,25 @@ export class ComplianceActionsService {
     // Identificar el user_id para notificar
     let userIdNotified: string | null = null;
     if (subjectType === 'kyc_applications') {
-      const { data } = await this.supabase.from('kyc_applications').select('user_id').eq('id', subjectId).single();
+      const { data } = await this.supabase
+        .from('kyc_applications')
+        .select('user_id')
+        .eq('id', subjectId)
+        .single();
       userIdNotified = data?.user_id;
     } else if (subjectType === 'kyb_applications') {
-      const { data } = await this.supabase.from('kyb_applications').select('requester_user_id').eq('id', subjectId).single();
+      const { data } = await this.supabase
+        .from('kyb_applications')
+        .select('requester_user_id')
+        .eq('id', subjectId)
+        .single();
       userIdNotified = data?.requester_user_id;
     } else if (subjectType === 'payout_request') {
-      const { data } = await this.supabase.from('payout_requests').select('user_id').eq('id', subjectId).single();
+      const { data } = await this.supabase
+        .from('payout_requests')
+        .select('user_id')
+        .eq('id', subjectId)
+        .single();
       userIdNotified = data?.user_id;
     }
 
@@ -490,7 +586,11 @@ export class ComplianceActionsService {
 
   // ── USER LIMITS ───────────────────────────────────────────────────
 
-  async setTransactionLimits(userId: string, actorId: string, dto: SetLimitsDto) {
+  async setTransactionLimits(
+    userId: string,
+    actorId: string,
+    dto: SetLimitsDto,
+  ) {
     const { data: current } = await this.supabase
       .from('transaction_limits')
       .select('*')
@@ -501,7 +601,8 @@ export class ComplianceActionsService {
 
     const newLimits = {
       user_id: userId,
-      daily_deposit_limit: dto.daily_deposit_limit ?? current?.daily_deposit_limit,
+      daily_deposit_limit:
+        dto.daily_deposit_limit ?? current?.daily_deposit_limit,
       daily_payout_limit: dto.daily_payout_limit ?? current?.daily_payout_limit,
       single_txn_limit: dto.single_txn_limit ?? current?.single_txn_limit,
       applied_by: actorId,

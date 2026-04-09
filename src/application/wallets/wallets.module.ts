@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
-import { WalletsController, AdminWalletsController } from './wallets.controller';
+import {
+  WalletsController,
+  AdminWalletsController,
+} from './wallets.controller';
 import { WalletsService } from './wallets.service';
 import { BridgeModule } from '../bridge/bridge.module';
 

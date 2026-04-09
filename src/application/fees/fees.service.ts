@@ -24,7 +24,9 @@ export class FeesService {
   async getPublicFees() {
     const { data, error } = await this.supabase
       .from('fees_config')
-      .select('operation_type, payment_rail, currency, fee_type, fee_percent, fee_fixed, min_fee, max_fee, description')
+      .select(
+        'operation_type, payment_rail, currency, fee_type, fee_percent, fee_fixed, min_fee, max_fee, description',
+      )
       .eq('is_active', true)
       .order('operation_type');
 
@@ -92,8 +94,7 @@ export class FeesService {
       .select()
       .single();
 
-    if (error || !data)
-      throw new NotFoundException('Tarifa no encontrada');
+    if (error || !data) throw new NotFoundException('Tarifa no encontrada');
     return data;
   }
 
