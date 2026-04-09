@@ -19,13 +19,18 @@ async function bootstrap() {
   // Security Headers
   app.use(helmet());
 
-  // CORS: acepta orígenes definidos en URL_FRONTEND (comma-separated)
+  // CORS: acepta orígenes definidos en URL_FRONTEND (comma-separated) y localhost:3000 para desarrollo
   const allowedOrigins = (process.env.URL_FRONTEND ?? '')
     .split(',')
     .map((o) => o.trim().replace(/\/$/, ''))
     .filter((o) => o.length > 0);
+    
+  if (!allowedOrigins.includes('http://localhost:3000')) {
+    allowedOrigins.push('http://localhost:3000');
+  }
+
   app.enableCors({
-    origin: allowedOrigins.length > 0 ? allowedOrigins : false,
+    origin: allowedOrigins,
     credentials: true,
   });
 

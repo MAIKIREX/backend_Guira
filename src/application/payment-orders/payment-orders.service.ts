@@ -697,9 +697,10 @@ export class PaymentOrdersService {
           amount: dto.amount.toString(),
         },
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error('Error llamando a Bridge Transfer API:', err);
-      throw new BadRequestException('No se pudieron generar las instrucciones de depósito en Bridge.');
+      const bridgeError = err?.response?.data?.message || err?.message || 'Error desconocido';
+      throw new BadRequestException('No se pudieron generar las instrucciones de depósito en Bridge. Razón: ' + bridgeError);
     }
 
     // 2. Extraer instrucciones de depósito
@@ -767,27 +768,37 @@ export class PaymentOrdersService {
   ) {
     const wallet = await this.getUserWallet(userId);
 
-    // Obtener instrucciones del VA
-    let depositInstructions: Record<string, unknown> = {};
-    if (dto.virtual_account_id) {
-      const { data: va } = await this.supabase
-        .from('bridge_virtual_accounts')
-        .select('*')
-        .eq('id', dto.virtual_account_id)
-        .eq('user_id', userId)
-        .single();
-
-      if (va) {
-        depositInstructions = {
-          type: 'virtual_account',
-          account_name: va.account_name,
-          account_number: va.account_number,
-          routing_number: va.routing_number,
-          bank_name: va.bank_name,
-          source_currency: va.source_currency,
-        };
-      }
+    // Obtener y validar instrucciones del VA
+    if (!dto.virtual_account_id) {
+      throw new BadRequestException(
+        'virtual_account_id es requerido para el flujo fiat_us_to_bridge_wallet',
+      );
     }
+
+    const { data: va, error: vaError } = await this.supabase
+      .from('bridge_virtual_accounts')
+      .select('*')
+      .eq('id', dto.virtual_account_id)
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .single();
+
+    if (vaError || !va) {
+      throw new BadRequestException(
+        'Virtual Account no encontrada, inactiva o no pertenece al usuario',
+      );
+    }
+
+    const depositInstructions: Record<string, unknown> = {
+      type: 'virtual_account',
+      label: `Cuenta bancaria VA (${va.source_currency?.toUpperCase() ?? 'USD'})`,
+      account_name: va.account_name,
+      beneficiary_name: va.beneficiary_name,
+      account_number: va.account_number,
+      routing_number: va.routing_number,
+      bank_name: va.bank_name,
+      source_currency: va.source_currency,
+    };
 
     const { fee_amount, net_amount } = await this.feesService.calculateFee(
       userId,
