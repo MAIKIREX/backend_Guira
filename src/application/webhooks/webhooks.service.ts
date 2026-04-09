@@ -223,6 +223,25 @@ export class WebhooksService {
         break;
 
       // ── Transfers ─────────────────────────────────────────────────────────────
+      case 'transfer.created':
+        this.logger.log(`transfer.created: ${payload?.event_object_id}`);
+        break;
+      case 'transfer.updated.status_transitioned':
+      case 'transfer.updated': {
+        const data = (payload.event_object || payload.data) as Record<string, unknown>;
+        const state = data?.state as string;
+        if (state === 'payment_processed') {
+          await this.handleTransferPaymentProcessed(payload);
+        } else if (state === 'complete' || state === 'completed') {
+          await this.handleTransferComplete(payload);
+        } else if (state === 'failed' || state === 'returned') {
+          await this.handleTransferFailed(payload);
+        } else {
+          this.logger.log(`transfer status_transitioned a ${state} - guardando progreso sin acción adicional`);
+        }
+        break;
+      }
+      // Alias legacy
       case 'transfer.payment_processed':
         await this.handleTransferPaymentProcessed(payload);
         break;
@@ -733,7 +752,7 @@ export class WebhooksService {
   private async handleTransferPaymentProcessed(
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const data = payload?.data as Record<string, unknown>;
+    const data = (payload?.event_object || payload?.data) as Record<string, unknown>;
     const transferId = data?.id as string;
     if (!transferId) return;
 
@@ -754,7 +773,7 @@ export class WebhooksService {
   private async handleTransferComplete(
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const data = payload?.data as Record<string, unknown>;
+    const data = (payload?.event_object || payload?.data) as Record<string, unknown>;
     const bridgeTransferId = data?.id as string;
     if (!bridgeTransferId) throw new Error('transfer.complete sin transfer ID');
 
@@ -873,7 +892,7 @@ export class WebhooksService {
   private async handleTransferFailed(
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const data = payload?.data as Record<string, unknown>;
+    const data = (payload?.event_object || payload?.data) as Record<string, unknown>;
     const bridgeTransferId = data?.id as string;
     if (!bridgeTransferId) throw new Error('transfer.failed sin transfer ID');
 
