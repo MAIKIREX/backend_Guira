@@ -723,7 +723,7 @@ export class PaymentOrdersService {
     };
 
     // 3. Crear registro de puente
-    await this.supabase.from('bridge_transfers').insert({
+    const { data: bridgeTransferRow } = await this.supabase.from('bridge_transfers').insert({
       user_id: userId,
       bridge_transfer_id: bridgeTransfer.id as string,
       amount: dto.amount,
@@ -734,7 +734,9 @@ export class PaymentOrdersService {
       destination_payment_rail: wallet.network,
       destination_currency: wallet.currency,
       bridge_raw_response: bridgeTransfer,
-    });
+    })
+      .select('id')
+      .single();
 
     const { data: order, error } = await this.supabase
       .from('payment_orders')
@@ -773,7 +775,7 @@ export class PaymentOrdersService {
       status: 'pending',
       reference_type: 'payment_order',
       reference_id: order.id,
-      bridge_transfer_id: bridgeTransfer.id as string,
+      bridge_transfer_id: bridgeTransferRow?.id ?? null,
       description: `On-ramp crypto: ${net_amount} ${wallet.currency} desde ${dto.source_address} (${dto.source_network})`,
     });
 

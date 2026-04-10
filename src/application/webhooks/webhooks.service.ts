@@ -829,13 +829,23 @@ export class WebhooksService {
         .eq('id', paymentOrder.id);
 
       // Asentar ledger entries vinculadas a la payment_order
-      const { count: settledCount } = await this.supabase
+      // Si tenemos receipt.final_amount de Bridge, actualizar el monto real recibido
+      const receiptFinalAmount = receipt?.final_amount
+        ? parseFloat(receipt.final_amount as string)
+        : null;
+
+      const { data: settledEntries } = await this.supabase
         .from('ledger_entries')
-        .update({ status: 'settled' })
+        .update({
+          status: 'settled',
+          ...(receiptFinalAmount != null ? { amount: receiptFinalAmount } : {}),
+        })
         .eq('reference_type', 'payment_order')
         .eq('reference_id', paymentOrder.id)
         .eq('status', 'pending')
         .select('id');
+
+      const settledCount = settledEntries?.length ?? 0;
 
       // Safety net: si no había ledger_entry pending para on-ramps,
       // crear uno settled directamente para que el trigger actualice balances
@@ -845,25 +855,28 @@ export class WebhooksService {
         'fiat_bo_to_bridge_wallet',
       ];
       if (
-        (!settledCount || settledCount === 0) &&
+        settledCount === 0 &&
         paymentOrder.wallet_id &&
         onRampFlows.includes(paymentOrder.flow_type)
       ) {
-        const netAmount =
+        // Usar receipt.final_amount (monto real) > net_amount interno como fallback
+        const fallbackNet =
           parseFloat(paymentOrder.amount) -
           parseFloat(paymentOrder.fee_amount ?? '0');
+        const creditAmount = receiptFinalAmount ?? fallbackNet;
+
         await this.supabase.from('ledger_entries').insert({
           wallet_id: paymentOrder.wallet_id,
           type: 'credit',
-          amount: netAmount,
+          amount: creditAmount,
           currency: paymentOrder.currency,
           status: 'settled',
           reference_type: 'payment_order',
           reference_id: paymentOrder.id,
-          description: `On-ramp completado (webhook safety-net): ${netAmount} ${paymentOrder.currency}`,
+          description: `On-ramp completado (webhook): ${creditAmount} ${paymentOrder.currency}`,
         });
         this.logger.warn(
-          `⚠️ Safety net: ledger_entry credit settled creado para order ${paymentOrder.id} (no existía pending)`,
+          `⚠️ Safety net: ledger_entry credit settled creado para order ${paymentOrder.id} — monto real: ${creditAmount}`,
         );
       }
 
