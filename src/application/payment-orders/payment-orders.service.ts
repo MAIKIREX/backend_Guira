@@ -1126,12 +1126,8 @@ export class PaymentOrdersService {
             bridge_wallet_id: wallet.provider_wallet_id,
           },
           destination: {
-            payment_rail: (
-              dto.destination_currency ?? wallet.currency
-            ).toLowerCase(),
-            currency: (
-              dto.destination_currency ?? wallet.currency
-            ).toLowerCase(),
+            payment_rail: dto.destination_network.toLowerCase(),
+            currency: (dto.destination_currency ?? wallet.currency).toLowerCase(),
             to_address: dto.destination_address,
           },
           amount: dto.amount.toString(),
