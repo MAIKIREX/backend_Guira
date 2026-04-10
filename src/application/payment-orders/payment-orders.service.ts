@@ -1281,6 +1281,8 @@ export class PaymentOrdersService {
         flow_type: 'bridge_wallet_to_fiat_us',
         flow_category: 'wallet_ramp',
         requires_psav: false,
+        source_type: 'bridge_wallet',
+        source_currency: wallet.currency,
         amount: dto.amount,
         currency: wallet.currency,
         fee_amount,
