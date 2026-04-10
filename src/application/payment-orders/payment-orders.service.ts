@@ -968,6 +968,8 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile?.bridge_customer_id,
           source: {
+            payment_rail: 'bridge_wallet',
+            currency: wallet.currency.toLowerCase(),
             bridge_wallet_id: wallet.provider_wallet_id,
           },
           destination: {
@@ -1122,6 +1124,8 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile?.bridge_customer_id,
           source: {
+            payment_rail: 'bridge_wallet',
+            currency: wallet.currency.toLowerCase(),
             bridge_wallet_id: wallet.provider_wallet_id,
           },
           destination: {
@@ -1288,6 +1292,8 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile?.bridge_customer_id,
           source: {
+            payment_rail: 'bridge_wallet',
+            currency: wallet.currency.toLowerCase(),
             bridge_wallet_id: wallet.provider_wallet_id,
           },
           destination: {
