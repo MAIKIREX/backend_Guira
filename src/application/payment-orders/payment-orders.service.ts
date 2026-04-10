@@ -981,9 +981,6 @@ export class PaymentOrdersService {
           },
           amount: dto.amount.toString(),
           developer_fee: fee_amount.toString(),
-          return_instructions: {
-            address: wallet.address,
-          },
         },
         idempotencyKey,
       );
@@ -1139,9 +1136,6 @@ export class PaymentOrdersService {
           },
           amount: dto.amount.toString(),
           developer_fee: fee_amount.toString(),
-          return_instructions: {
-            address: wallet.address,
-          },
         },
         idempotencyKey,
       );
@@ -1303,9 +1297,6 @@ export class PaymentOrdersService {
           },
           amount: dto.amount.toString(),
           developer_fee: fee_amount.toString(),
-          return_instructions: {
-            address: wallet.address,
-          },
         },
         idempotencyKey,
       );
