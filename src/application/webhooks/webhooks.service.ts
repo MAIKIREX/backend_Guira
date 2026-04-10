@@ -816,6 +816,66 @@ export class WebhooksService {
       .maybeSingle();
 
     if (paymentOrder) {
+      // ── Guard: flujo de dos tramos (bridge_wallet_to_fiat_bo) ──
+      // Tramo 1 (Bridge Transfer → PSAV) completado por webhook.
+      // Tramo 2 (PSAV → BOB → cuenta usuario) debe ser gestionado por staff.
+      const isDualLegFlow =
+        paymentOrder.flow_type === 'bridge_wallet_to_fiat_bo';
+
+      if (isDualLegFlow) {
+        // Asentar ledger entries (debit confirmed on-chain)
+        await this.supabase
+          .from('ledger_entries')
+          .update({ status: 'settled' })
+          .eq('reference_type', 'payment_order')
+          .eq('reference_id', paymentOrder.id)
+          .eq('status', 'pending');
+
+        // Liberar saldo reservado (el debit ya es definitivo)
+        const totalReserved =
+          parseFloat(paymentOrder.amount ?? '0') +
+          parseFloat(paymentOrder.fee_amount ?? '0');
+        await this.supabase.rpc('release_reserved_balance', {
+          p_user_id: paymentOrder.user_id,
+          p_currency: (paymentOrder.currency ?? 'USDC').toUpperCase(),
+          p_amount: totalReserved,
+        });
+
+        // Notificar staff que el PSAV recibió el crypto
+        const { data: admins } = await this.supabase
+          .from('profiles')
+          .select('id')
+          .in('role', ['staff', 'admin', 'super_admin'])
+          .eq('is_active', true)
+          .limit(5);
+
+        if (admins?.length) {
+          const notifications = admins.map((admin) => ({
+            user_id: admin.id,
+            type: 'system',
+            title: 'Retiro BO — Crypto recibido por PSAV',
+            message: `Orden ${paymentOrder.id}: Bridge confirmó que el PSAV recibió ${paymentOrder.amount} ${paymentOrder.currency}. Pendiente: conversión USDC→BOB y depósito a cuenta BO del cliente.`,
+            reference_type: 'payment_order',
+            reference_id: paymentOrder.id,
+          }));
+          await this.supabase.from('notifications').insert(notifications);
+        }
+
+        // Notificar al usuario que el primer tramo está listo
+        await this.supabase.from('notifications').insert({
+          user_id: paymentOrder.user_id,
+          type: 'financial',
+          title: 'Transferencia en Proceso',
+          message: `Tu retiro de ${paymentOrder.amount} ${paymentOrder.currency} está siendo procesado. Recibirás tus bolivianos pronto.`,
+          reference_type: 'payment_order',
+          reference_id: paymentOrder.id,
+        });
+
+        this.logger.log(
+          `🔄 Payment order ${paymentOrder.id} (bridge_wallet_to_fiat_bo): Tramo 1 completado — crypto en PSAV. Pendiente payout BOB manual.`,
+        );
+      } else {
+      // Comportamiento original: marcar orden como completed
       await this.supabase
         .from('payment_orders')
         .update({
@@ -883,6 +943,7 @@ export class WebhooksService {
       this.logger.log(
         `✅ Payment order ${paymentOrder.id} completada vía webhook (transfer ${bridgeTransferId})`,
       );
+      }
     }
 
     // [GAP 1 FIX] 3. UPDATE ledger_entry existente: pending → settled

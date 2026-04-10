@@ -864,8 +864,14 @@ export class PaymentOrdersService {
   }
 
   /**
-   * 2.4 Wallet Bridge → Fiat BO (PSAV off-ramp)
-   * Wallet Bridge → PSAV → cuenta bancaria BO del usuario
+   * 2.4 Wallet Bridge → Fiat BO (Bridge Transfer + PSAV off-ramp)
+   *
+   * Flujo de dos tramos:
+   *   Tramo 1 (automático): Wallet Bridge del usuario → POST /v0/transfers → Wallet Crypto del PSAV
+   *   Tramo 2 (manual):     PSAV convierte USDC → BOB → deposita en cuenta BO del usuario
+   *
+   * El webhook transfer.complete asienta el ledger y libera la reserva (Tramo 1).
+   * Staff completa la orden cuando el PSAV confirma el depósito BOB (Tramo 2).
    */
   private async createBridgeWalletToFiatBo(
     userId: string,
@@ -904,6 +910,12 @@ export class PaymentOrdersService {
 
     const rateData = await this.exchangeRatesService.getRate('USDC_BOB');
 
+    // Obtener dirección crypto del PSAV para recibir los fondos
+    const psavAccount = await this.psavService.getDepositAccount(
+      'crypto',
+      'USDC',
+    );
+
     const { data: order, error } = await this.supabase
       .from('payment_orders')
       .insert({
@@ -911,7 +923,7 @@ export class PaymentOrdersService {
         wallet_id: wallet.id,
         flow_type: 'bridge_wallet_to_fiat_bo',
         flow_category: 'wallet_ramp',
-        requires_psav: true,
+        requires_psav: false,
         amount: dto.amount,
         currency: wallet.currency,
         fee_amount,
@@ -927,7 +939,7 @@ export class PaymentOrdersService {
           (net_amount * rateData.effective_rate).toFixed(2),
         ),
         notes: dto.notes,
-        status: 'processing',
+        status: 'created',
       })
       .select()
       .single();
@@ -942,8 +954,86 @@ export class PaymentOrdersService {
       throw new BadRequestException(error.message);
     }
 
+    // Ejecutar Tramo 1: Bridge Transfer → PSAV crypto wallet
+    try {
+      const { data: profile } = await this.supabase
+        .from('profiles')
+        .select('bridge_customer_id')
+        .eq('id', userId)
+        .single();
+
+      const idempotencyKey = `po_w2fbo_${order.id}`;
+      const bridgeResult = await this.bridgeApi.post<Record<string, unknown>>(
+        '/v0/transfers',
+        {
+          on_behalf_of: profile?.bridge_customer_id,
+          source: {
+            payment_rail: 'usdc',
+            currency: wallet.currency.toLowerCase(),
+            from_address: wallet.address,
+          },
+          destination: {
+            payment_rail: (
+              psavAccount.crypto_network ?? 'usdc'
+            ).toLowerCase(),
+            currency: wallet.currency.toLowerCase(),
+            to_address: psavAccount.crypto_address,
+          },
+          amount: dto.amount.toString(),
+          developer_fee: fee_amount.toString(),
+          return_instructions: {
+            address: wallet.address,
+          },
+        },
+        idempotencyKey,
+      );
+
+      const transferId = (bridgeResult?.id ?? null) as string | null;
+      await this.supabase
+        .from('payment_orders')
+        .update({
+          status: 'processing',
+          bridge_transfer_id: transferId,
+        })
+        .eq('id', order.id);
+
+      // Crear ledger entry (debit, pending — se asienta con webhook transfer.complete)
+      await this.supabase.from('ledger_entries').insert({
+        wallet_id: wallet.id,
+        type: 'debit',
+        amount: totalNeeded,
+        currency: wallet.currency,
+        status: 'pending',
+        reference_type: 'payment_order',
+        reference_id: order.id,
+        bridge_transfer_id: transferId,
+        description: `Off-ramp BO: ${net_amount} ${wallet.currency} → BOB (PSAV)`,
+      });
+
+      order.status = 'processing';
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Revertir: liberar reserva + marcar failed
+      await this.supabase.rpc('release_reserved_balance', {
+        p_user_id: userId,
+        p_currency: wallet.currency,
+        p_amount: totalNeeded,
+      });
+      await this.supabase
+        .from('payment_orders')
+        .update({
+          status: 'failed',
+          failure_reason: `Bridge Transfer falló: ${message}`,
+        })
+        .eq('id', order.id);
+
+      throw new BadRequestException(
+        `Error al ejecutar transfer BO: ${message}`,
+      );
+    }
+
     this.logger.log(
-      `📋 Orden bridge_wallet_to_fiat_bo: ${order.id} — ${dto.amount} ${wallet.currency}→BOB`,
+      `📋 Orden bridge_wallet_to_fiat_bo: ${order.id} — ${dto.amount} ${wallet.currency}→BOB (Bridge Transfer → PSAV)`,
     );
     return order;
   }
@@ -1673,28 +1763,10 @@ export class PaymentOrdersService {
       });
     }
 
-    // Off-ramp PSAV a fiat BO — asentar débito y liberar reserva
-    if (order.flow_type === 'bridge_wallet_to_fiat_bo') {
-      const totalReserved =
-        parseFloat(order.amount ?? '0') + parseFloat(order.fee_amount ?? '0');
+    // Off-ramp PSAV a fiat BO — El ledger debit y la liberación de reserva
+    // ahora se manejan automáticamente en el webhook transfer.complete (Tramo 1).
+    // El completeOrder solo finaliza el estado de la orden tras el payout BOB (Tramo 2).
 
-      await this.supabase.from('ledger_entries').insert({
-        wallet_id: order.wallet_id,
-        type: 'debit',
-        amount: totalReserved,
-        currency: order.currency,
-        status: 'settled',
-        reference_type: 'payment_order',
-        reference_id: orderId,
-        description: `Off-ramp completado — ${order.amount} ${order.currency} → BOB (PSAV)`,
-      });
-
-      await this.supabase.rpc('release_reserved_balance', {
-        p_user_id: order.user_id,
-        p_currency: (order.currency ?? 'USDC').toUpperCase(),
-        p_amount: totalReserved,
-      });
-    }
 
     await this.supabase.from('audit_logs').insert({
       performed_by: actorId,
