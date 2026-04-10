@@ -894,10 +894,10 @@ export class PaymentOrdersService {
       .eq('currency', wallet.currency)
       .single();
 
-    const totalNeeded = dto.amount + fee_amount;
+    const totalNeeded = dto.amount;
     if (!balance || parseFloat(balance.available_amount ?? '0') < totalNeeded) {
       throw new BadRequestException(
-        `Saldo insuficiente. Necesitas $${totalNeeded} (monto + fee) pero tienes $${balance?.available_amount ?? 0}`,
+        `Saldo insuficiente. Necesitas $${totalNeeded} pero tienes $${balance?.available_amount ?? 0}`,
       );
     }
 
@@ -962,26 +962,43 @@ export class PaymentOrdersService {
         .eq('id', userId)
         .single();
 
+      // Validar y normalizar la red del PSAV
+      const VALID_CRYPTO_RAILS = [
+        'arbitrum', 'avalanche_c_chain', 'base', 'celo',
+        'ethereum', 'optimism', 'polygon', 'solana', 'stellar', 'tron',
+      ];
+      const psavRail = (psavAccount.crypto_network ?? 'polygon').toLowerCase().trim();
+      if (!VALID_CRYPTO_RAILS.includes(psavRail)) {
+        throw new Error(
+          `Red PSAV inválida: "${psavAccount.crypto_network}" (normalizada: "${psavRail}"). Valores permitidos: ${VALID_CRYPTO_RAILS.join(', ')}`,
+        );
+      }
+
+      const transferPayload = {
+        on_behalf_of: profile?.bridge_customer_id,
+        source: {
+          payment_rail: 'bridge_wallet',
+          currency: wallet.currency.toLowerCase(),
+          bridge_wallet_id: wallet.provider_wallet_id,
+        },
+        destination: {
+          payment_rail: psavRail,
+          currency: wallet.currency.toLowerCase(),
+          to_address: psavAccount.crypto_address,
+        },
+        amount: dto.amount.toString(),
+        developer_fee: fee_amount.toString(),
+        client_reference_id: order.id,
+      };
+
+      this.logger.log(
+        `🔍 Bridge Transfer payload (fiat_bo): ${JSON.stringify(transferPayload)}`,
+      );
+
       const idempotencyKey = `po_w2fbo_${order.id}`;
       const bridgeResult = await this.bridgeApi.post<Record<string, unknown>>(
         '/v0/transfers',
-        {
-          on_behalf_of: profile?.bridge_customer_id,
-          source: {
-            payment_rail: 'bridge_wallet',
-            currency: wallet.currency.toLowerCase(),
-            bridge_wallet_id: wallet.provider_wallet_id,
-          },
-          destination: {
-            payment_rail: (
-              psavAccount.crypto_network ?? 'usdc'
-            ).toLowerCase(),
-            currency: wallet.currency.toLowerCase(),
-            to_address: psavAccount.crypto_address,
-          },
-          amount: dto.amount.toString(),
-          developer_fee: fee_amount.toString(),
-        },
+        transferPayload,
         idempotencyKey,
       );
 
@@ -1060,7 +1077,7 @@ export class PaymentOrdersService {
       .eq('currency', wallet.currency)
       .single();
 
-    const totalNeeded = dto.amount + fee_amount;
+    const totalNeeded = dto.amount;
     if (!balance || parseFloat(balance.available_amount ?? '0') < totalNeeded) {
       throw new BadRequestException(
         `Saldo insuficiente. Necesitas $${totalNeeded} pero tienes $${balance?.available_amount ?? 0}`,
@@ -1115,24 +1132,43 @@ export class PaymentOrdersService {
         .eq('id', userId)
         .single();
 
+      // Validar y normalizar la red destino
+      const VALID_CRYPTO_RAILS = [
+        'arbitrum', 'avalanche_c_chain', 'base', 'celo',
+        'ethereum', 'optimism', 'polygon', 'solana', 'stellar', 'tron',
+      ];
+      const destinationRail = (dto.destination_network ?? '').toLowerCase().trim();
+      if (!VALID_CRYPTO_RAILS.includes(destinationRail)) {
+        throw new Error(
+          `Red destino inválida: "${dto.destination_network}" (normalizada: "${destinationRail}"). Valores permitidos: ${VALID_CRYPTO_RAILS.join(', ')}`,
+        );
+      }
+
+      const transferPayload = {
+        on_behalf_of: profile?.bridge_customer_id,
+        source: {
+          payment_rail: 'bridge_wallet',
+          currency: wallet.currency.toLowerCase(),
+          bridge_wallet_id: wallet.provider_wallet_id,
+        },
+        destination: {
+          payment_rail: destinationRail,
+          currency: (dto.destination_currency ?? wallet.currency).toLowerCase(),
+          to_address: dto.destination_address,
+        },
+        amount: dto.amount.toString(),
+        developer_fee: fee_amount.toString(),
+        client_reference_id: order.id,
+      };
+
+      this.logger.log(
+        `🔍 Bridge Transfer payload (crypto): ${JSON.stringify(transferPayload)}`,
+      );
+
       const idempotencyKey = `po_w2c_${order.id}`;
       const bridgeResult = await this.bridgeApi.post<Record<string, unknown>>(
         '/v0/transfers',
-        {
-          on_behalf_of: profile?.bridge_customer_id,
-          source: {
-            payment_rail: 'bridge_wallet',
-            currency: wallet.currency.toLowerCase(),
-            bridge_wallet_id: wallet.provider_wallet_id,
-          },
-          destination: {
-            payment_rail: dto.destination_network.toLowerCase(),
-            currency: (dto.destination_currency ?? wallet.currency).toLowerCase(),
-            to_address: dto.destination_address,
-          },
-          amount: dto.amount.toString(),
-          developer_fee: fee_amount.toString(),
-        },
+        transferPayload,
         idempotencyKey,
       );
 
@@ -1223,7 +1259,7 @@ export class PaymentOrdersService {
       .eq('currency', wallet.currency)
       .single();
 
-    const totalNeeded = dto.amount + fee_amount;
+    const totalNeeded = dto.amount;
     if (!balance || parseFloat(balance.available_amount ?? '0') < totalNeeded) {
       throw new BadRequestException(
         `Saldo insuficiente. Necesitas $${totalNeeded} pero tienes $${balance?.available_amount ?? 0}`,
@@ -1293,6 +1329,7 @@ export class PaymentOrdersService {
           },
           amount: dto.amount.toString(),
           developer_fee: fee_amount.toString(),
+          client_reference_id: order.id,
         },
         idempotencyKey,
       );

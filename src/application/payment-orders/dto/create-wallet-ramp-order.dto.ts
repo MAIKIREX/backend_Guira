@@ -58,6 +58,7 @@ export class CreateWalletRampOrderDto {
   @ApiPropertyOptional()
   @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_crypto')
   @IsString()
+  @IsNotEmpty()
   destination_currency?: string;
 
   // ── destino fiat BO (bridge_wallet_to_fiat_bo) ──

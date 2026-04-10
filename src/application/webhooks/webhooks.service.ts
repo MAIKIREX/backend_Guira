@@ -832,9 +832,7 @@ export class WebhooksService {
           .eq('status', 'pending');
 
         // Liberar saldo reservado (el debit ya es definitivo)
-        const totalReserved =
-          parseFloat(paymentOrder.amount ?? '0') +
-          parseFloat(paymentOrder.fee_amount ?? '0');
+        const totalReserved = parseFloat(paymentOrder.amount ?? '0');
         await this.supabase.rpc('release_reserved_balance', {
           p_user_id: paymentOrder.user_id,
           p_currency: (paymentOrder.currency ?? 'USDC').toUpperCase(),
@@ -906,6 +904,26 @@ export class WebhooksService {
         .select('id');
 
       const settledCount = settledEntries?.length ?? 0;
+
+      // Liberar saldo reservado (off-ramp completado exitosamente)
+      // Solo se reserva dto.amount (el fee lo gestiona Bridge vía developer_fee)
+      const offRampFlows = [
+        'bridge_wallet_to_crypto',
+        'bridge_wallet_to_fiat_us',
+      ];
+      if (offRampFlows.includes(paymentOrder.flow_type)) {
+        const totalReserved = parseFloat(paymentOrder.amount ?? '0');
+        if (totalReserved > 0) {
+          await this.supabase.rpc('release_reserved_balance', {
+            p_user_id: paymentOrder.user_id,
+            p_currency: (paymentOrder.currency ?? 'USDC').toUpperCase(),
+            p_amount: totalReserved,
+          });
+          this.logger.log(
+            `💰 Reserva liberada para order ${paymentOrder.id}: ${totalReserved} ${paymentOrder.currency}`,
+          );
+        }
+      }
 
       // Safety net: si no había ledger_entry pending para on-ramps,
       // crear uno settled directamente para que el trigger actualice balances
@@ -1067,9 +1085,8 @@ export class WebhooksService {
         .eq('id', failedOrder.id);
 
       // Liberar balance reservado de la payment_order
-      const orderTotal =
-        parseFloat(failedOrder.amount ?? '0') +
-        parseFloat(failedOrder.fee_amount ?? '0');
+      // Solo se reserva amount (el fee lo gestiona Bridge vía developer_fee)
+      const orderTotal = parseFloat(failedOrder.amount ?? '0');
       if (orderTotal > 0) {
         await this.supabase.rpc('release_reserved_balance', {
           p_user_id: failedOrder.user_id,
