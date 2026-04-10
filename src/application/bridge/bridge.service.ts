@@ -695,6 +695,10 @@ export class BridgeService {
             external_account_id: externalAccountBridgeId,
           },
           amount: req.amount.toString(),
+          developer_fee: (req.fee_amount ?? '0').toString(),
+          return_instructions: {
+            address: wallet?.address,
+          },
         },
         req.idempotency_key,
       );

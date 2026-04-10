@@ -309,7 +309,11 @@ export class PaymentOrdersService {
             currency: dto.destination_currency?.toLowerCase() ?? 'usdc',
             to_address: dto.destination_address,
           },
-          amount: net_amount.toString(),
+          amount: dto.amount.toString(),
+          developer_fee: fee_amount.toString(),
+          return_instructions: {
+            address: dto.source_address,
+          },
         },
         idempotencyKey,
       );
@@ -696,6 +700,10 @@ export class PaymentOrdersService {
             to_address: wallet.address,
           },
           amount: dto.amount.toString(),
+          developer_fee: fee_amount.toString(),
+          return_instructions: {
+            address: dto.source_address,
+          },
         },
         idempotencyKey,
       );
@@ -1011,10 +1019,18 @@ export class PaymentOrdersService {
 
     // Ejecutar transfer vía Bridge API
     try {
+      // Obtener bridge_customer_id del usuario
+      const { data: profile } = await this.supabase
+        .from('profiles')
+        .select('bridge_customer_id')
+        .eq('id', userId)
+        .single();
+
       const idempotencyKey = `po_w2c_${order.id}`;
       const bridgeResult = await this.bridgeApi.post<Record<string, unknown>>(
         '/v0/transfers',
         {
+          on_behalf_of: profile?.bridge_customer_id,
           source: {
             payment_rail: 'usdc',
             currency: wallet.currency.toLowerCase(),
@@ -1029,7 +1045,11 @@ export class PaymentOrdersService {
             ).toLowerCase(),
             to_address: dto.destination_address,
           },
-          amount: net_amount.toString(),
+          amount: dto.amount.toString(),
+          developer_fee: fee_amount.toString(),
+          return_instructions: {
+            address: wallet.address,
+          },
         },
         idempotencyKey,
       );
@@ -1189,7 +1209,11 @@ export class PaymentOrdersService {
             currency: (extAccount.currency ?? 'usd').toLowerCase(),
             external_account_id: extAccount.bridge_external_account_id,
           },
-          amount: net_amount.toString(),
+          amount: dto.amount.toString(),
+          developer_fee: fee_amount.toString(),
+          return_instructions: {
+            address: wallet.address,
+          },
         },
         idempotencyKey,
       );
