@@ -968,9 +968,9 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile?.bridge_customer_id,
           source: {
-            payment_rail: 'usdc',
+            payment_rail: 'bridge_wallet',
             currency: wallet.currency.toLowerCase(),
-            from_address: wallet.address,
+            wallet_id: wallet.id,
           },
           destination: {
             payment_rail: (
@@ -1124,9 +1124,9 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile?.bridge_customer_id,
           source: {
-            payment_rail: 'usdc',
+            payment_rail: 'bridge_wallet',
             currency: wallet.currency.toLowerCase(),
-            from_address: wallet.address,
+            wallet_id: wallet.id,
           },
           destination: {
             payment_rail: (
