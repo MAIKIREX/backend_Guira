@@ -968,9 +968,7 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile?.bridge_customer_id,
           source: {
-            payment_rail: 'bridge_wallet',
-            currency: wallet.currency.toLowerCase(),
-            wallet_id: wallet.id,
+            bridge_wallet_id: wallet.provider_wallet_id,
           },
           destination: {
             payment_rail: (
@@ -1124,9 +1122,7 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile?.bridge_customer_id,
           source: {
-            payment_rail: 'bridge_wallet',
-            currency: wallet.currency.toLowerCase(),
-            wallet_id: wallet.id,
+            bridge_wallet_id: wallet.provider_wallet_id,
           },
           destination: {
             payment_rail: (
@@ -1292,9 +1288,7 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile?.bridge_customer_id,
           source: {
-            payment_rail: 'usdc',
-            currency: wallet.currency.toLowerCase(),
-            from_address: wallet.address,
+            bridge_wallet_id: wallet.provider_wallet_id,
           },
           destination: {
             payment_rail: extAccount.account_type ?? 'ach',
