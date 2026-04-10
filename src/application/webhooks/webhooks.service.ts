@@ -822,16 +822,50 @@ export class WebhooksService {
           status: 'completed',
           completed_at: new Date().toISOString(),
           tx_hash: (data?.destination_tx_hash as string) ?? null,
+          amount_destination: receipt?.final_amount
+            ? parseFloat(receipt.final_amount as string)
+            : null,
         })
         .eq('id', paymentOrder.id);
 
       // Asentar ledger entries vinculadas a la payment_order
-      await this.supabase
+      const { count: settledCount } = await this.supabase
         .from('ledger_entries')
         .update({ status: 'settled' })
         .eq('reference_type', 'payment_order')
         .eq('reference_id', paymentOrder.id)
-        .eq('status', 'pending');
+        .eq('status', 'pending')
+        .select('id');
+
+      // Safety net: si no había ledger_entry pending para on-ramps,
+      // crear uno settled directamente para que el trigger actualice balances
+      const onRampFlows = [
+        'crypto_to_bridge_wallet',
+        'fiat_us_to_bridge_wallet',
+        'fiat_bo_to_bridge_wallet',
+      ];
+      if (
+        (!settledCount || settledCount === 0) &&
+        paymentOrder.wallet_id &&
+        onRampFlows.includes(paymentOrder.flow_type)
+      ) {
+        const netAmount =
+          parseFloat(paymentOrder.amount) -
+          parseFloat(paymentOrder.fee_amount ?? '0');
+        await this.supabase.from('ledger_entries').insert({
+          wallet_id: paymentOrder.wallet_id,
+          type: 'credit',
+          amount: netAmount,
+          currency: paymentOrder.currency,
+          status: 'settled',
+          reference_type: 'payment_order',
+          reference_id: paymentOrder.id,
+          description: `On-ramp completado (webhook safety-net): ${netAmount} ${paymentOrder.currency}`,
+        });
+        this.logger.warn(
+          `⚠️ Safety net: ledger_entry credit settled creado para order ${paymentOrder.id} (no existía pending)`,
+        );
+      }
 
       this.logger.log(
         `✅ Payment order ${paymentOrder.id} completada vía webhook (transfer ${bridgeTransferId})`,

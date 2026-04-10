@@ -740,19 +740,34 @@ export class PaymentOrdersService {
         currency: 'USDT',
         fee_amount,
         net_amount,
+        source_type: 'crypto_external',
+        source_currency: 'USDT',
         source_address: dto.source_address,
         source_network: dto.source_network,
         destination_type: 'bridge_wallet',
         destination_currency: wallet.currency,
         bridge_transfer_id: bridgeTransfer.id as string,
         bridge_source_deposit_instructions: depositInstructions,
-        notes: dto.notes,
+        notes: dto.notes ?? `On-ramp crypto: ${dto.amount} USDT (${dto.source_network}) → Bridge Wallet`,
         status: 'waiting_deposit',
       })
       .select()
       .single();
 
     if (error) throw new BadRequestException(error.message);
+
+    // 4. Crear ledger entry (credit, pending — se liquida con webhook)
+    await this.supabase.from('ledger_entries').insert({
+      wallet_id: wallet.id,
+      type: 'credit',
+      amount: net_amount,
+      currency: wallet.currency,
+      status: 'pending',
+      reference_type: 'payment_order',
+      reference_id: order.id,
+      bridge_transfer_id: bridgeTransfer.id as string,
+      description: `On-ramp crypto: ${net_amount} ${wallet.currency} desde ${dto.source_address} (${dto.source_network})`,
+    });
 
     this.logger.log(
       `📋 Orden crypto_to_bridge_wallet: ${order.id} — ${dto.amount}`,
