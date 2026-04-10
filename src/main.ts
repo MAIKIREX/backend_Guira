@@ -16,23 +16,33 @@ async function bootstrap() {
   const prefix = process.env.PATH_SUBDOMAIN || 'api';
   app.setGlobalPrefix(prefix);
 
-  // Security Headers
-  app.use(helmet());
-
-  // CORS: acepta orígenes definidos en URL_FRONTEND (comma-separated) y localhost:3000 para desarrollo
+  // CORS: acepta orígenes definidos en URL_FRONTEND (comma-separated) y localhost para desarrollo
   const allowedOrigins = (process.env.URL_FRONTEND ?? '')
     .split(',')
     .map((o) => o.trim().replace(/\/$/, ''))
     .filter((o) => o.length > 0);
-    
+
+  // Siempre permitir localhost para desarrollo
   if (!allowedOrigins.includes('http://localhost:3000')) {
     allowedOrigins.push('http://localhost:3000');
   }
+  if (!allowedOrigins.includes('http://localhost:5173')) {
+    allowedOrigins.push('http://localhost:5173');
+  }
 
+  console.log('🔒 CORS allowed origins:', allowedOrigins);
+
+  // IMPORTANTE: enableCors ANTES de helmet para que las respuestas preflight (OPTIONS)
+  // se envíen correctamente sin ser bloqueadas por helmet
   app.enableCors({
     origin: allowedOrigins,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   });
+
+  // Security Headers — crossOriginResourcePolicy false para no bloquear peticiones cross-origin a la API
+  app.use(helmet({ crossOriginResourcePolicy: false }));
 
   // Validación/transformación global de DTOs
   app.useGlobalPipes(
