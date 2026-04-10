@@ -1235,7 +1235,7 @@ export class PaymentOrdersService {
     // Validar external_account
     const { data: extAccount } = await this.supabase
       .from('bridge_external_accounts')
-      .select('id, account_type, currency, bridge_external_account_id')
+      .select('id, account_type, currency, bridge_external_account_id, payment_rail')
       .eq('id', dto.external_account_id)
       .eq('user_id', userId)
       .single();
@@ -1325,7 +1325,7 @@ export class PaymentOrdersService {
             bridge_wallet_id: wallet.provider_wallet_id,
           },
           destination: {
-            payment_rail: extAccount.account_type ?? 'ach',
+            payment_rail: extAccount.payment_rail ?? 'ach',
             currency: (extAccount.currency ?? 'usd').toLowerCase(),
             external_account_id: extAccount.bridge_external_account_id,
           },
