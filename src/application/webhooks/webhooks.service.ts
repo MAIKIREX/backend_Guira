@@ -1072,7 +1072,7 @@ export class WebhooksService {
       .from('payment_orders')
       .select('id, user_id, wallet_id, amount, fee_amount, currency')
       .eq('bridge_transfer_id', bridgeTransferId)
-      .in('status', ['processing', 'created'])
+      .in('status', ['processing', 'created', 'waiting_deposit'])
       .maybeSingle();
 
     if (failedOrder) {

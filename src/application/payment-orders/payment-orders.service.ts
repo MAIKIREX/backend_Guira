@@ -268,6 +268,8 @@ export class PaymentOrdersService {
           dto.destination_currency?.toUpperCase() ??
           dto.source_currency?.toUpperCase() ??
           'USDT',
+        exchange_rate_applied: 1,
+        amount_destination: net_amount,
         supplier_id: dto.supplier_id ?? null,
         business_purpose: dto.business_purpose,
         supporting_document_url: dto.supporting_document_url,
@@ -321,6 +323,23 @@ export class PaymentOrdersService {
       const transferId = (bridgeResult?.id ?? null) as string | null;
       const sourceDepositInstructions =
         bridgeResult?.source_deposit_instructions ?? null;
+
+      // ── Crear registro bridge_transfers (requerido para vincular webhooks) ──
+      await this.supabase.from('bridge_transfers').insert({
+        user_id: userId,
+        bridge_transfer_id: transferId,
+        amount: dto.amount,
+        net_amount,
+        bridge_state: (bridgeResult?.state as string) ?? 'awaiting_funds',
+        status: 'pending',
+        source_payment_rail: dto.source_network,
+        destination_payment_rail: dto.destination_network,
+        destination_currency:
+          dto.destination_currency?.toUpperCase() ??
+          dto.source_currency?.toUpperCase() ??
+          'USDC',
+        bridge_raw_response: bridgeResult,
+      });
 
       await this.supabase
         .from('payment_orders')
