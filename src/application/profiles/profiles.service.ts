@@ -247,4 +247,78 @@ export class ProfilesService {
 
     return data as ProfileResponseDto;
   }
+
+  /**
+   * Cambia el rol de un usuario.
+   * Reglas:
+   *  - Nadie puede cambiar su propio rol.
+   *  - Solo super_admin puede asignar roles admin y super_admin.
+   *  - admin puede asignar solo client y staff.
+   * Registra la acción en audit_logs.
+   */
+  async updateRole(
+    targetId: string,
+    newRole: string,
+    reason: string,
+    actor: { id: string; profile: { role: string } },
+  ): Promise<ProfileResponseDto> {
+    // 1. No auto-modificación
+    if (actor.id === targetId) {
+      throw new BadRequestException('No puedes cambiar tu propio rol');
+    }
+
+    // 2. Solo super_admin puede asignar admin o super_admin
+    if (
+      (newRole === 'super_admin' || newRole === 'admin') &&
+      actor.profile.role !== 'super_admin'
+    ) {
+      throw new BadRequestException(
+        'Solo un super_admin puede asignar el rol admin o super_admin',
+      );
+    }
+
+    // 3. Obtener perfil actual para auditoría
+    const current = await this.findById(targetId);
+    const previousRole = current.role;
+
+    if (previousRole === newRole) {
+      throw new BadRequestException(
+        `El usuario ya tiene el rol "${newRole}"`,
+      );
+    }
+
+    // 4. Actualizar rol
+    const { data, error } = await this.supabase
+      .from('profiles')
+      .update({
+        role: newRole,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', targetId)
+      .select()
+      .single();
+
+    if (error || !data) {
+      throw new NotFoundException(`Usuario ${targetId} no encontrado`);
+    }
+
+    // 5. Registrar en audit_logs
+    await this.supabase.from('audit_logs').insert({
+      performed_by: actor.id,
+      role: actor.profile.role,
+      action: 'ROLE_CHANGE',
+      table_name: 'profiles',
+      record_id: targetId,
+      previous_values: { role: previousRole },
+      new_values: { role: newRole },
+      reason,
+      source: 'admin_panel',
+    });
+
+    this.logger.log(
+      `Rol de ${targetId} cambiado de "${previousRole}" a "${newRole}" por ${actor.id}`,
+    );
+
+    return data as ProfileResponseDto;
+  }
 }

@@ -21,6 +21,7 @@ import {
 import { ProfilesService } from './profiles.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { FreezeAccountDto, ActivateAccountDto } from './dto/freeze-account.dto';
+import { UpdateRoleDto } from './dto/update-role.dto';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
 import { RolesGuard } from '../../core/guards/roles.guard';
@@ -156,5 +157,18 @@ export class AdminProfilesController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.profilesService.toggleActive(id, dto.is_active, actor.id);
+  }
+
+  @Patch(':id/role')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Cambiar el rol de un usuario' })
+  @ApiResponse({ status: 200, description: 'Rol actualizado' })
+  @ApiResponse({ status: 400, description: 'Operación no permitida' })
+  updateRole(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateRoleDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.profilesService.updateRole(id, dto.role, dto.reason, actor);
   }
 }
