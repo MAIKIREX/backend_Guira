@@ -1531,22 +1531,63 @@ export class PaymentOrdersService {
       );
     }
 
-    // Si tenía saldo reservado (flujos de salida), liberarlo
-    const outboundFlows = [
-      'bridge_wallet_to_crypto',
-      'bridge_wallet_to_fiat_us',
-      'bridge_wallet_to_fiat_bo',
-    ];
+    // 1. Manejar ledger entries 'pending' de esta orden
+    const { data: pendingLedgers } = await this.supabase
+      .from('ledger_entries')
+      .update({ status: 'cancelled' })
+      .eq('reference_type', 'payment_order')
+      .eq('reference_id', orderId)
+      .eq('status', 'pending')
+      .select('amount, type');
 
-    if (outboundFlows.includes(order.flow_type ?? '')) {
-      const totalReserved =
-        parseFloat(order.amount ?? '0') + parseFloat(order.fee_amount ?? '0');
+    if (pendingLedgers && pendingLedgers.length > 0) {
+      // Liberar saldos reservados asociados a debitos pendientes
+      const totalToRelease = pendingLedgers
+        .filter((l) => l.type === 'debit')
+        .reduce((sum, l) => sum + parseFloat(l.amount), 0);
 
-      await this.supabase.rpc('release_reserved_balance', {
-        p_user_id: userId,
-        p_currency: (order.currency ?? 'USDC').toUpperCase(),
-        p_amount: totalReserved,
-      });
+      if (totalToRelease > 0) {
+        await this.supabase.rpc('release_reserved_balance', {
+          p_user_id: userId,
+          p_currency: (order.currency ?? 'USDC').toUpperCase(),
+          p_amount: totalToRelease,
+        });
+
+        this.logger.log(
+          `💰 Reserva liberada para orden cancelada: ${totalToRelease} ${order.currency}`,
+        );
+      }
+    }
+
+    // 2. Manejar ledgers 'settled' (es decir, el balance ya fue deducto definitivamente)
+    // Para devoluciones en este punto, necesitamos emitir un reembolso (credit).
+    const { data: settledLedgers } = await this.supabase
+      .from('ledger_entries')
+      .select('amount, type')
+      .eq('reference_type', 'payment_order')
+      .eq('reference_id', orderId)
+      .eq('status', 'settled')
+      .eq('type', 'debit');
+
+    if (settledLedgers && settledLedgers.length > 0 && order.wallet_id) {
+      const totalToRefund = settledLedgers.reduce((sum, l) => sum + parseFloat(l.amount), 0);
+
+      if (totalToRefund > 0) {
+        await this.supabase.from('ledger_entries').insert({
+          wallet_id: order.wallet_id,
+          type: 'credit',
+          amount: totalToRefund,
+          currency: order.currency,
+          status: 'settled',
+          reference_type: 'payment_order',
+          reference_id: orderId,
+          description: `Reembolso por orden cancelada`,
+        });
+
+        this.logger.log(
+          `💰 Reembolso emitido para orden cancelada: ${totalToRefund} ${order.currency}`,
+        );
+      }
     }
 
     const { data: updated, error } = await this.supabase
@@ -1866,29 +1907,63 @@ export class PaymentOrdersService {
 
     if (error) throw new BadRequestException(error.message);
 
-    // Liberar saldo reservado si aplica
-    const outboundFlows = [
-      'bridge_wallet_to_crypto',
-      'bridge_wallet_to_fiat_us',
-      'bridge_wallet_to_fiat_bo',
-    ];
+    // 1. Manejar ledger entries 'pending' de esta orden
+    const { data: pendingLedgers } = await this.supabase
+      .from('ledger_entries')
+      .update({ status: 'failed' })
+      .eq('reference_type', 'payment_order')
+      .eq('reference_id', orderId)
+      .eq('status', 'pending')
+      .select('amount, type');
 
-    if (outboundFlows.includes(order.flow_type ?? '')) {
-      const totalReserved =
-        parseFloat(order.amount ?? '0') + parseFloat(order.fee_amount ?? '0');
+    if (pendingLedgers && pendingLedgers.length > 0) {
+      // Liberar saldos reservados asociados a debitos pendientes
+      const totalToRelease = pendingLedgers
+        .filter((l) => l.type === 'debit')
+        .reduce((sum, l) => sum + parseFloat(l.amount), 0);
 
-      await this.supabase
-        .from('ledger_entries')
-        .update({ status: 'failed' })
-        .eq('reference_type', 'payment_order')
-        .eq('reference_id', orderId)
-        .eq('status', 'pending');
+      if (totalToRelease > 0) {
+        await this.supabase.rpc('release_reserved_balance', {
+          p_user_id: order.user_id,
+          p_currency: (order.currency ?? 'USDC').toUpperCase(),
+          p_amount: totalToRelease,
+        });
 
-      await this.supabase.rpc('release_reserved_balance', {
-        p_user_id: order.user_id,
-        p_currency: (order.currency ?? 'USDC').toUpperCase(),
-        p_amount: totalReserved,
-      });
+        this.logger.log(
+          `💰 Reserva liberada para orden fallida: ${totalToRelease} ${order.currency}`,
+        );
+      }
+    }
+
+    // 2. Manejar ledgers 'settled' (es decir, el balance ya fue deducto definitivamente)
+    // Para devoluciones en este punto, necesitamos emitir un reembolso (credit).
+    const { data: settledLedgers } = await this.supabase
+      .from('ledger_entries')
+      .select('amount, type')
+      .eq('reference_type', 'payment_order')
+      .eq('reference_id', orderId)
+      .eq('status', 'settled')
+      .eq('type', 'debit');
+
+    if (settledLedgers && settledLedgers.length > 0 && order.wallet_id) {
+      const totalToRefund = settledLedgers.reduce((sum, l) => sum + parseFloat(l.amount), 0);
+
+      if (totalToRefund > 0) {
+        await this.supabase.from('ledger_entries').insert({
+          wallet_id: order.wallet_id,
+          type: 'credit',
+          amount: totalToRefund,
+          currency: order.currency,
+          status: 'settled',
+          reference_type: 'payment_order',
+          reference_id: orderId,
+          description: `Reembolso por orden fallida/rechazada`,
+        });
+
+        this.logger.log(
+          `💰 Reembolso emitido para orden fallida: ${totalToRefund} ${order.currency}`,
+        );
+      }
     }
 
     await this.supabase.from('audit_logs').insert({
