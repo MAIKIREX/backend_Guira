@@ -1,5 +1,6 @@
 import {
   IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -110,19 +111,28 @@ export class CreateFeeOverrideDto {
   @IsUUID()
   user_id: string;
 
-  @ApiProperty({ example: 'payout' })
-  @IsString()
-  @IsNotEmpty()
+  @ApiProperty({
+    example: 'ramp_off_bo',
+    enum: [
+      'interbank_bo_out', 'interbank_w2w', 'interbank_bo_wallet', 'interbank_bo_in',
+      'ramp_on_fiat_us', 'ramp_on_bo', 'ramp_on_crypto',
+      'ramp_off_bo', 'ramp_off_crypto', 'ramp_off_fiat_us',
+    ],
+  })
+  @IsIn([
+    'interbank_bo_out', 'interbank_w2w', 'interbank_bo_wallet', 'interbank_bo_in',
+    'ramp_on_fiat_us', 'ramp_on_bo', 'ramp_on_crypto',
+    'ramp_off_bo', 'ramp_off_crypto', 'ramp_off_fiat_us',
+  ])
   operation_type: string;
 
-  @ApiPropertyOptional({ example: 'wire' })
-  @IsOptional()
-  @IsString()
-  payment_rail?: string;
+  @ApiProperty({ example: 'psav', enum: ['psav', 'bridge'] })
+  @IsIn(['psav', 'bridge'])
+  payment_rail: string;
 
-  @ApiPropertyOptional({ example: 'USD' })
+  @ApiPropertyOptional({ example: 'USD', enum: ['USD', 'BOB', 'USDC', 'USDT'] })
   @IsOptional()
-  @IsString()
+  @IsIn(['USD', 'BOB', 'USDC', 'USDT'])
   currency?: string;
 
   @ApiProperty({ enum: ['percent', 'fixed', 'mixed'] })
