@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   ParseUUIDPipe,
@@ -20,6 +21,7 @@ import {
   UpdateFeeDto,
   CreateFeeOverrideDto,
 } from './dto/create-fee.dto';
+import { UpdateFeeOverrideDto } from './dto/update-fee-override.dto';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
 import { RolesGuard } from '../../core/guards/roles.guard';
@@ -96,4 +98,28 @@ export class AdminFeesController {
   ) {
     return this.feesService.createOverride(dto, actor.id);
   }
+
+  @Patch('overrides/:id')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Actualizar override de fee' })
+  @ApiResponse({ status: 200, description: 'Override actualizado' })
+  updateOverride(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateFeeOverrideDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.feesService.updateOverride(id, dto, actor.id);
+  }
+
+  @Delete('overrides/:id')
+  @Roles('super_admin')
+  @ApiOperation({ summary: 'Eliminar override de fee permanentemente' })
+  @ApiResponse({ status: 200, description: 'Override eliminado' })
+  deleteOverride(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.feesService.deleteOverride(id, actor.id);
+  }
 }
+

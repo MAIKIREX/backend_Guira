@@ -160,6 +160,118 @@ export class FeesService {
     return data;
   }
 
+  /** Actualiza un override existente. */
+  async updateOverride(
+    overrideId: string,
+    dto: {
+      fee_percent?: number;
+      fee_fixed?: number;
+      min_fee?: number;
+      max_fee?: number;
+      is_active?: boolean;
+      valid_until?: string;
+      notes?: string;
+    },
+    actorId: string,
+  ) {
+    // 1. Obtener override actual para auditoría
+    const { data: current, error: findError } = await this.supabase
+      .from('customer_fee_overrides')
+      .select('*')
+      .eq('id', overrideId)
+      .single();
+
+    if (findError || !current)
+      throw new NotFoundException('Override no encontrado');
+
+    // 2. Si se está activando, verificar que no haya otro activo
+    //    para el mismo user + operation_type + payment_rail
+    if (dto.is_active === true && !current.is_active) {
+      const { data: conflict } = await this.supabase
+        .from('customer_fee_overrides')
+        .select('id')
+        .eq('user_id', current.user_id)
+        .eq('operation_type', current.operation_type)
+        .eq('payment_rail', current.payment_rail)
+        .eq('is_active', true)
+        .neq('id', overrideId)
+        .maybeSingle();
+
+      if (conflict) {
+        throw new BadRequestException(
+          `Ya existe un override activo para ${current.operation_type}/${current.payment_rail}. Desactívalo primero.`,
+        );
+      }
+    }
+
+    // 3. Actualizar
+    const { data, error } = await this.supabase
+      .from('customer_fee_overrides')
+      .update({ ...dto, updated_at: new Date().toISOString() })
+      .eq('id', overrideId)
+      .select()
+      .single();
+
+    if (error || !data)
+      throw new BadRequestException('No se pudo actualizar el override');
+
+    // 4. Audit log
+    await this.supabase.from('audit_logs').insert({
+      actor_id: actorId,
+      action: 'fee_override_updated',
+      entity_type: 'customer_fee_override',
+      entity_id: overrideId,
+      details: {
+        user_id: current.user_id,
+        previous: {
+          fee_percent: current.fee_percent,
+          fee_fixed: current.fee_fixed,
+          is_active: current.is_active,
+        },
+        updated: dto,
+      },
+    });
+
+    return data;
+  }
+
+  /** Elimina permanentemente un override. */
+  async deleteOverride(overrideId: string, actorId: string) {
+    // 1. Obtener override para auditoría
+    const { data: current, error: findError } = await this.supabase
+      .from('customer_fee_overrides')
+      .select('*')
+      .eq('id', overrideId)
+      .single();
+
+    if (findError || !current)
+      throw new NotFoundException('Override no encontrado');
+
+    // 2. Eliminar
+    const { error } = await this.supabase
+      .from('customer_fee_overrides')
+      .delete()
+      .eq('id', overrideId);
+
+    if (error) throw new BadRequestException('No se pudo eliminar el override');
+
+    // 3. Audit log
+    await this.supabase.from('audit_logs').insert({
+      actor_id: actorId,
+      action: 'fee_override_deleted',
+      entity_type: 'customer_fee_override',
+      entity_id: overrideId,
+      details: {
+        user_id: current.user_id,
+        operation_type: current.operation_type,
+        payment_rail: current.payment_rail,
+        fee_type: current.fee_type,
+      },
+    });
+
+    return { message: 'Override eliminado permanentemente' };
+  }
+
   // ───────────────────────────────────────────────
   //  Servicio  interno — Cálculo de fee
   // ───────────────────────────────────────────────
@@ -231,3 +343,4 @@ export class FeesService {
     };
   }
 }
+
