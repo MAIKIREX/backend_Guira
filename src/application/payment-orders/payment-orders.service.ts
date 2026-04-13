@@ -213,7 +213,7 @@ export class PaymentOrdersService {
         destination_account_number: fullAccountNumber,
         exchange_rate_applied: rateData.effective_rate,
         amount_destination: parseFloat(
-          (net_amount * rateData.effective_rate).toFixed(2),
+          (net_amount / rateData.effective_rate).toFixed(2),
         ),
         psav_deposit_instructions: depositInstructions,
         business_purpose: dto.business_purpose,
@@ -414,7 +414,7 @@ export class PaymentOrdersService {
         supplier_id: dto.supplier_id ?? null,
         exchange_rate_applied: rateData.effective_rate,
         amount_destination: parseFloat(
-          (net_amount * rateData.effective_rate).toFixed(2),
+          (net_amount / rateData.effective_rate).toFixed(2),
         ),
         psav_deposit_instructions: depositInstructions,
         business_purpose: dto.business_purpose,
@@ -654,7 +654,7 @@ export class PaymentOrdersService {
         destination_currency: wallet.currency,
         exchange_rate_applied: rateData.effective_rate,
         amount_destination: parseFloat(
-          (net_amount * rateData.effective_rate).toFixed(2),
+          (net_amount / rateData.effective_rate).toFixed(2),
         ),
         psav_deposit_instructions: depositInstructions,
         notes: dto.notes,
@@ -1698,11 +1698,14 @@ export class PaymentOrdersService {
       }
     }
 
+    const isBobOut = ['bolivia_to_world', 'bolivia_to_wallet', 'fiat_bo_to_bridge_wallet'].includes(order.flow_type ?? '');
+    
     const amountDestination = exchangeRate
       ? parseFloat(
-          (parseFloat(order.net_amount ?? order.amount) * exchangeRate).toFixed(
-            2,
-          ),
+          (isBobOut
+            ? parseFloat(order.net_amount ?? order.amount) / exchangeRate
+            : parseFloat(order.net_amount ?? order.amount) * exchangeRate
+          ).toFixed(2),
         )
       : null;
 

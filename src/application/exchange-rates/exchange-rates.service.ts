@@ -33,9 +33,9 @@ export class ExchangeRatesService {
   /**
    * Sincroniza desde el API externo (Binance P2P history).
    * BUY: Tasa a la que el usuario compra USDT dando BOB (1 USDT = X BOB).
-   *      Para nuestro par BOB_USD, multiplicador = 1 / X.
+   *      Se almacena directamente como BOB_USD = X (cuántos BOB por 1 USD).
    * SELL: Tasa a la que el usuario vende USDT por BOB (1 USDT = Y BOB).
-   *       Para nuestro par USD_BOB, multiplicador = Y.
+   *       Se almacena directamente como USD_BOB = Y (cuántos BOB por 1 USD).
    */
   async syncExternalRates(actorId = 'system_admin') {
     try {
@@ -59,8 +59,8 @@ export class ExchangeRatesService {
         );
       }
 
-      // 1. De BOB a USD (User da BOB, recibe USD)
-      const bobToUsdRate = 1 / buyRateBobPerUsd;
+      // 1. Tasa de compra: cuántos BOB por 1 USD (directo del API)
+      const bobToUsdRate = buyRateBobPerUsd;
 
       // 2. De USD a BOB (User da USD, recibe BOB)
       const usdToBobRate = sellRateBobPerUsd;
@@ -145,7 +145,14 @@ export class ExchangeRatesService {
 
     const baseRate = parseFloat(data.rate);
     const spreadPercent = parseFloat(data.spread_percent ?? '0');
-    const spreadMultiplier = 1 - spreadPercent / 100;
+
+    // El spread se aplica SIEMPRE en contra del usuario:
+    // - Para BOB_* (dividimos): SUBIR la tasa → el divisor es mayor → usuario recibe MENOS USD
+    // - Para USD_*/USDC_* (multiplicamos): BAJAR la tasa → el multiplicador es menor → usuario recibe MENOS BOB
+    const isBobPair = data.pair.toUpperCase().startsWith('BOB_');
+    const spreadMultiplier = isBobPair
+      ? 1 + spreadPercent / 100  // subir tasa para penalizar al dividir
+      : 1 - spreadPercent / 100; // bajar tasa para penalizar al multiplicar
     const effectiveRate = baseRate * spreadMultiplier;
 
     return {
@@ -165,7 +172,14 @@ export class ExchangeRatesService {
   ) {
     const pair = `${fromCurrency}_${toCurrency}`.toUpperCase();
     const rateData = await this.getRate(pair);
-    const converted = amount * rateData.effective_rate;
+    
+    // Ahora todas las tasas almacenan "BOB por 1 USD"
+    // BOB→USD/USDC: dividir (cuántos USD obtienes por X BOB)
+    // USD/USDC→BOB: multiplicar (cuántos BOB obtienes por X USD)
+    const isBobToUsd = pair.startsWith('BOB_');
+    const converted = isBobToUsd
+      ? amount / rateData.effective_rate
+      : amount * rateData.effective_rate;
 
     return {
       original_amount: amount,
