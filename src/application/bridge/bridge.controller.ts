@@ -5,6 +5,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   ParseUUIDPipe,
   UseGuards,
 } from '@nestjs/common';
@@ -194,6 +195,18 @@ export class BridgeController {
 @UseGuards(RolesGuard)
 export class AdminBridgeController {
   constructor(private readonly bridgeService: BridgeService) {}
+
+  // ── Transfers (bridge_transfers) ─────────
+
+  @Get('transfers')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Listar todas las transferencias Bridge (admin)' })
+  @ApiResponse({ status: 200, description: 'Lista de bridge_transfers' })
+  listAllTransfers(@Query('status') status?: string) {
+    return this.bridgeService.listAllTransfers({ status });
+  }
+
+  // ── Payouts (payout_requests) ────────────
 
   @Post('payouts/:id/approve')
   @Roles('staff', 'admin', 'super_admin')

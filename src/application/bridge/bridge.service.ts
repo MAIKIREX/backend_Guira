@@ -864,6 +864,32 @@ export class BridgeService {
     return data ?? [];
   }
 
+  /** Admin: lista TODAS las transferencias Bridge (sin filtro de usuario). */
+  async listAllTransfers(filters?: { status?: string }) {
+    let query = this.supabase
+      .from('bridge_transfers')
+      .select(
+        '*, profiles!bridge_transfers_user_id_fkey(email, full_name)',
+      )
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (filters?.status && filters.status !== 'all') {
+      query = query.eq('status', filters.status);
+    }
+
+    const { data, error } = await query;
+    if (error) throw new BadRequestException(error.message);
+
+    // Aplanar el join de profiles para comodidad del frontend
+    return (data ?? []).map((t: any) => ({
+      ...t,
+      user_email: t.profiles?.email ?? null,
+      user_full_name: t.profiles?.full_name ?? null,
+      profiles: undefined,
+    }));
+  }
+
   async getTransfer(transferId: string, userId: string) {
     const { data, error } = await this.supabase
       .from('bridge_transfers')
