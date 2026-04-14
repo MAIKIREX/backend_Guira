@@ -222,6 +222,9 @@ export class ClientBankAccountsService {
         'Tu solicitud de cambio de cuenta bancaria ha sido enviada. Un miembro del equipo la revisará a la brevedad.',
     });
 
+    // 7. Notificar al staff
+    await this.notifyStaff(userId);
+
     this.logger.log(
       `🏦 Solicitud de cambio de cuenta bancaria: ${accountId} por usuario ${userId} — Motivo: ${dto.change_reason}`,
     );
@@ -437,5 +440,41 @@ export class ClientBankAccountsService {
     }
 
     return account;
+  }
+  /**
+   * Notifica al staff sobre una solicitud de cambio de cuenta bancaria.
+   */
+  private async notifyStaff(userId: string) {
+    try {
+      // Obtener el correo del usuario para mayor contexto (opcional pero bueno)
+      const { data: profile } = await this.supabase
+        .from('profiles')
+        .select('full_name, email')
+        .eq('id', userId)
+        .single();
+        
+      const userName = profile?.full_name || profile?.email || 'Un usuario';
+
+      // Obtener IDs de staff/admin
+      const { data: staffUsers } = await this.supabase
+        .from('profiles')
+        .select('id')
+        .in('role', ['staff', 'admin', 'super_admin'])
+        .eq('is_active', true);
+
+      if (staffUsers && staffUsers.length > 0) {
+        const notifications = staffUsers.map((s) => ({
+          user_id: s.id,
+          type: 'info',
+          title: '🏦 Solicitud de cambio de cuenta',
+          message: `${userName} ha solicitado un cambio en su cuenta bancaria. Ve al panel de usuarios para revisar.`,
+          metadata: { requester_user_id: userId, tab: 'users' },
+        }));
+
+        await this.supabase.from('notifications').insert(notifications);
+      }
+    } catch (err) {
+      this.logger.warn(`Error notificando staff sobre cambio bancario: ${err}`);
+    }
   }
 }
