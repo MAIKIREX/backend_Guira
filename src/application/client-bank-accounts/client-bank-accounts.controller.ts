@@ -3,7 +3,6 @@ import {
   Get,
   Post,
   Patch,
-  Delete,
   Body,
   Param,
   UseGuards,
@@ -72,27 +71,17 @@ export class ClientBankAccountsController {
   @ApiOperation({
     summary: 'Solicitar actualización de cuenta bancaria',
     description:
-      'Los cambios quedan pendientes de aprobación por un miembro del staff.',
+      'Los cambios quedan pendientes de aprobación por un miembro del staff. Límite: 1 cambio por mes calendario. Requiere motivo obligatorio.',
   })
   @ApiResponse({ status: 200, description: 'Solicitud de cambio registrada' })
   @ApiResponse({ status: 404, description: 'Cuenta no encontrada' })
+  @ApiResponse({ status: 400, description: 'Rate limit excedido o cambio pendiente' })
   requestUpdate(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateBankAccountDto,
   ) {
     return this.service.requestUpdate(user.id, id, dto);
-  }
-
-  @Delete(':id')
-  @ApiOperation({ summary: 'Eliminar cuenta bancaria' })
-  @ApiResponse({ status: 200, description: 'Cuenta eliminada' })
-  @ApiResponse({ status: 404, description: 'Cuenta no encontrada' })
-  remove(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ) {
-    return this.service.remove(user.id, id);
   }
 }
 

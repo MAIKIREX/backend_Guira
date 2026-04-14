@@ -123,6 +123,7 @@ export class ClientBankAccountsService {
   /**
    * Solicita actualización de la cuenta bancaria.
    * Los cambios quedan en estado 'pending_approval' hasta que un staff los apruebe.
+   * Límite: 1 solicitud de cambio por mes calendario.
    */
   async requestUpdate(
     userId: string,
@@ -141,7 +142,34 @@ export class ClientBankAccountsService {
       throw new NotFoundException('Cuenta bancaria no encontrada.');
     }
 
-    // 2. Guardar los cambios pendientes en metadata y cambiar status
+    // 2. Verificar que no haya un cambio pendiente
+    if (account.status === 'pending_approval') {
+      throw new BadRequestException(
+        'Ya tienes una solicitud de cambio pendiente. Espera a que sea procesada.',
+      );
+    }
+
+    // 3. Rate limit: 1 cambio por mes calendario
+    if (account.last_change_requested_at) {
+      const lastRequest = new Date(account.last_change_requested_at);
+      const now = new Date();
+      if (
+        lastRequest.getFullYear() === now.getFullYear() &&
+        lastRequest.getMonth() === now.getMonth()
+      ) {
+        const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const formattedDate = nextMonth.toLocaleDateString('es-BO', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        });
+        throw new BadRequestException(
+          `Solo puedes solicitar un cambio de cuenta bancaria por mes. Tu próximo cambio estará disponible a partir del ${formattedDate}.`,
+        );
+      }
+    }
+
+    // 4. Construir los cambios pendientes
     const pendingChanges: Record<string, any> = {};
     if (dto.bank_name !== undefined) pendingChanges.bank_name = dto.bank_name.trim();
     if (dto.account_number !== undefined) pendingChanges.account_number = dto.account_number.trim();
@@ -157,6 +185,8 @@ export class ClientBankAccountsService {
       .update({
         status: 'pending_approval',
         pending_changes: pendingChanges,
+        change_reason: dto.change_reason.trim(),
+        last_change_requested_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
       .eq('id', accountId)
@@ -166,7 +196,7 @@ export class ClientBankAccountsService {
 
     if (error) throw new BadRequestException(error.message);
 
-    // 3. Audit log
+    // 5. Audit log
     await this.supabase.from('audit_logs').insert({
       performed_by: userId,
       role: 'client',
@@ -179,11 +209,11 @@ export class ClientBankAccountsService {
         account_holder: account.account_holder,
         account_type: account.account_type,
       },
-      new_values: pendingChanges,
+      new_values: { ...pendingChanges, change_reason: dto.change_reason.trim() },
       source: 'client_profile',
     });
 
-    // 4. Notificar al staff (opcional — notificación interna)
+    // 6. Notificar al usuario
     await this.supabase.from('notifications').insert({
       user_id: userId,
       type: 'info',
@@ -193,47 +223,15 @@ export class ClientBankAccountsService {
     });
 
     this.logger.log(
-      `🏦 Solicitud de cambio de cuenta bancaria: ${accountId} por usuario ${userId}`,
+      `🏦 Solicitud de cambio de cuenta bancaria: ${accountId} por usuario ${userId} — Motivo: ${dto.change_reason}`,
     );
 
     return updated;
   }
 
-  /**
-   * Elimina la cuenta bancaria del usuario.
-   */
-  async remove(userId: string, accountId: string) {
-    const { data: account } = await this.supabase
-      .from('client_bank_accounts')
-      .select('id')
-      .eq('id', accountId)
-      .eq('user_id', userId)
-      .single();
-
-    if (!account) {
-      throw new NotFoundException('Cuenta bancaria no encontrada.');
-    }
-
-    const { error } = await this.supabase
-      .from('client_bank_accounts')
-      .delete()
-      .eq('id', accountId)
-      .eq('user_id', userId);
-
-    if (error) throw new BadRequestException(error.message);
-
-    // Audit log
-    await this.supabase.from('audit_logs').insert({
-      performed_by: userId,
-      role: 'client',
-      action: 'DELETE_BANK_ACCOUNT',
-      table_name: 'client_bank_accounts',
-      record_id: accountId,
-      source: 'client_profile',
-    });
-
-    return { message: 'Cuenta bancaria eliminada.' };
-  }
+  // Nota: El método remove() fue eliminado intencionalmente.
+  // Los clientes NO pueden eliminar su cuenta bancaria, solo solicitar cambios.
+  // La eliminación solo puede realizarse por staff desde el panel de administración.
 
   // ─────────────────────────────────────────────────────
   //  Endpoints de administración (Staff/Admin)

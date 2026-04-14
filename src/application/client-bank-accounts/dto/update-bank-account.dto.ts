@@ -2,10 +2,11 @@ import {
   IsString,
   IsOptional,
   IsEnum,
+  IsNotEmpty,
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateBankAccountDto {
   @ApiPropertyOptional({ example: 'Banco Nacional de Bolivia' })
@@ -35,4 +36,14 @@ export class UpdateBankAccountDto {
     message: 'El tipo de cuenta debe ser savings o checking.',
   })
   account_type?: string;
+
+  @ApiProperty({
+    example: 'Cambié de banco por mejor tasa de interés y comisiones más bajas.',
+    description: 'Motivo obligatorio del cambio. Mínimo 10 caracteres.',
+  })
+  @IsNotEmpty({ message: 'Debes indicar el motivo del cambio.' })
+  @IsString()
+  @MinLength(10, { message: 'El motivo debe tener al menos 10 caracteres.' })
+  @MaxLength(500)
+  change_reason: string;
 }
