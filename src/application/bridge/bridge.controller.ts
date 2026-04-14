@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Delete,
+  Patch,
   Body,
   Param,
   Query,
@@ -235,5 +236,72 @@ export class AdminBridgeController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.bridgeService.rejectPayout(id, body.reason, actor.id);
+  }
+
+  // ── VA Fee Management ─────────────────
+
+  @Get('users/:userId/va-fee')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Get resolved developer_fee for a client (override → global)' })
+  getUserVaFee(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+  ) {
+    return this.bridgeService.getResolvedVaFee(userId);
+  }
+
+  @Patch('users/:userId/va-fee')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Set/clear developer_fee override for a client' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        fee_percent: { type: 'number', nullable: true, description: 'null to clear override' },
+        reason: { type: 'string' },
+      },
+      required: ['reason'],
+    },
+  })
+  setUserVaFee(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Body() body: { fee_percent: number | null; reason: string },
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.bridgeService.setUserVaFeeOverride(
+      userId,
+      body.fee_percent,
+      body.reason,
+      actor.id,
+    );
+  }
+
+  @Get('users/:userId/virtual-accounts')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'List active VAs for a user (admin)' })
+  listUserVirtualAccounts(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+  ) {
+    return this.bridgeService.listUserVirtualAccounts(userId);
+  }
+
+  @Patch('virtual-accounts/:id/fee')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Update developer_fee_percent of existing VA in Bridge' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        fee_percent: { type: 'number' },
+        reason: { type: 'string' },
+      },
+      required: ['fee_percent', 'reason'],
+    },
+  })
+  updateVaFee(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { fee_percent: number; reason: string },
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.bridgeService.updateVirtualAccountFee(id, body.fee_percent, actor.id);
   }
 }

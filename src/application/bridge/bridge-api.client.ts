@@ -72,6 +72,27 @@ export class BridgeApiClient {
     return res.json() as Promise<T>;
   }
 
+  async put<T = Record<string, unknown>>(
+    path: string,
+    body: unknown,
+  ): Promise<T> {
+    this.ensureConfigured();
+
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: 'PUT',
+      headers: this.headers,
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      this.logger.error(`Bridge PUT ${path} failed [${res.status}]: ${err}`);
+      throw new BadGatewayException(`Bridge API error [${res.status}]: ${err}`);
+    }
+
+    return res.json() as Promise<T>;
+  }
+
   async delete<T = Record<string, unknown>>(path: string): Promise<T> {
     this.ensureConfigured();
 

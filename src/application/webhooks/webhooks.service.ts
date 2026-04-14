@@ -526,7 +526,11 @@ export class WebhooksService {
     });
 
     // 3. Calcular fee (aplica en ambos escenarios)
-    const devFeePercent = parseFloat(va.developer_fee_percent ?? '0') || 1.0;
+    // Usar el fee almacenado en la VA. 0% es un valor legítimo (cliente VIP sin cobro).
+    const devFeePercent =
+      va.developer_fee_percent != null
+        ? parseFloat(String(va.developer_fee_percent))
+        : 0;
     const feeAmount = parseFloat(((amount * devFeePercent) / 100).toFixed(2));
     const netAmount = parseFloat((amount - feeAmount).toFixed(2));
 

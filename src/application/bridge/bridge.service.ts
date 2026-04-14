@@ -85,19 +85,31 @@ export class BridgeService {
       destinationAddress = wallet?.address;
     }
 
-    // ── Determinar developer_fee_percent ──────────────────
-    // Si el DTO lo trae, usar ese valor; sino leer de fees_config
+    // ── Determinar developer_fee_percent (3 niveles) ──────────────────
+    // 1. DTO explícito (admin puede enviarlo) → 2. Override per-client → 3. Global
     let devFeePercent: string | undefined;
     if (dto.developer_fee_percent !== undefined) {
+      // Nivel 1: DTO explícito
       devFeePercent = dto.developer_fee_percent.toString();
     } else {
-      // Fallback: leer fee por defecto de app_settings
-      const { data: feeSetting } = await this.supabase
-        .from('app_settings')
-        .select('value')
-        .eq('key', 'DEFAULT_VA_FEE_PERCENT')
-        .maybeSingle();
-      devFeePercent = feeSetting?.value ?? undefined;
+      // Nivel 2: Override per-client en profiles
+      const { data: profileFee } = await this.supabase
+        .from('profiles')
+        .select('va_developer_fee_percent')
+        .eq('id', userId)
+        .single();
+
+      if (profileFee?.va_developer_fee_percent != null) {
+        devFeePercent = profileFee.va_developer_fee_percent.toString();
+      } else {
+        // Nivel 3: Fee global de app_settings
+        const { data: feeSetting } = await this.supabase
+          .from('app_settings')
+          .select('value')
+          .eq('key', 'DEFAULT_DEVELOPER_FEE_PCT')
+          .maybeSingle();
+        devFeePercent = feeSetting?.value ?? undefined;
+      }
     }
 
     // ── Crear en Bridge (formato anidado source/destination) ──
@@ -1094,5 +1106,155 @@ export class BridgeService {
       );
     }
     return accountType;
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  ADMIN: VA FEE MANAGEMENT
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Actualiza el developer_fee_percent de una VA existente en Bridge y en DB local.
+   * Solo admin/super_admin pueden invocar.
+   */
+  async updateVirtualAccountFee(
+    vaId: string,
+    newFeePercent: number,
+    actorId: string,
+  ): Promise<Record<string, unknown>> {
+    // 1. Obtener VA de DB
+    const { data: va, error } = await this.supabase
+      .from('bridge_virtual_accounts')
+      .select('bridge_virtual_account_id, bridge_customer_id, developer_fee_percent, status')
+      .eq('id', vaId)
+      .single();
+    if (error || !va)
+      throw new NotFoundException('Virtual Account no encontrada');
+    if (va.status !== 'active')
+      throw new BadRequestException('Solo se pueden actualizar VAs activas');
+
+    // 2. Actualizar en Bridge via PUT
+    await this.bridgeApi.put<Record<string, unknown>>(
+      `/v0/customers/${va.bridge_customer_id}/virtual_accounts/${va.bridge_virtual_account_id}`,
+      { developer_fee_percent: newFeePercent.toString() },
+    );
+
+    // 3. Actualizar en DB local
+    const { data: updated, error: updateErr } = await this.supabase
+      .from('bridge_virtual_accounts')
+      .update({ developer_fee_percent: newFeePercent })
+      .eq('id', vaId)
+      .select()
+      .single();
+    if (updateErr) throw new BadRequestException(updateErr.message);
+
+    // 4. Audit log
+    await this.supabase.from('audit_log').insert({
+      actor_id: actorId,
+      action: 'update_va_fee',
+      target_type: 'bridge_virtual_account',
+      target_id: vaId,
+      details: {
+        old_fee: va.developer_fee_percent,
+        new_fee: newFeePercent,
+        bridge_va_id: va.bridge_virtual_account_id,
+      },
+    });
+
+    this.logger.log(
+      `VA fee updated: ${vaId} (${va.developer_fee_percent}% → ${newFeePercent}%) by ${actorId}`,
+    );
+    return updated;
+  }
+
+  /**
+   * Establece o limpia el override de developer_fee_percent para un usuario.
+   * fee_percent=null → limpiar override (vuelve a fee global).
+   */
+  async setUserVaFeeOverride(
+    userId: string,
+    feePercent: number | null,
+    reason: string,
+    actorId: string,
+  ) {
+    // Verificar que el usuario existe
+    const { data: profile, error: profileErr } = await this.supabase
+      .from('profiles')
+      .select('id, va_developer_fee_percent')
+      .eq('id', userId)
+      .single();
+    if (profileErr || !profile)
+      throw new NotFoundException('Usuario no encontrado');
+
+    const oldFee = profile.va_developer_fee_percent;
+
+    const { error } = await this.supabase
+      .from('profiles')
+      .update({ va_developer_fee_percent: feePercent })
+      .eq('id', userId);
+    if (error) throw new BadRequestException(error.message);
+
+    // Audit log
+    await this.supabase.from('audit_log').insert({
+      actor_id: actorId,
+      action:
+        feePercent !== null
+          ? 'set_va_fee_override'
+          : 'clear_va_fee_override',
+      target_type: 'profile',
+      target_id: userId,
+      details: { old_fee: oldFee, new_fee: feePercent, reason },
+    });
+
+    this.logger.log(
+      `VA fee override ${feePercent !== null ? 'set' : 'cleared'}: user=${userId} (${oldFee}% → ${feePercent}%) by ${actorId}`,
+    );
+    return { user_id: userId, va_developer_fee_percent: feePercent };
+  }
+
+  /**
+   * Obtiene el fee resuelto para un usuario (override → global).
+   */
+  async getResolvedVaFee(userId: string) {
+    // 1. Check profile override
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('va_developer_fee_percent')
+      .eq('id', userId)
+      .single();
+
+    if (profile?.va_developer_fee_percent != null) {
+      return {
+        resolved_fee: profile.va_developer_fee_percent,
+        source: 'client_override' as const,
+      };
+    }
+
+    // 2. Fall back to global
+    const { data: feeSetting } = await this.supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'DEFAULT_DEVELOPER_FEE_PCT')
+      .maybeSingle();
+
+    return {
+      resolved_fee: feeSetting?.value ? parseFloat(feeSetting.value) : null,
+      source: 'global' as const,
+    };
+  }
+
+  /**
+   * Lista las VAs activas de un usuario (para admin).
+   */
+  async listUserVirtualAccounts(userId: string) {
+    const { data, error } = await this.supabase
+      .from('bridge_virtual_accounts')
+      .select(
+        'id, bridge_virtual_account_id, source_currency, destination_currency, developer_fee_percent, status, created_at',
+      )
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false });
+    if (error) throw new BadRequestException(error.message);
+    return data ?? [];
   }
 }
