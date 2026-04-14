@@ -15,6 +15,15 @@ export class ExchangeRatesService {
   private readonly EXTERNAL_API_URL =
     'https://api-mdp-2.onrender.com/api/forex/exchange-rate/all?asset=USDT';
 
+  /**
+   * Alias de pares legacy → canónicos.
+   * BOB_USDC y USDC_BOB ya no existen en DB; se redirigen a BOB_USD / USD_BOB.
+   */
+  private readonly PAIR_ALIASES: Record<string, string> = {
+    BOB_USDC: 'BOB_USD',
+    USDC_BOB: 'USD_BOB',
+  };
+
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
   ) {}
@@ -32,10 +41,9 @@ export class ExchangeRatesService {
 
   /**
    * Sincroniza desde el API externo (Binance P2P history).
-   * BUY: Tasa a la que el usuario compra USDT dando BOB (1 USDT = X BOB).
-   *      Se almacena directamente como BOB_USD = X (cuántos BOB por 1 USD).
-   * SELL: Tasa a la que el usuario vende USDT por BOB (1 USDT = Y BOB).
-   *       Se almacena directamente como USD_BOB = Y (cuántos BOB por 1 USD).
+   * Solo 2 pares canónicos:
+   *   BUY  → BOB_USD = X (cuántos BOB por 1 USD)
+   *   SELL → USD_BOB = Y (cuántos BOB por 1 USD)
    */
   async syncExternalRates(actorId = 'system_admin') {
     try {
@@ -65,12 +73,9 @@ export class ExchangeRatesService {
       // 2. De USD a BOB (User da USD, recibe BOB)
       const usdToBobRate = sellRateBobPerUsd;
 
-      // Actualizamos los pares en nuestra base de datos
+      // Actualizamos los 2 pares canónicos en la base de datos
       await this.updateRateInternal('BOB_USD', bobToUsdRate, actorId);
-      await this.updateRateInternal('BOB_USDC', bobToUsdRate, actorId);
-
       await this.updateRateInternal('USD_BOB', usdToBobRate, actorId);
-      await this.updateRateInternal('USDC_BOB', usdToBobRate, actorId);
 
       this.logger.log(
         'Sincronización de tasas de cambio completada exitosamente.',
@@ -133,10 +138,13 @@ export class ExchangeRatesService {
    *   - Para venta (USD → BOB): el usuario recibe menos BOB
    */
   async getRate(pair: string) {
+    const resolvedPair =
+      this.PAIR_ALIASES[pair.toUpperCase()] ?? pair.toUpperCase();
+
     const { data, error } = await this.supabase
       .from('exchange_rates_config')
       .select('*')
-      .eq('pair', pair.toUpperCase())
+      .eq('pair', resolvedPair)
       .single();
 
     if (error || !data) {
@@ -147,8 +155,8 @@ export class ExchangeRatesService {
     const spreadPercent = parseFloat(data.spread_percent ?? '0');
 
     // El spread se aplica SIEMPRE en contra del usuario:
-    // - Para BOB_* (dividimos): SUBIR la tasa → el divisor es mayor → usuario recibe MENOS USD
-    // - Para USD_*/USDC_* (multiplicamos): BAJAR la tasa → el multiplicador es menor → usuario recibe MENOS BOB
+    // - Para BOB_USD (dividimos): SUBIR la tasa → el divisor es mayor → usuario recibe MENOS USD
+    // - Para USD_BOB (multiplicamos): BAJAR la tasa → el multiplicador es menor → usuario recibe MENOS BOB
     const isBobPair = data.pair.toUpperCase().startsWith('BOB_');
     const spreadMultiplier = isBobPair
       ? 1 + spreadPercent / 100  // subir tasa para penalizar al dividir
@@ -192,7 +200,6 @@ export class ExchangeRatesService {
     };
   }
 
-  /** Lista todos los pares de tipo de cambio. */
   async getAllRates() {
     const { data, error } = await this.supabase
       .from('exchange_rates_config')
@@ -200,7 +207,25 @@ export class ExchangeRatesService {
       .order('pair');
 
     if (error) throw new BadRequestException(error.message);
-    return data ?? [];
+    
+    return (data ?? []).map((row) => {
+      const baseRate = parseFloat(row.rate);
+      const spreadPercent = parseFloat(row.spread_percent ?? '0');
+      const isBobPair = row.pair.toUpperCase().startsWith('BOB_');
+      
+      const spreadMultiplier = isBobPair
+        ? 1 + spreadPercent / 100
+        : 1 - spreadPercent / 100;
+        
+      const effectiveRate = baseRate * spreadMultiplier;
+
+      return {
+        ...row,
+        base_rate: baseRate,
+        spread_percent: spreadPercent,
+        effective_rate: parseFloat(effectiveRate.toFixed(6)),
+      };
+    });
   }
 
   /** Actualiza tipo de cambio (solo admin, manual). */
@@ -209,8 +234,11 @@ export class ExchangeRatesService {
     dto: { rate: number; spread_percent?: number },
     actorId: string,
   ) {
+    const resolvedPair =
+      this.PAIR_ALIASES[pair.toUpperCase()] ?? pair.toUpperCase();
+
     // Obtener valores previos para audit
-    const old = await this.getRate(pair);
+    const old = await this.getRate(resolvedPair);
 
     const updatePayload: Record<string, unknown> = {
       rate: dto.rate,
@@ -225,7 +253,7 @@ export class ExchangeRatesService {
     const { data, error } = await this.supabase
       .from('exchange_rates_config')
       .update(updatePayload)
-      .eq('pair', pair.toUpperCase())
+      .eq('pair', resolvedPair)
       .select()
       .single();
 

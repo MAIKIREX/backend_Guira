@@ -394,7 +394,7 @@ export class PaymentOrdersService {
       dto.amount,
     );
 
-    const rateData = await this.exchangeRatesService.getRate('BOB_USDC');
+    const rateData = await this.exchangeRatesService.getRate('BOB_USD');
 
     const { data: order, error } = await this.supabase
       .from('payment_orders')
@@ -636,7 +636,7 @@ export class PaymentOrdersService {
       dto.amount,
     );
 
-    const rateData = await this.exchangeRatesService.getRate('BOB_USDC');
+    const rateData = await this.exchangeRatesService.getRate('BOB_USD');
 
     const { data: order, error } = await this.supabase
       .from('payment_orders')
@@ -927,7 +927,7 @@ export class PaymentOrdersService {
       p_amount: totalNeeded,
     });
 
-    const rateData = await this.exchangeRatesService.getRate('USDC_BOB');
+    const rateData = await this.exchangeRatesService.getRate('USD_BOB');
 
     // Obtener dirección crypto del PSAV para recibir los fondos
     const psavAccount = await this.psavService.getDepositAccount(
@@ -1687,9 +1687,9 @@ export class PaymentOrdersService {
       const pairMap: Record<string, string> = {
         bolivia_to_world: 'BOB_USD',
         world_to_bolivia: 'USD_BOB',
-        bolivia_to_wallet: 'BOB_USDC',
-        fiat_bo_to_bridge_wallet: 'BOB_USDC',
-        bridge_wallet_to_fiat_bo: 'USDC_BOB',
+        bolivia_to_wallet: 'BOB_USD',
+        fiat_bo_to_bridge_wallet: 'BOB_USD',
+        bridge_wallet_to_fiat_bo: 'USD_BOB',
       };
       const pair = pairMap[order.flow_type];
       if (pair) {
