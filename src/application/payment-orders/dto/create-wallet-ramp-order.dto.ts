@@ -62,22 +62,27 @@ export class CreateWalletRampOrderDto {
   destination_currency?: string;
 
   // ── destino fiat BO (bridge_wallet_to_fiat_bo) ──
-  @ApiPropertyOptional()
-  @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_fiat_bo')
+  // NOTA: Estos campos ahora se leen desde client_bank_accounts en el backend.
+  // Se mantienen opcionales por retrocompatibilidad pero son IGNORADOS en el servicio.
+  @ApiPropertyOptional({
+    description: 'Deprecado para fiat_bo. El backend lee de client_bank_accounts.',
+  })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   destination_bank_name?: string;
 
-  @ApiPropertyOptional()
-  @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_fiat_bo')
+  @ApiPropertyOptional({
+    description: 'Deprecado para fiat_bo. El backend lee de client_bank_accounts.',
+  })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   destination_account_number?: string;
 
-  @ApiPropertyOptional()
-  @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_fiat_bo')
+  @ApiPropertyOptional({
+    description: 'Deprecado para fiat_bo. El backend lee de client_bank_accounts.',
+  })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   destination_account_holder?: string;
 
   @ApiPropertyOptional()

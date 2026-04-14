@@ -12,6 +12,7 @@ import { FeesService } from '../fees/fees.service';
 import { PsavService } from '../psav/psav.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { BridgeApiClient } from '../bridge/bridge-api.client';
+import { ClientBankAccountsService } from '../client-bank-accounts/client-bank-accounts.service';
 import {
   CreateInterbankOrderDto,
   InterbankFlowType,
@@ -38,6 +39,7 @@ export class PaymentOrdersService {
     private readonly psavService: PsavService,
     private readonly exchangeRatesService: ExchangeRatesService,
     private readonly bridgeApi: BridgeApiClient,
+    private readonly bankAccountsService: ClientBankAccountsService,
   ) {}
 
   // ═══════════════════════════════════════════════
@@ -896,6 +898,10 @@ export class PaymentOrdersService {
     userId: string,
     dto: CreateWalletRampOrderDto,
   ) {
+    // 1. Obtener cuenta bancaria aprobada del perfil del cliente
+    const bankAccount =
+      await this.bankAccountsService.getApprovedAccountForWithdrawal(userId);
+
     const wallet = await this.getUserWallet(userId, dto.wallet_id);
 
     const { fee_amount, net_amount } = await this.feesService.calculateFee(
@@ -935,6 +941,7 @@ export class PaymentOrdersService {
       'USDC',
     );
 
+    // Snapshot: los datos bancarios se copian en la orden para trazabilidad histórica
     const { data: order, error } = await this.supabase
       .from('payment_orders')
       .insert({
@@ -949,9 +956,10 @@ export class PaymentOrdersService {
         net_amount,
         destination_type: 'bank_bo',
         destination_currency: 'BOB',
-        destination_bank_name: dto.destination_bank_name,
-        destination_account_number: dto.destination_account_number,
-        destination_account_holder: dto.destination_account_holder,
+        destination_bank_name: bankAccount.bank_name,
+        destination_account_number: bankAccount.account_number,
+        destination_account_holder: bankAccount.account_holder,
+        client_bank_account_id: bankAccount.id,
         destination_qr_url: dto.destination_qr_url,
         exchange_rate_applied: rateData.effective_rate,
         amount_destination: parseFloat(
