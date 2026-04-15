@@ -86,8 +86,8 @@ async function bootstrap() {
   // Habilitar cierre limpio (Graceful Shutdown)
   app.enableShutdownHooks();
 
-  await app.listen(port);
-  console.log(`🚀 Guira API running on http://localhost:${port}/${prefix}`);
+  await app.listen(port, '0.0.0.0');
+  console.log(`🚀 Guira API running on port ${port} with prefix /${prefix} (0.0.0.0)`);
   console.log(`📚 Swagger docs: http://localhost:${port}/${prefix}/docs`);
 }
 bootstrap();
