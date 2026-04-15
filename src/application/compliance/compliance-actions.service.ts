@@ -169,7 +169,122 @@ export class ComplianceActionsService {
       .eq('review_id', reviewId)
       .order('created_at', { ascending: true });
 
-    return { ...review, events, comments };
+    // C3 FIX: Resolver application data, profile y documents
+    // para que el frontend no necesite queries directas a Supabase.
+    let userId: string | null = null;
+    let applicationData: Record<string, any> = {};
+    let onboardingType: 'personal' | 'company' = 'personal';
+
+    if (review.subject_type === 'kyc_applications') {
+      const { data: kyc } = await this.supabase
+        .from('kyc_applications')
+        .select('*, people (*)')
+        .eq('id', review.subject_id)
+        .maybeSingle();
+      if (kyc) {
+        userId = kyc.user_id;
+        applicationData = this.mapKycToFormData(kyc);
+        onboardingType = 'personal';
+      }
+    } else if (review.subject_type === 'kyb_applications') {
+      const { data: kyb } = await this.supabase
+        .from('kyb_applications')
+        .select('*, businesses (*, business_directors(*), business_ubos(*))')
+        .eq('id', review.subject_id)
+        .maybeSingle();
+      if (kyb) {
+        userId = kyb.requester_user_id;
+        applicationData = kyb.businesses ?? kyb;
+        onboardingType = 'company';
+      }
+    }
+
+    let profileData: any = null;
+    let documents: any[] = [];
+
+    if (userId) {
+      const { data: prof } = await this.supabase
+        .from('profiles')
+        .select('id, email, full_name, onboarding_status, bridge_customer_id')
+        .eq('id', userId)
+        .maybeSingle();
+      profileData = prof;
+
+      // Documents con signed URLs — generadas server-side
+      const { data: docs } = await this.supabase
+        .from('documents')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      // Filtrar solo el más reciente por tipo
+      const latestDocsMap = new Map<string, any>();
+      for (const doc of docs ?? []) {
+        const typeKey =
+          doc.document_type || doc.description || 'unknown_document';
+        if (!latestDocsMap.has(typeKey)) latestDocsMap.set(typeKey, doc);
+      }
+
+      documents = await Promise.all(
+        Array.from(latestDocsMap.values()).map(async (doc) => {
+          let signedUrl: string | null = null;
+          if (doc.storage_path) {
+            const { data: urlData } = await this.supabase.storage
+              .from('kyc-documents')
+              .createSignedUrl(doc.storage_path, 3600);
+            signedUrl = urlData?.signedUrl ?? null;
+          }
+          return { ...doc, signed_url: signedUrl };
+        }),
+      );
+    }
+
+    return {
+      ...review,
+      events,
+      comments,
+      user_id: userId,
+      onboarding_type: onboardingType,
+      application_data: applicationData,
+      profile: profileData,
+      documents,
+    };
+  }
+
+  /**
+   * Mapea los datos crudos de kyc_applications + people a un formato
+   * plano esperado por el componente de detalle del frontend.
+   */
+  private mapKycToFormData(kyc: any): Record<string, any> {
+    const p = kyc.people;
+    if (!p) return kyc;
+    return {
+      first_names: p.first_name,
+      last_names: p.last_name,
+      middle_name: p.middle_name,
+      dob: p.date_of_birth,
+      nationality: p.nationality,
+      id_document_type: p.id_type,
+      id_number: p.id_number,
+      id_expiry: p.id_expiry_date,
+      tax_id: p.tax_id,
+      email: p.email,
+      phone: p.phone,
+      street: p.address1,
+      street2: p.address2,
+      city: p.city,
+      state_province: p.state,
+      postal_code: p.postal_code,
+      country: p.country,
+      country_of_residence: p.country_of_residence,
+      occupation: p.most_recent_occupation ?? p.employment_status,
+      source_of_funds: p.source_of_funds,
+      purpose: p.account_purpose,
+      purpose_other: p.account_purpose_other,
+      estimated_monthly_volume: p.expected_monthly_payments_usd,
+      is_pep: p.is_pep,
+      employment_status: p.employment_status,
+    };
   }
 
   // ── REVIEWS (Acciones) ────────────────────────────────────────────
@@ -395,6 +510,17 @@ export class ComplianceActionsService {
     }
 
     if (userIdNotified) {
+      // C2 FIX: Sincronizar profiles.onboarding_status con estado específico
+      // para que el wizard del cliente redirija al paso correcto.
+      const nextProfileStatus =
+        review.subject_type === 'kyc_applications'
+          ? 'kyc_started'
+          : 'kyb_started';
+      await this.supabase
+        .from('profiles')
+        .update({ onboarding_status: nextProfileStatus })
+        .eq('id', userIdNotified);
+
       const actionsMsg = requiredActions?.length
         ? `\n\nAcciones requeridas: ${requiredActions.join(', ')}`
         : '';
@@ -528,50 +654,68 @@ export class ComplianceActionsService {
     actorId: string,
     reason: string,
   ): Promise<void> {
+    // C1 FIX: Resolver user_id ANTES del update para reusar en profile sync + notificación.
+    let userIdNotified: string | null = null;
+
     switch (subjectType) {
-      case 'kyc_applications':
+      case 'kyc_applications': {
+        const { data: kycApp } = await this.supabase
+          .from('kyc_applications')
+          .select('user_id')
+          .eq('id', subjectId)
+          .single();
+        userIdNotified = kycApp?.user_id ?? null;
+
         await this.supabase
           .from('kyc_applications')
           .update({ status: 'rejected' })
           .eq('id', subjectId);
-        break;
 
-      case 'kyb_applications':
+        // C1 FIX: Sincronizar profiles.onboarding_status = 'rejected'
+        if (userIdNotified) {
+          await this.supabase
+            .from('profiles')
+            .update({ onboarding_status: 'rejected' })
+            .eq('id', userIdNotified);
+        }
+        break;
+      }
+
+      case 'kyb_applications': {
+        const { data: kybApp } = await this.supabase
+          .from('kyb_applications')
+          .select('requester_user_id')
+          .eq('id', subjectId)
+          .single();
+        userIdNotified = kybApp?.requester_user_id ?? null;
+
         await this.supabase
           .from('kyb_applications')
           .update({ status: 'rejected' })
           .eq('id', subjectId);
-        break;
 
-      case 'payout_request':
+        // C1 FIX: Sincronizar profiles.onboarding_status = 'rejected'
+        if (userIdNotified) {
+          await this.supabase
+            .from('profiles')
+            .update({ onboarding_status: 'rejected' })
+            .eq('id', userIdNotified);
+        }
+        break;
+      }
+
+      case 'payout_request': {
         // Rechazar payout en Bridge Service (libera saldos)
         await this.bridgeService.rejectPayout(subjectId, reason, actorId);
-        break;
-    }
 
-    // Identificar el user_id para notificar
-    let userIdNotified: string | null = null;
-    if (subjectType === 'kyc_applications') {
-      const { data } = await this.supabase
-        .from('kyc_applications')
-        .select('user_id')
-        .eq('id', subjectId)
-        .single();
-      userIdNotified = data?.user_id;
-    } else if (subjectType === 'kyb_applications') {
-      const { data } = await this.supabase
-        .from('kyb_applications')
-        .select('requester_user_id')
-        .eq('id', subjectId)
-        .single();
-      userIdNotified = data?.requester_user_id;
-    } else if (subjectType === 'payout_request') {
-      const { data } = await this.supabase
-        .from('payout_requests')
-        .select('user_id')
-        .eq('id', subjectId)
-        .single();
-      userIdNotified = data?.user_id;
+        const { data: payoutReq } = await this.supabase
+          .from('payout_requests')
+          .select('user_id')
+          .eq('id', subjectId)
+          .single();
+        userIdNotified = payoutReq?.user_id ?? null;
+        break;
+      }
     }
 
     if (userIdNotified) {

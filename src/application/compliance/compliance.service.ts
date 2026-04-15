@@ -108,10 +108,29 @@ export class ComplianceService {
   // ── Compliance Reviews (lectura) ──────────────────────────────────
 
   async getComplianceReviews(userId: string) {
+    // C11 FIX: subject_id contiene IDs de aplicaciones (kyc/kyb), no user_id.
+    // Primero resolvemos los IDs de aplicaciones del usuario.
+    const { data: kycApps } = await this.supabase
+      .from('kyc_applications')
+      .select('id')
+      .eq('user_id', userId);
+
+    const { data: kybApps } = await this.supabase
+      .from('kyb_applications')
+      .select('id')
+      .eq('requester_user_id', userId);
+
+    const subjectIds = [
+      ...(kycApps ?? []).map((a) => a.id),
+      ...(kybApps ?? []).map((a) => a.id),
+    ];
+
+    if (subjectIds.length === 0) return [];
+
     const { data, error } = await this.supabase
       .from('compliance_reviews')
       .select('*')
-      .eq('subject_id', userId)
+      .in('subject_id', subjectIds)
       .order('opened_at', { ascending: false });
 
     if (error) throw new Error(error.message);
