@@ -17,6 +17,7 @@ import {
   CreateExternalAccountDto,
   CreateLiquidationAddressDto,
 } from './dto/create-virtual-account.dto';
+import { UpdateVirtualAccountDto } from './dto/update-virtual-account.dto';
 
 @Injectable()
 export class BridgeService {
@@ -45,72 +46,70 @@ export class BridgeService {
       );
     }
 
-    // Verificar duplicados
-    const { data: existing } = await this.supabase
-      .from('bridge_virtual_accounts')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('source_currency', dto.source_currency.toLowerCase())
-      .eq('status', 'active')
-      .maybeSingle();
-
-    if (existing) {
-      throw new BadRequestException(
-        `Ya tienes una cuenta virtual activa para ${dto.source_currency}`,
-      );
-    }
-
     // ── Determinar destino ──────────────────────────────
-    // Caso A: Wallet interna de Guira (fondos se quedan en plataforma)
-    // Caso B: Wallet externa (Binance, MetaMask, etc.) — fondos salen de Guira
-    // Caso C: Ninguno especificado — default a wallet interna del usuario
     let destinationAddress: string | undefined;
     let isExternalSweep = false;
+    const destinationType = dto.destination_address ? 'wallet_external' : 'wallet_bridge';
 
     if (dto.destination_address) {
-      // ── Caso B: Wallet externa ──
       destinationAddress = dto.destination_address;
       isExternalSweep = true;
+
+      // Verificar unicidad: no dos VAs externas con misma dirección por moneda
+      const { data: existingExternal } = await this.supabase
+        .from('bridge_virtual_accounts')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('source_currency', dto.source_currency.toLowerCase())
+        .eq('destination_address', dto.destination_address)
+        .eq('is_external_sweep', true)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      if (existingExternal) {
+        throw new BadRequestException(
+          `Ya tienes una cuenta virtual activa en ${dto.source_currency.toUpperCase()} apuntando a esa dirección externa.`,
+        );
+      }
+
       this.logger.log(
         `VA con destino externo para user ${userId}: ${dto.destination_address} (${dto.destination_label ?? 'sin etiqueta'})`,
       );
-    } else if (dto.destination_wallet_id) {
-      // ── Caso A: Wallet interna ──
-      const { data: wallet } = await this.supabase
-        .from('wallets')
-        .select('address')
-        .eq('id', dto.destination_wallet_id)
-        .eq('user_id', userId)
-        .single();
-      destinationAddress = wallet?.address;
-    }
-
-    // ── Determinar developer_fee_percent (3 niveles) ──────────────────
-    // 1. DTO explícito (admin puede enviarlo) → 2. Override per-client → 3. Global
-    let devFeePercent: string | undefined;
-    if (dto.developer_fee_percent !== undefined) {
-      // Nivel 1: DTO explícito
-      devFeePercent = dto.developer_fee_percent.toString();
     } else {
-      // Nivel 2: Override per-client en profiles
-      const { data: profileFee } = await this.supabase
-        .from('profiles')
-        .select('va_developer_fee_percent')
-        .eq('id', userId)
-        .single();
+      // Para wallet_bridge: máximo 1 VA por moneda
+      const { data: existingBridge } = await this.supabase
+        .from('bridge_virtual_accounts')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('source_currency', dto.source_currency.toLowerCase())
+        .eq('is_external_sweep', false)
+        .eq('status', 'active')
+        .maybeSingle();
 
-      if (profileFee?.va_developer_fee_percent != null) {
-        devFeePercent = profileFee.va_developer_fee_percent.toString();
-      } else {
-        // Nivel 3: Fee global de app_settings
-        const { data: feeSetting } = await this.supabase
-          .from('app_settings')
-          .select('value')
-          .eq('key', 'DEFAULT_DEVELOPER_FEE_PCT')
-          .maybeSingle();
-        devFeePercent = feeSetting?.value ?? undefined;
+      if (existingBridge) {
+        throw new BadRequestException(
+          `Ya tienes una cuenta virtual activa en ${dto.source_currency.toUpperCase()} apuntando a tu wallet de Bridge.`,
+        );
+      }
+
+      if (dto.destination_wallet_id) {
+        const { data: wallet } = await this.supabase
+          .from('wallets')
+          .select('address')
+          .eq('id', dto.destination_wallet_id)
+          .eq('user_id', userId)
+          .single();
+        destinationAddress = wallet?.address;
       }
     }
+
+    // ── Resolver developer_fee_percent (2 niveles) ──────────────────
+    // 1. Override por usuario (va_fee_overrides) → 2. Fee global (va_fee_defaults)
+    const devFeePercent = await this.resolveVaFee(
+      userId,
+      dto.source_currency.toLowerCase(),
+      destinationType,
+    );
 
     // ── Crear en Bridge (formato anidado source/destination) ──
     const bridgePayload: Record<string, unknown> = {
@@ -123,8 +122,8 @@ export class BridgeService {
     };
 
     // Solo enviar developer_fee_percent si tiene valor
-    if (devFeePercent) {
-      bridgePayload.developer_fee_percent = devFeePercent;
+    if (devFeePercent != null) {
+      bridgePayload.developer_fee_percent = devFeePercent.toString();
     }
 
     const bridgeVA = await this.bridgeApi.post<Record<string, unknown>>(
@@ -166,12 +165,12 @@ export class BridgeService {
         br_code: (sdi.br_code as string) ?? null,
         sort_code: (sdi.sort_code as string) ?? null,
         payment_rails: (sdi.payment_rails as string[]) ?? null,
-        // Titular de la cuenta: presente en EUR (IBAN), MXN (CLABE), BRL (PIX), GBP (FPS) y COP (Bre-B)
+        // Titular de la cuenta
         account_holder_name: (sdi.account_holder_name as string) ?? null,
-        // Mensaje de depósito: específico de COP/Bre-B — el cliente DEBE incluirlo en la transferencia
+        // Mensaje de depósito: específico de COP/Bre-B
         deposit_message: (sdi.deposit_message as string) ?? null,
-        // Fee
-        developer_fee_percent: devFeePercent ? parseFloat(devFeePercent) : null,
+        // Fee (snapshot)
+        developer_fee_percent: devFeePercent,
         status: 'active',
       })
       .select()
@@ -1109,137 +1108,308 @@ export class BridgeService {
   }
 
   // ═══════════════════════════════════════════════════
-  //  ADMIN: VA FEE MANAGEMENT
+  //  ADMIN: VA FEE — RESOLUCIÓN INTERNA
   // ═══════════════════════════════════════════════════
 
   /**
-   * Actualiza el developer_fee_percent de una VA existente en Bridge y en DB local.
-   * Solo admin/super_admin pueden invocar.
+   * Resuelve el developer_fee_percent para una combinación de usuario + moneda + destino.
+   * 2 niveles: Override por usuario (va_fee_overrides) → Fee global (va_fee_defaults).
    */
-  async updateVirtualAccountFee(
-    vaId: string,
-    newFeePercent: number,
-    actorId: string,
-  ): Promise<Record<string, unknown>> {
-    // 1. Obtener VA de DB
-    const { data: va, error } = await this.supabase
-      .from('bridge_virtual_accounts')
-      .select('bridge_virtual_account_id, bridge_customer_id, developer_fee_percent, status')
-      .eq('id', vaId)
-      .single();
-    if (error || !va)
-      throw new NotFoundException('Virtual Account no encontrada');
-    if (va.status !== 'active')
-      throw new BadRequestException('Solo se pueden actualizar VAs activas');
+  private async resolveVaFee(
+    userId: string,
+    sourceCurrency: string,
+    destinationType: string,
+  ): Promise<number | null> {
+    // Nivel 1: Override por usuario
+    const { data: override } = await this.supabase
+      .from('va_fee_overrides')
+      .select('fee_percent')
+      .eq('user_id', userId)
+      .eq('source_currency', sourceCurrency)
+      .eq('destination_type', destinationType)
+      .maybeSingle();
 
-    // 2. Actualizar en Bridge via PUT
-    await this.bridgeApi.put<Record<string, unknown>>(
-      `/v0/customers/${va.bridge_customer_id}/virtual_accounts/${va.bridge_virtual_account_id}`,
-      { developer_fee_percent: newFeePercent.toString() },
-    );
+    if (override?.fee_percent != null) {
+      return override.fee_percent;
+    }
 
-    // 3. Actualizar en DB local
-    const { data: updated, error: updateErr } = await this.supabase
-      .from('bridge_virtual_accounts')
-      .update({ developer_fee_percent: newFeePercent })
-      .eq('id', vaId)
-      .select()
-      .single();
-    if (updateErr) throw new BadRequestException(updateErr.message);
+    // Nivel 2: Fee global por defecto
+    const { data: defaultFee } = await this.supabase
+      .from('va_fee_defaults')
+      .select('fee_percent')
+      .eq('source_currency', sourceCurrency)
+      .eq('destination_type', destinationType)
+      .maybeSingle();
 
-    // 4. Audit log
-    await this.supabase.from('audit_log').insert({
-      actor_id: actorId,
-      action: 'update_va_fee',
-      target_type: 'bridge_virtual_account',
-      target_id: vaId,
-      details: {
-        old_fee: va.developer_fee_percent,
-        new_fee: newFeePercent,
-        bridge_va_id: va.bridge_virtual_account_id,
-      },
-    });
+    return defaultFee?.fee_percent ?? null;
+  }
 
-    this.logger.log(
-      `VA fee updated: ${vaId} (${va.developer_fee_percent}% → ${newFeePercent}%) by ${actorId}`,
-    );
-    return updated;
+  // ═══════════════════════════════════════════════════
+  //  ADMIN: VA FEE DEFAULTS (globales)
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Lista todos los fees globales por defecto (6 monedas × 2 destinos = 12 registros).
+   */
+  async listVaFeeDefaults() {
+    const { data, error } = await this.supabase
+      .from('va_fee_defaults')
+      .select('*')
+      .order('source_currency')
+      .order('destination_type');
+    if (error) throw new BadRequestException(error.message);
+    return data ?? [];
   }
 
   /**
-   * Establece o limpia el override de developer_fee_percent para un usuario.
-   * fee_percent=null → limpiar override (vuelve a fee global).
+   * Actualiza un fee global por defecto.
    */
-  async setUserVaFeeOverride(
-    userId: string,
-    feePercent: number | null,
-    reason: string,
+  async updateVaFeeDefault(
+    sourceCurrency: string,
+    destinationType: string,
+    feePercent: number,
     actorId: string,
   ) {
-    // Verificar que el usuario existe
-    const { data: profile, error: profileErr } = await this.supabase
-      .from('profiles')
-      .select('id, va_developer_fee_percent')
-      .eq('id', userId)
+    const currency = sourceCurrency.toLowerCase();
+    const destType = destinationType.toLowerCase();
+
+    // Obtener valor anterior
+    const { data: existing } = await this.supabase
+      .from('va_fee_defaults')
+      .select('id, fee_percent')
+      .eq('source_currency', currency)
+      .eq('destination_type', destType)
       .single();
-    if (profileErr || !profile)
-      throw new NotFoundException('Usuario no encontrado');
 
-    const oldFee = profile.va_developer_fee_percent;
+    if (!existing) {
+      throw new NotFoundException(
+        `No se encontró configuración por defecto para ${currency.toUpperCase()} / ${destType}`,
+      );
+    }
 
-    const { error } = await this.supabase
-      .from('profiles')
-      .update({ va_developer_fee_percent: feePercent })
-      .eq('id', userId);
+    const oldFee = existing.fee_percent;
+
+    const { data, error } = await this.supabase
+      .from('va_fee_defaults')
+      .update({
+        fee_percent: feePercent,
+        updated_by: actorId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existing.id)
+      .select()
+      .single();
     if (error) throw new BadRequestException(error.message);
 
     // Audit log
-    await this.supabase.from('audit_log').insert({
-      actor_id: actorId,
-      action:
-        feePercent !== null
-          ? 'set_va_fee_override'
-          : 'clear_va_fee_override',
-      target_type: 'profile',
-      target_id: userId,
-      details: { old_fee: oldFee, new_fee: feePercent, reason },
+    await this.supabase.from('audit_logs').insert({
+      performed_by: actorId,
+      action: 'update_va_fee_default',
+      table_name: 'va_fee_defaults',
+      record_id: existing.id,
+      affected_fields: ['fee_percent'],
+      previous_values: { source_currency: currency, destination_type: destType, fee_percent: oldFee },
+      new_values: { source_currency: currency, destination_type: destType, fee_percent: feePercent },
+      reason: `Fee default actualizado: ${currency}/${destType} (${oldFee}% → ${feePercent}%)`,
+      source: 'admin_panel',
     });
 
     this.logger.log(
-      `VA fee override ${feePercent !== null ? 'set' : 'cleared'}: user=${userId} (${oldFee}% → ${feePercent}%) by ${actorId}`,
+      `VA fee default updated: ${currency}/${destType} (${oldFee}% → ${feePercent}%) by ${actorId}`,
     );
-    return { user_id: userId, va_developer_fee_percent: feePercent };
+    return data;
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  ADMIN: VA FEE OVERRIDES (por usuario)
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Lista todos los overrides de fee configurados para un usuario.
+   */
+  async listVaFeeOverrides(userId: string) {
+    const { data, error } = await this.supabase
+      .from('va_fee_overrides')
+      .select('*')
+      .eq('user_id', userId)
+      .order('source_currency')
+      .order('destination_type');
+    if (error) throw new BadRequestException(error.message);
+    return data ?? [];
   }
 
   /**
-   * Obtiene el fee resuelto para un usuario (override → global).
+   * Establece o actualiza un override de fee por usuario (UPSERT).
    */
-  async getResolvedVaFee(userId: string) {
-    // 1. Check profile override
+  async setVaFeeOverride(
+    userId: string,
+    body: {
+      source_currency: string;
+      destination_type: string;
+      fee_percent: number;
+      reason: string;
+    },
+    actorId: string,
+  ) {
+    const currency = body.source_currency.toLowerCase();
+    const destType = body.destination_type.toLowerCase();
+
+    // Verificar que el usuario existe
     const { data: profile } = await this.supabase
       .from('profiles')
-      .select('va_developer_fee_percent')
+      .select('id')
       .eq('id', userId)
       .single();
+    if (!profile) throw new NotFoundException('Usuario no encontrado');
 
-    if (profile?.va_developer_fee_percent != null) {
-      return {
-        resolved_fee: profile.va_developer_fee_percent,
-        source: 'client_override' as const,
-      };
-    }
-
-    // 2. Fall back to global
-    const { data: feeSetting } = await this.supabase
-      .from('app_settings')
-      .select('value')
-      .eq('key', 'DEFAULT_DEVELOPER_FEE_PCT')
+    // Obtener valor anterior (si existe)
+    const { data: existing } = await this.supabase
+      .from('va_fee_overrides')
+      .select('fee_percent')
+      .eq('user_id', userId)
+      .eq('source_currency', currency)
+      .eq('destination_type', destType)
       .maybeSingle();
 
-    return {
-      resolved_fee: feeSetting?.value ? parseFloat(feeSetting.value) : null,
-      source: 'global' as const,
-    };
+    const oldFee = existing?.fee_percent ?? null;
+
+    // UPSERT
+    const { data, error } = await this.supabase
+      .from('va_fee_overrides')
+      .upsert(
+        {
+          user_id: userId,
+          source_currency: currency,
+          destination_type: destType,
+          fee_percent: body.fee_percent,
+          reason: body.reason,
+          set_by: actorId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,source_currency,destination_type' },
+      )
+      .select()
+      .single();
+    if (error) throw new BadRequestException(error.message);
+
+    // Audit log
+    await this.supabase.from('audit_logs').insert({
+      performed_by: actorId,
+      action: 'set_va_fee_override',
+      table_name: 'va_fee_overrides',
+      record_id: userId,
+      affected_fields: ['fee_percent'],
+      previous_values: { source_currency: currency, destination_type: destType, fee_percent: oldFee },
+      new_values: { source_currency: currency, destination_type: destType, fee_percent: body.fee_percent },
+      reason: body.reason,
+      source: 'admin_panel',
+    });
+
+    this.logger.log(
+      `VA fee override set: user=${userId} ${currency}/${destType} fee=${body.fee_percent}% by ${actorId}`,
+    );
+    return data;
+  }
+
+  /**
+   * Elimina un override de fee (el usuario vuelve a usar el fee global por defecto).
+   */
+  async clearVaFeeOverride(
+    userId: string,
+    sourceCurrency: string,
+    destinationType: string,
+    actorId: string,
+  ) {
+    const currency = sourceCurrency.toLowerCase();
+    const destType = destinationType.toLowerCase();
+
+    const { data: existing } = await this.supabase
+      .from('va_fee_overrides')
+      .select('fee_percent')
+      .eq('user_id', userId)
+      .eq('source_currency', currency)
+      .eq('destination_type', destType)
+      .maybeSingle();
+
+    if (!existing) {
+      throw new NotFoundException(
+        `No hay override configurado para ${currency.toUpperCase()} / ${destType}`,
+      );
+    }
+
+    const { error } = await this.supabase
+      .from('va_fee_overrides')
+      .delete()
+      .eq('user_id', userId)
+      .eq('source_currency', currency)
+      .eq('destination_type', destType);
+    if (error) throw new BadRequestException(error.message);
+
+    // Audit log
+    await this.supabase.from('audit_logs').insert({
+      performed_by: actorId,
+      action: 'clear_va_fee_override',
+      table_name: 'va_fee_overrides',
+      record_id: userId,
+      affected_fields: ['fee_percent'],
+      previous_values: { source_currency: currency, destination_type: destType, fee_percent: existing.fee_percent },
+      new_values: null,
+      reason: `Override eliminado para ${currency.toUpperCase()} / ${destType}`,
+      source: 'admin_panel',
+    });
+
+    this.logger.log(
+      `VA fee override cleared: user=${userId} ${currency}/${destType} by ${actorId}`,
+    );
+    return { deleted: true, source_currency: currency, destination_type: destType };
+  }
+
+  /**
+   * Devuelve la matriz completa de fees resueltos (12 combinaciones)
+   * para un usuario, indicando la fuente (override o default).
+   */
+  async getResolvedVaFeeMatrix(userId: string) {
+    const currencies = ['usd', 'eur', 'mxn', 'brl', 'gbp', 'cop'];
+    const destTypes = ['wallet_bridge', 'wallet_external'];
+
+    // Obtener todos los overrides del usuario
+    const { data: overrides } = await this.supabase
+      .from('va_fee_overrides')
+      .select('source_currency, destination_type, fee_percent')
+      .eq('user_id', userId);
+
+    // Obtener todos los defaults
+    const { data: defaults } = await this.supabase
+      .from('va_fee_defaults')
+      .select('source_currency, destination_type, fee_percent');
+
+    const overrideMap = new Map(
+      (overrides ?? []).map((o) => [`${o.source_currency}:${o.destination_type}`, o.fee_percent]),
+    );
+    const defaultMap = new Map(
+      (defaults ?? []).map((d) => [`${d.source_currency}:${d.destination_type}`, d.fee_percent]),
+    );
+
+    const matrix: Array<{
+      source_currency: string;
+      destination_type: string;
+      resolved_fee: number | null;
+      source: 'override' | 'default';
+    }> = [];
+
+    for (const currency of currencies) {
+      for (const destType of destTypes) {
+        const key = `${currency}:${destType}`;
+        const overrideFee = overrideMap.get(key);
+        if (overrideFee != null) {
+          matrix.push({ source_currency: currency, destination_type: destType, resolved_fee: overrideFee, source: 'override' });
+        } else {
+          matrix.push({ source_currency: currency, destination_type: destType, resolved_fee: defaultMap.get(key) ?? null, source: 'default' });
+        }
+      }
+    }
+
+    return matrix;
   }
 
   /**
@@ -1249,12 +1419,143 @@ export class BridgeService {
     const { data, error } = await this.supabase
       .from('bridge_virtual_accounts')
       .select(
-        'id, bridge_virtual_account_id, source_currency, destination_currency, developer_fee_percent, status, created_at',
+        'id, bridge_virtual_account_id, source_currency, destination_currency, destination_address, destination_payment_rail, developer_fee_percent, is_external_sweep, status, created_at',
       )
       .eq('user_id', userId)
       .eq('status', 'active')
       .order('created_at', { ascending: false });
     if (error) throw new BadRequestException(error.message);
     return data ?? [];
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  ADMIN: VA UPDATE (fee, destination, currency)
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Actualiza campos de una VA existente en Bridge y en DB local.
+   * Soporta: developer_fee_percent, destination.address, destination.currency.
+   * Solo admin/super_admin.
+   */
+  async updateVirtualAccount(
+    vaId: string,
+    dto: UpdateVirtualAccountDto,
+    actorId: string,
+  ) {
+    // 1. Obtener VA completa
+    const { data: va, error } = await this.supabase
+      .from('bridge_virtual_accounts')
+      .select('*')
+      .eq('id', vaId)
+      .single();
+    if (error || !va)
+      throw new NotFoundException('Virtual Account no encontrada');
+    if (va.status !== 'active')
+      throw new BadRequestException('Solo se pueden actualizar VAs activas');
+
+    // 2. Construir payload para Bridge API (solo campos presentes)
+    const bridgePayload: Record<string, unknown> = {};
+    const dbUpdate: Record<string, unknown> = {};
+    const previousValues: Record<string, unknown> = {};
+    const affectedFields: string[] = [];
+
+    if (dto.developer_fee_percent !== undefined) {
+      bridgePayload.developer_fee_percent = dto.developer_fee_percent.toString();
+      dbUpdate.developer_fee_percent = dto.developer_fee_percent;
+      previousValues.developer_fee_percent = va.developer_fee_percent;
+      affectedFields.push('developer_fee_percent');
+    }
+    if (dto.destination_address !== undefined) {
+      bridgePayload.destination = {
+        ...((bridgePayload.destination ?? {}) as object),
+        address: dto.destination_address,
+      };
+      dbUpdate.destination_address = dto.destination_address;
+      previousValues.destination_address = va.destination_address;
+      affectedFields.push('destination_address');
+
+      // Si se cambia la dirección, actualizar is_external_sweep
+      if (dto.destination_address && !va.is_external_sweep) {
+        dbUpdate.is_external_sweep = true;
+        previousValues.is_external_sweep = va.is_external_sweep;
+        affectedFields.push('is_external_sweep');
+      }
+    }
+    if (dto.destination_currency !== undefined) {
+      bridgePayload.destination = {
+        ...((bridgePayload.destination ?? {}) as object),
+        currency: dto.destination_currency.toLowerCase(),
+      };
+      dbUpdate.destination_currency = dto.destination_currency.toLowerCase();
+      previousValues.destination_currency = va.destination_currency;
+      affectedFields.push('destination_currency');
+    }
+
+    if (Object.keys(bridgePayload).length === 0) {
+      throw new BadRequestException('Debe especificar al menos un campo a actualizar (developer_fee_percent, destination_address o destination_currency)');
+    }
+
+    // 3. PUT a Bridge
+    await this.bridgeApi.put(
+      `/v0/customers/${va.bridge_customer_id}/virtual_accounts/${va.bridge_virtual_account_id}`,
+      bridgePayload,
+    );
+
+    // 4. UPDATE en DB local (con compensación si falla)
+    let updated: Record<string, unknown>;
+    try {
+      const { data: updatedRow, error: dbErr } = await this.supabase
+        .from('bridge_virtual_accounts')
+        .update(dbUpdate)
+        .eq('id', vaId)
+        .select()
+        .single();
+      if (dbErr) throw new Error(dbErr.message);
+      updated = updatedRow;
+    } catch (dbError) {
+      // Compensación: intentar revertir en Bridge
+      this.logger.error(`DB update falló tras PUT exitoso a Bridge. Intentando revertir… ${dbError}`);
+      const revertPayload: Record<string, unknown> = {};
+      if (dto.developer_fee_percent !== undefined) {
+        revertPayload.developer_fee_percent = va.developer_fee_percent?.toString() ?? '0';
+      }
+      if (dto.destination_address !== undefined || dto.destination_currency !== undefined) {
+        revertPayload.destination = {};
+        if (dto.destination_address !== undefined) {
+          (revertPayload.destination as Record<string, string>).address = va.destination_address ?? '';
+        }
+        if (dto.destination_currency !== undefined) {
+          (revertPayload.destination as Record<string, string>).currency = va.destination_currency;
+        }
+      }
+      try {
+        await this.bridgeApi.put(
+          `/v0/customers/${va.bridge_customer_id}/virtual_accounts/${va.bridge_virtual_account_id}`,
+          revertPayload,
+        );
+        this.logger.warn('Reversión en Bridge exitosa');
+      } catch (revertErr) {
+        this.logger.error(`CRÍTICO: Reversión en Bridge también falló: ${revertErr}`);
+      }
+      throw new BadRequestException('Error al actualizar VA en DB local. Se intentó revertir en Bridge.');
+    }
+
+    // 5. Audit log
+    await this.supabase.from('audit_logs').insert({
+      performed_by: actorId,
+      action: 'update_virtual_account',
+      table_name: 'bridge_virtual_accounts',
+      record_id: vaId,
+      affected_fields: affectedFields,
+      previous_values: previousValues,
+      new_values: dbUpdate,
+      reason: dto.reason,
+      source: 'admin_panel',
+    });
+
+    this.logger.log(
+      `VA updated: ${vaId} fields=[${affectedFields.join(', ')}] by ${actorId}`,
+    );
+    return updated;
   }
 }

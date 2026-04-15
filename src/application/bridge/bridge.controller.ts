@@ -24,6 +24,7 @@ import {
   CreateExternalAccountDto,
   CreateLiquidationAddressDto,
 } from './dto/create-virtual-account.dto';
+import { UpdateVirtualAccountDto } from './dto/update-virtual-account.dto';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
 import { RolesGuard } from '../../core/guards/roles.guard';
@@ -238,42 +239,108 @@ export class AdminBridgeController {
     return this.bridgeService.rejectPayout(id, body.reason, actor.id);
   }
 
-  // ── VA Fee Management ─────────────────
+  // ── VA Fee Defaults (globales) ─────────────────
 
-  @Get('users/:userId/va-fee')
+  @Get('va-fee-defaults')
   @Roles('staff', 'admin', 'super_admin')
-  @ApiOperation({ summary: 'Get resolved developer_fee for a client (override → global)' })
-  getUserVaFee(
-    @Param('userId', new ParseUUIDPipe()) userId: string,
-  ) {
-    return this.bridgeService.getResolvedVaFee(userId);
+  @ApiOperation({ summary: 'Listar fees globales por defecto (6 monedas × 2 destinos)' })
+  listVaFeeDefaults() {
+    return this.bridgeService.listVaFeeDefaults();
   }
 
-  @Patch('users/:userId/va-fee')
+  @Patch('va-fee-defaults')
   @Roles('admin', 'super_admin')
-  @ApiOperation({ summary: 'Set/clear developer_fee override for a client' })
+  @ApiOperation({ summary: 'Actualizar un fee global por defecto' })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
-        fee_percent: { type: 'number', nullable: true, description: 'null to clear override' },
-        reason: { type: 'string' },
+        source_currency: { type: 'string', example: 'usd' },
+        destination_type: { type: 'string', example: 'wallet_bridge', enum: ['wallet_bridge', 'wallet_external'] },
+        fee_percent: { type: 'number', example: 1.5 },
       },
-      required: ['reason'],
+      required: ['source_currency', 'destination_type', 'fee_percent'],
     },
   })
-  setUserVaFee(
-    @Param('userId', new ParseUUIDPipe()) userId: string,
-    @Body() body: { fee_percent: number | null; reason: string },
+  updateVaFeeDefault(
+    @Body() body: { source_currency: string; destination_type: string; fee_percent: number },
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    return this.bridgeService.setUserVaFeeOverride(
-      userId,
+    return this.bridgeService.updateVaFeeDefault(
+      body.source_currency,
+      body.destination_type,
       body.fee_percent,
-      body.reason,
       actor.id,
     );
   }
+
+  // ── VA Fee Overrides (por usuario) ─────────────────
+
+  @Get('users/:userId/va-fee-overrides')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Listar fee overrides de un usuario' })
+  listVaFeeOverrides(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+  ) {
+    return this.bridgeService.listVaFeeOverrides(userId);
+  }
+
+  @Patch('users/:userId/va-fee-overrides')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Establecer/actualizar un fee override para un usuario' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        source_currency: { type: 'string', example: 'usd' },
+        destination_type: { type: 'string', example: 'wallet_bridge', enum: ['wallet_bridge', 'wallet_external'] },
+        fee_percent: { type: 'number', example: 0.5 },
+        reason: { type: 'string', example: 'Tarifa preferencial para cliente VIP' },
+      },
+      required: ['source_currency', 'destination_type', 'fee_percent', 'reason'],
+    },
+  })
+  setVaFeeOverride(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Body() body: { source_currency: string; destination_type: string; fee_percent: number; reason: string },
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.bridgeService.setVaFeeOverride(userId, body, actor.id);
+  }
+
+  @Delete('users/:userId/va-fee-overrides')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Eliminar un fee override de un usuario' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        source_currency: { type: 'string', example: 'usd' },
+        destination_type: { type: 'string', example: 'wallet_bridge', enum: ['wallet_bridge', 'wallet_external'] },
+      },
+      required: ['source_currency', 'destination_type'],
+    },
+  })
+  clearVaFeeOverride(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Body() body: { source_currency: string; destination_type: string },
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.bridgeService.clearVaFeeOverride(userId, body.source_currency, body.destination_type, actor.id);
+  }
+
+  // ── VA Fee Matrix (resuelto) ─────────────────
+
+  @Get('users/:userId/va-fee-matrix')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Obtener matriz de fees resueltos (12 combinaciones) con fuente' })
+  getVaFeeMatrix(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+  ) {
+    return this.bridgeService.getResolvedVaFeeMatrix(userId);
+  }
+
+  // ── VAs de usuario (admin) ─────────────────
 
   @Get('users/:userId/virtual-accounts')
   @Roles('staff', 'admin', 'super_admin')
@@ -284,24 +351,16 @@ export class AdminBridgeController {
     return this.bridgeService.listUserVirtualAccounts(userId);
   }
 
-  @Patch('virtual-accounts/:id/fee')
+  // ── Actualizar VA (fee, destination_address, destination_currency) ──────────
+
+  @Patch('virtual-accounts/:id')
   @Roles('admin', 'super_admin')
-  @ApiOperation({ summary: 'Update developer_fee_percent of existing VA in Bridge' })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        fee_percent: { type: 'number' },
-        reason: { type: 'string' },
-      },
-      required: ['fee_percent', 'reason'],
-    },
-  })
-  updateVaFee(
+  @ApiOperation({ summary: 'Actualizar VA existente (fee, destino, moneda) via PUT a Bridge' })
+  updateVirtualAccount(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() body: { fee_percent: number; reason: string },
+    @Body() dto: UpdateVirtualAccountDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    return this.bridgeService.updateVirtualAccountFee(id, body.fee_percent, actor.id);
+    return this.bridgeService.updateVirtualAccount(id, dto, actor.id);
   }
 }

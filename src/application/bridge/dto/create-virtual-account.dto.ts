@@ -127,17 +127,6 @@ export class CreateVirtualAccountDto {
   @IsString()
   @MaxLength(100)
   destination_label?: string;
-
-  @ApiPropertyOptional({
-    description:
-      'Porcentaje de fee que Guira cobra sobre cada depósito recibido en esta VA (ej: 1.0 = 1%). Si no se especifica, se usa el fee por defecto de la configuración.',
-    example: 1.0,
-  })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  developer_fee_percent?: number;
 }
 
 // ═══════════════════════════════════════════════════
