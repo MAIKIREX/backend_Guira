@@ -7,20 +7,11 @@ import {
   MaxLength,
   MinLength,
   IsEnum,
+  ValidateIf,
 } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
-
-/**
- * Monedas crypto destino soportadas por Bridge.
- */
-const SUPPORTED_DESTINATION_CURRENCIES = [
-  'usdc',
-  'usdt',
-  'usdb',
-  'dai',
-  'pyusd',
-  'eurc',
-] as const;
+import { SUPPORTED_DESTINATION_CURRENCIES } from '../bridge.constants';
+import { IsBlockchainAddress } from '../validators/is-blockchain-address.validator';
 
 /**
  * DTO para actualizar una Virtual Account existente.
@@ -48,6 +39,11 @@ export class UpdateVirtualAccountDto {
   @IsString()
   @MinLength(10)
   @MaxLength(256)
+  @ValidateIf((o) => o.destination_address !== undefined)
+  @IsBlockchainAddress({
+    message:
+      'La dirección de wallet no tiene un formato válido. Formatos soportados: EVM (0x...), Solana, Tron, Bitcoin.',
+  })
   destination_address?: string;
 
   @ApiPropertyOptional({

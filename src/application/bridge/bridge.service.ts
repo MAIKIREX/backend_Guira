@@ -9,6 +9,7 @@ import {
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
 import { BridgeApiClient } from './bridge-api.client';
+import { PAYMENT_RAIL_TO_BRIDGE_ACCOUNT_TYPE } from './bridge.constants';
 import { FeesService } from '../fees/fees.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { CreatePayoutRequestDto } from './dto/create-payout.dto';
@@ -46,6 +47,21 @@ export class BridgeService {
       );
     }
 
+    // ── Validar límites de creación de VAs (configurables desde app_settings) ──
+    const vaLimits = await this.getVaCreationLimits();
+
+    const { count: totalActive } = await this.supabase
+      .from('bridge_virtual_accounts')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('status', 'active');
+
+    if ((totalActive ?? 0) >= vaLimits.maxTotal) {
+      throw new BadRequestException(
+        `Has alcanzado el límite máximo de ${vaLimits.maxTotal} cuentas virtuales activas. Desactiva alguna antes de crear una nueva.`,
+      );
+    }
+
     // ── Determinar destino ──────────────────────────────
     let destinationAddress: string | undefined;
     let isExternalSweep = false;
@@ -69,6 +85,21 @@ export class BridgeService {
       if (existingExternal) {
         throw new BadRequestException(
           `Ya tienes una cuenta virtual activa en ${dto.source_currency.toUpperCase()} apuntando a esa dirección externa.`,
+        );
+      }
+
+      // Verificar límite de VAs externas por moneda
+      const { count: externalCount } = await this.supabase
+        .from('bridge_virtual_accounts')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('source_currency', dto.source_currency.toLowerCase())
+        .eq('is_external_sweep', true)
+        .eq('status', 'active');
+
+      if ((externalCount ?? 0) >= vaLimits.maxExternalPerCurrency) {
+        throw new BadRequestException(
+          `Has alcanzado el límite de ${vaLimits.maxExternalPerCurrency} cuentas virtuales externas activas para ${dto.source_currency.toUpperCase()}. Desactiva alguna antes de crear otra.`,
         );
       }
 
@@ -169,8 +200,12 @@ export class BridgeService {
         account_holder_name: (sdi.account_holder_name as string) ?? null,
         // Mensaje de depósito: específico de COP/Bre-B
         deposit_message: (sdi.deposit_message as string) ?? null,
-        // Fee (snapshot)
-        developer_fee_percent: devFeePercent,
+        // Fee confirmado por Bridge (fuente de verdad)
+        // Si Bridge no lo devuelve, usamos el cálculo local como fallback
+        developer_fee_percent:
+          bridgeVA.developer_fee_percent !== undefined && bridgeVA.developer_fee_percent !== null
+            ? parseFloat(bridgeVA.developer_fee_percent as string)
+            : devFeePercent,
         status: 'active',
       })
       .select()
@@ -1070,6 +1105,42 @@ export class BridgeService {
     return parseFloat(data?.value ?? '10000');
   }
 
+  /**
+   * Lee los límites de creación de VAs desde `app_settings`.
+   * Fallback a valores por defecto si no existen en la DB.
+   *
+   * Keys en app_settings:
+   * - VA_MAX_TOTAL_ACTIVE_PER_USER: máx. VAs activas totales por usuario
+   * - VA_MAX_EXTERNAL_PER_CURRENCY: máx. VAs externas por moneda por usuario
+   */
+  private async getVaCreationLimits(): Promise<{
+    maxTotal: number;
+    maxExternalPerCurrency: number;
+  }> {
+    const { data } = await this.supabase
+      .from('app_settings')
+      .select('key, value')
+      .in('key', [
+        'VA_MAX_TOTAL_ACTIVE_PER_USER',
+        'VA_MAX_EXTERNAL_PER_CURRENCY',
+      ]);
+
+    const settings = Object.fromEntries(
+      (data ?? []).map((r: { key: string; value: string }) => [r.key, r.value]),
+    );
+
+    return {
+      maxTotal: parseInt(
+        settings['VA_MAX_TOTAL_ACTIVE_PER_USER'] ?? '24',
+        10,
+      ),
+      maxExternalPerCurrency: parseInt(
+        settings['VA_MAX_EXTERNAL_PER_CURRENCY'] ?? '3',
+        10,
+      ),
+    };
+  }
+
   private async createComplianceReview(
     entityType: string,
     entityId: string,
@@ -1090,18 +1161,11 @@ export class BridgeService {
    * Guira payment_rail values:  ach, wire, sepa, spei, pix, bre_b
    */
   private getBridgeAccountType(paymentRail: string): string {
-    const map: Record<string, string> = {
-      ach: 'us',
-      wire: 'us',
-      sepa: 'iban',
-      spei: 'clabe',
-      pix: 'pix',
-      bre_b: 'bre_b',
-    };
-    const accountType = map[paymentRail];
+    const accountType = PAYMENT_RAIL_TO_BRIDGE_ACCOUNT_TYPE[paymentRail];
     if (!accountType) {
+      const supported = Object.keys(PAYMENT_RAIL_TO_BRIDGE_ACCOUNT_TYPE).join(', ');
       throw new BadRequestException(
-        `Payment rail '${paymentRail}' no tiene un account_type de Bridge mapeado.`,
+        `Payment rail '${paymentRail}' no tiene un account_type de Bridge mapeado. Rails soportados: ${supported}`,
       );
     }
     return accountType;

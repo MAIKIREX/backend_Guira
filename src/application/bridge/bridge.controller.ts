@@ -17,7 +17,9 @@ import {
   ApiResponse,
   ApiBody,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { BridgeService } from './bridge.service';
+import { VA_THROTTLE_CONFIG } from './bridge.constants';
 import { CreatePayoutRequestDto } from './dto/create-payout.dto';
 import {
   CreateVirtualAccountDto,
@@ -43,12 +45,17 @@ export class BridgeController {
   // ── Virtual Accounts ──────────────────
 
   @Post('virtual-accounts')
+  @Throttle({ default: { limit: VA_THROTTLE_CONFIG.limit, ttl: VA_THROTTLE_CONFIG.ttl } })
   @ApiOperation({
     summary: 'Crear Virtual Account para recepción de depósitos',
   })
   @ApiResponse({
     status: 201,
     description: 'VA creada con instrucciones bancarias',
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'Rate limit excedido — máximo 6 creaciones de VA cada 10 minutos',
   })
   createVirtualAccount(
     @CurrentUser() user: AuthenticatedUser,

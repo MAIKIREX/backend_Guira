@@ -10,9 +10,11 @@ import {
   MaxLength,
   MinLength,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsBlockchainAddress } from '../validators/is-blockchain-address.validator';
 
 // ═══════════════════════════════════════════════════
 //  Virtual Account DTO (depósitos entrantes)
@@ -117,6 +119,11 @@ export class CreateVirtualAccountDto {
   })
   @IsOptional()
   @IsString()
+  @ValidateIf((o) => o.destination_address !== undefined)
+  @IsBlockchainAddress({
+    message:
+      'La dirección de wallet no tiene un formato válido. Formatos soportados: EVM (0x...), Solana, Tron, Bitcoin.',
+  })
   destination_address?: string;
 
   @ApiPropertyOptional({
