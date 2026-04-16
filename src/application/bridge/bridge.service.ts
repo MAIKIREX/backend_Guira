@@ -1529,30 +1529,32 @@ export class BridgeService {
       previousValues.developer_fee_percent = va.developer_fee_percent;
       affectedFields.push('developer_fee_percent');
     }
-    if (dto.destination_address !== undefined) {
+    if (dto.destination_address !== undefined || dto.destination_currency !== undefined) {
       bridgePayload.destination = {
         ...((bridgePayload.destination ?? {}) as object),
-        address: dto.destination_address,
+        address: dto.destination_address ?? va.destination_address,
+        currency: (dto.destination_currency ?? va.destination_currency).toLowerCase(),
+        payment_rail: va.destination_payment_rail, // Required by Bridge API
       };
-      dbUpdate.destination_address = dto.destination_address;
-      previousValues.destination_address = va.destination_address;
-      affectedFields.push('destination_address');
-
-      // Si se cambia la dirección, actualizar is_external_sweep
-      if (dto.destination_address && !va.is_external_sweep) {
-        dbUpdate.is_external_sweep = true;
-        previousValues.is_external_sweep = va.is_external_sweep;
-        affectedFields.push('is_external_sweep');
+      
+      if (dto.destination_address !== undefined) {
+        dbUpdate.destination_address = dto.destination_address;
+        previousValues.destination_address = va.destination_address;
+        affectedFields.push('destination_address');
+  
+        // Si se cambia la dirección, actualizar is_external_sweep
+        if (dto.destination_address && !va.is_external_sweep) {
+          dbUpdate.is_external_sweep = true;
+          previousValues.is_external_sweep = va.is_external_sweep;
+          affectedFields.push('is_external_sweep');
+        }
       }
-    }
-    if (dto.destination_currency !== undefined) {
-      bridgePayload.destination = {
-        ...((bridgePayload.destination ?? {}) as object),
-        currency: dto.destination_currency.toLowerCase(),
-      };
-      dbUpdate.destination_currency = dto.destination_currency.toLowerCase();
-      previousValues.destination_currency = va.destination_currency;
-      affectedFields.push('destination_currency');
+
+      if (dto.destination_currency !== undefined) {
+        dbUpdate.destination_currency = dto.destination_currency.toLowerCase();
+        previousValues.destination_currency = va.destination_currency;
+        affectedFields.push('destination_currency');
+      }
     }
 
     if (Object.keys(bridgePayload).length === 0) {
