@@ -1529,12 +1529,12 @@ export class BridgeService {
       previousValues.developer_fee_percent = va.developer_fee_percent;
       affectedFields.push('developer_fee_percent');
     }
-    if (dto.destination_address !== undefined || dto.destination_currency !== undefined) {
+    if (dto.destination_address !== undefined || dto.destination_currency !== undefined || dto.destination_payment_rail !== undefined) {
       bridgePayload.destination = {
         ...((bridgePayload.destination ?? {}) as object),
         address: dto.destination_address ?? va.destination_address,
         currency: (dto.destination_currency ?? va.destination_currency).toLowerCase(),
-        payment_rail: va.destination_payment_rail, // Required by Bridge API
+        payment_rail: (dto.destination_payment_rail ?? va.destination_payment_rail).toLowerCase(),
       };
       
       if (dto.destination_address !== undefined) {
@@ -1550,15 +1550,22 @@ export class BridgeService {
         }
       }
 
+
       if (dto.destination_currency !== undefined) {
         dbUpdate.destination_currency = dto.destination_currency.toLowerCase();
         previousValues.destination_currency = va.destination_currency;
         affectedFields.push('destination_currency');
       }
+
+      if (dto.destination_payment_rail !== undefined) {
+        dbUpdate.destination_payment_rail = dto.destination_payment_rail.toLowerCase();
+        previousValues.destination_payment_rail = va.destination_payment_rail;
+        affectedFields.push('destination_payment_rail');
+      }
     }
 
     if (Object.keys(bridgePayload).length === 0) {
-      throw new BadRequestException('Debe especificar al menos un campo a actualizar (developer_fee_percent, destination_address o destination_currency)');
+      throw new BadRequestException('Debe especificar al menos un campo a actualizar (developer_fee_percent, destination_address, destination_currency o destination_payment_rail)');
     }
 
     // 3. PUT a Bridge
@@ -1585,13 +1592,16 @@ export class BridgeService {
       if (dto.developer_fee_percent !== undefined) {
         revertPayload.developer_fee_percent = va.developer_fee_percent?.toString() ?? '0';
       }
-      if (dto.destination_address !== undefined || dto.destination_currency !== undefined) {
+      if (dto.destination_address !== undefined || dto.destination_currency !== undefined || dto.destination_payment_rail !== undefined) {
         revertPayload.destination = {};
         if (dto.destination_address !== undefined) {
           (revertPayload.destination as Record<string, string>).address = va.destination_address ?? '';
         }
         if (dto.destination_currency !== undefined) {
           (revertPayload.destination as Record<string, string>).currency = va.destination_currency;
+        }
+        if (dto.destination_payment_rail !== undefined) {
+          (revertPayload.destination as Record<string, string>).payment_rail = va.destination_payment_rail;
         }
       }
       try {

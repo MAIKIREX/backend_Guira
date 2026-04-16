@@ -43,7 +43,7 @@ const SUPPORTED_SOURCE_CURRENCIES = [
  * Redes blockchain de destino soportadas por Bridge (OfframpChain).
  * Ref: https://apidocs.bridge.xyz → CreateVirtualAccount schema
  */
-const SUPPORTED_DESTINATION_RAILS = [
+export const SUPPORTED_DESTINATION_RAILS = [
   'arbitrum',
   'avalanche_c_chain',
   'base',

@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { SUPPORTED_DESTINATION_CURRENCIES } from '../bridge.constants';
+import { SUPPORTED_DESTINATION_RAILS } from './create-virtual-account.dto';
 import { IsBlockchainAddress } from '../validators/is-blockchain-address.validator';
 
 /**
@@ -56,6 +57,17 @@ export class UpdateVirtualAccountDto {
     message: `destination_currency debe ser una de: ${SUPPORTED_DESTINATION_CURRENCIES.join(', ')}`,
   })
   destination_currency?: string;
+
+  @ApiPropertyOptional({
+    description: 'Nueva red crypto de destino',
+    enum: SUPPORTED_DESTINATION_RAILS,
+    example: 'ethereum',
+  })
+  @IsOptional()
+  @IsEnum(SUPPORTED_DESTINATION_RAILS, {
+    message: `destination_payment_rail debe ser una de las redes soportadas.`,
+  })
+  destination_payment_rail?: string;
 
   @ApiProperty({
     description: 'Motivo del cambio (requerido para auditoria)',
