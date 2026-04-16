@@ -1460,6 +1460,64 @@ export class PaymentOrdersService {
     return data;
   }
 
+  /**
+   * El usuario actualiza campos editables de su orden.
+   * Solo permite campos seguros (supporting_document_url, notes)
+   * y solo en estados tempranos (created, waiting_deposit).
+   */
+  async updateOrderByUser(
+    userId: string,
+    orderId: string,
+    dto: Record<string, unknown>,
+  ) {
+    const EDITABLE_STATUSES = ['created', 'waiting_deposit'];
+    const ALLOWED_FIELDS = ['supporting_document_url', 'notes'];
+
+    const { data: order, error: fetchErr } = await this.supabase
+      .from('payment_orders')
+      .select('id, status')
+      .eq('id', orderId)
+      .eq('user_id', userId)
+      .single();
+
+    if (fetchErr || !order) {
+      throw new NotFoundException('Orden no encontrada');
+    }
+
+    if (!EDITABLE_STATUSES.includes(order.status)) {
+      throw new BadRequestException(
+        `No se puede modificar una orden en estado "${order.status}"`,
+      );
+    }
+
+    // Filtrar a solo campos permitidos
+    const safeUpdate: Record<string, unknown> = {};
+    for (const key of ALLOWED_FIELDS) {
+      if (key in dto) {
+        safeUpdate[key] = dto[key];
+      }
+    }
+
+    if (Object.keys(safeUpdate).length === 0) {
+      throw new BadRequestException('No se proporcionaron campos válidos para actualizar');
+    }
+
+    const { data, error } = await this.supabase
+      .from('payment_orders')
+      .update(safeUpdate)
+      .eq('id', orderId)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) throw new BadRequestException(error.message);
+
+    this.logger.log(
+      `📝 Orden ${orderId} actualizada por usuario: ${Object.keys(safeUpdate).join(', ')}`,
+    );
+    return data;
+  }
+
   /** El usuario confirma que realizó el depósito (sube comprobante). */
   async confirmDeposit(
     userId: string,

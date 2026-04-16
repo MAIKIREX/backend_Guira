@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Param,
   Body,
   Query,
@@ -109,6 +110,18 @@ export class PaymentOrdersController {
   }
 
   // ── Acciones del usuario ──
+
+  @Patch(':id')
+  @ApiOperation({
+    summary: 'Actualizar campos editables de una orden (supporting_document_url, notes)',
+  })
+  updateOrder(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: Record<string, unknown>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.paymentOrdersService.updateOrderByUser(user.id, id, dto);
+  }
 
   @Post(':id/confirm-deposit')
   @ApiOperation({

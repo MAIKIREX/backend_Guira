@@ -132,10 +132,38 @@ export class FeesService {
     },
     actorId: string,
   ) {
+    // D3 Fix: Validar que no exista un override activo duplicado
+    const conflictQuery = this.supabase
+      .from('customer_fee_overrides')
+      .select('id')
+      .eq('user_id', dto.user_id)
+      .eq('operation_type', dto.operation_type)
+      .eq('is_active', true);
+
+    if (dto.payment_rail) {
+      conflictQuery.eq('payment_rail', dto.payment_rail);
+    }
+
+    const { data: conflict } = await conflictQuery.maybeSingle();
+
+    if (conflict) {
+      throw new BadRequestException(
+        `Ya existe un override activo para ${dto.operation_type}/${dto.payment_rail ?? 'any'}. Desactívalo o elimínalo primero.`,
+      );
+    }
+
+    // D4 Fix: Asegurar que valid_from siempre tenga un valor
+    const today = new Date().toISOString().split('T')[0];
+
+    // D6 Fix: Normalizar currency a minúsculas para consistencia con fees_config
+    const normalizedCurrency = dto.currency?.toLowerCase();
+
     const { data, error } = await this.supabase
       .from('customer_fee_overrides')
       .insert({
         ...dto,
+        currency: normalizedCurrency,
+        valid_from: dto.valid_from ?? today,
         is_active: true,
         created_by: actorId,
       })
@@ -153,7 +181,9 @@ export class FeesService {
       details: {
         user_id: dto.user_id,
         operation_type: dto.operation_type,
+        payment_rail: dto.payment_rail,
         fee_type: dto.fee_type,
+        valid_from: dto.valid_from ?? today,
       },
     });
 
@@ -289,13 +319,16 @@ export class FeesService {
     const today = new Date().toISOString().split('T')[0];
 
     // 1. Buscar override del cliente
+    // D2 Fix: Agregar filtro por payment_rail para evitar ambigüedad
+    // D4 Fix: Manejar valid_from NULL con OR clause
     const { data: override } = await this.supabase
       .from('customer_fee_overrides')
       .select('*')
       .eq('user_id', userId)
       .eq('operation_type', operationType)
+      .eq('payment_rail', paymentRail)
       .eq('is_active', true)
-      .lte('valid_from', today)
+      .or(`valid_from.is.null,valid_from.lte.${today}`)
       .or(`valid_until.is.null,valid_until.gte.${today}`)
       .maybeSingle();
 
