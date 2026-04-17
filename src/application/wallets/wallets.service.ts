@@ -217,19 +217,21 @@ export class WalletsService {
         // Crear UNA wallet en Bridge para este network
         const bridgeWallet = await this.createBridgeWallet(
           customerId,
-          wc.currencies[0] ?? 'usdc',
           wc.network,
         );
 
-        // Guardar en DB — la currency principal es la primera de la lista
+        // Guardar en DB
+        // - network: fuente de verdad = Bridge response.chain (D-4)
+        // - currency: currency principal/legacy — el desglose real vive en tabla balances (D-5)
+        const chainFromBridge = bridgeWallet.chain ?? wc.network;
         await this.supabase.from('wallets').insert({
           user_id: userId,
           currency: wc.currencies[0]?.toUpperCase() ?? 'USDC',
           address: bridgeWallet.address,
-          network: wc.network,
+          network: chainFromBridge,
           provider_key: 'bridge',
           provider_wallet_id: bridgeWallet.id,
-          label: `Wallet ${wc.network.charAt(0).toUpperCase() + wc.network.slice(1)}`,
+          label: `Wallet ${chainFromBridge.charAt(0).toUpperCase() + chainFromBridge.slice(1)}`,
           is_active: true,
         });
 
@@ -435,7 +437,6 @@ export class WalletsService {
    */
   private async createBridgeWallet(
     bridgeCustomerId: string,
-    _currency: string,
     network: string,
   ): Promise<{ id: string; address: string; chain: string }> {
     const idempotencyKey = `wallet-${bridgeCustomerId}-${network}-${Date.now()}`;
