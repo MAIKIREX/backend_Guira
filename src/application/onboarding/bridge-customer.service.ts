@@ -1196,47 +1196,38 @@ export class BridgeCustomerService {
   //  Wallet Initialization
   // ───────────────────────────────────────
 
+  /**
+   * Pre-inicializa el balance USD (fiat base) para el usuario.
+   *
+   * NOTA: La creación de wallets Bridge y balances multi-token ahora se
+   * maneja centralizadamente en WalletsService.initializeClientWallets(),
+   * que es llamado por el webhook de KYC/KYB aprobado o por el endpoint admin.
+   *
+   * Este método solo garantiza que exista la fila de balance USD (fiat)
+   * que se necesita para operaciones internas antes de que Bridge cree las wallets.
+   */
   private async initializeWallet(userId: string) {
     try {
-      const { data: existingWallet } = await this.supabase
-        .from('wallets')
+      // Solo asegurar que exista el balance USD (fiat base)
+      const { data: existingBalance } = await this.supabase
+        .from('balances')
         .select('id')
         .eq('user_id', userId)
+        .eq('currency', 'USD')
         .maybeSingle();
 
-      if (existingWallet) return;
-
-      const { data: wallet } = await this.supabase
-        .from('wallets')
-        .insert({
+      if (!existingBalance) {
+        await this.supabase.from('balances').insert({
           user_id: userId,
-          label: 'Principal',
-          currency: 'USD', // normalizado a mayúsculas — igual que initializeWalletsForUser
-        })
-        .select('id')
-        .single();
-
-      if (wallet) {
-        // Verificar si ya existe balance USD antes de insertar (evita duplicado)
-        const { data: existingBalance } = await this.supabase
-          .from('balances')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('currency', 'USD')
-          .maybeSingle();
-
-        if (!existingBalance) {
-          await this.supabase.from('balances').insert({
-            user_id: userId,
-            currency: 'USD',
-            amount: 0,
-            available_amount: 0,
-            reserved_amount: 0,
-          });
-        }
+          currency: 'USD',
+          amount: 0,
+          available_amount: 0,
+          reserved_amount: 0,
+        });
+        this.logger.log(`Balance USD pre-inicializado para usuario ${userId}`);
       }
     } catch (err) {
-      this.logger.warn(`Error inicializando wallet para ${userId}: ${err}`);
+      this.logger.warn(`Error pre-inicializando balance USD para ${userId}: ${err}`);
     }
   }
 

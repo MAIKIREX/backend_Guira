@@ -24,7 +24,7 @@ export class WalletsService {
   //  Endpoints de usuario
   // ───────────────────────────────────────────────
 
-  /** Lista wallets activas del usuario junto con su balance. */
+  /** Lista wallets activas del usuario junto con sus balances multi-token. */
   async findAllByUser(userId: string) {
     const { data: wallets, error } = await this.supabase
       .from('wallets')
@@ -38,32 +38,47 @@ export class WalletsService {
     if (error) throw new BadRequestException(error.message);
     if (!wallets || wallets.length === 0) return [];
 
-    // Obtener balances para enriquecer cada wallet
+    // Obtener TODOS los balances del usuario
     const { data: balances } = await this.supabase
       .from('balances')
       .select('currency, amount, available_amount, reserved_amount')
       .eq('user_id', userId);
 
-    const balanceMap = new Map<
-      string,
-      { amount: number; available_amount: number; reserved_amount: number }
-    >(
-      (balances ?? []).map((b) => [
-        b.currency?.toUpperCase(),
-        {
-          amount: parseFloat(b.amount ?? '0') || 0,
-          available_amount: parseFloat(b.available_amount ?? '0') || 0,
-          reserved_amount: parseFloat(b.reserved_amount ?? '0') || 0,
-        },
-      ]),
-    );
+    const balanceList = (balances ?? []).map((b) => ({
+      currency: b.currency?.toUpperCase(),
+      balance: parseFloat(b.amount ?? '0') || 0,
+      available_balance: parseFloat(b.available_amount ?? '0') || 0,
+      reserved_balance: parseFloat(b.reserved_amount ?? '0') || 0,
+    }));
+
+    // Obtener la config actual para saber qué currencies aplican a cada network
+    const walletConfigs = await this.getWalletConfigs();
+    const networkCurrenciesMap = new Map<string, string[]>();
+    for (const wc of walletConfigs) {
+      networkCurrenciesMap.set(wc.network, wc.currencies);
+    }
 
     return wallets.map((w) => {
-      const bal = balanceMap.get(w.currency?.toUpperCase()) ?? {
-        amount: 0,
-        available_amount: 0,
-        reserved_amount: 0,
-      };
+      // Obtener las currencies soportadas para esta wallet según su network
+      const supportedCurrencies = networkCurrenciesMap.get(w.network ?? '') ?? [w.currency?.toUpperCase()];
+
+      // Filtrar balances que corresponden a las currencies soportadas en esta network
+      const tokenBalances = supportedCurrencies.map((cur) => {
+        const curUpper = cur.toUpperCase();
+        const bal = balanceList.find((b) => b.currency === curUpper);
+        return {
+          currency: curUpper,
+          balance: bal?.balance ?? 0,
+          available_balance: bal?.available_balance ?? 0,
+          reserved_balance: bal?.reserved_balance ?? 0,
+        };
+      });
+
+      // Totales agregados (suma de todos los tokens)
+      const totalBalance = tokenBalances.reduce((sum, t) => sum + t.balance, 0);
+      const totalAvailable = tokenBalances.reduce((sum, t) => sum + t.available_balance, 0);
+      const totalReserved = tokenBalances.reduce((sum, t) => sum + t.reserved_balance, 0);
+
       return {
         id: w.id,
         currency: w.currency,
@@ -73,9 +88,12 @@ export class WalletsService {
         label: w.label,
         is_active: w.is_active,
         created_at: w.created_at,
-        balance: bal.amount,
-        available_balance: bal.available_amount,
-        reserved_balance: bal.reserved_amount,
+        // Balances multi-token
+        token_balances: tokenBalances,
+        // Totales agregados (retrocompatibilidad)
+        balance: totalBalance,
+        available_balance: totalAvailable,
+        reserved_balance: totalReserved,
       };
     });
   }
@@ -149,7 +167,11 @@ export class WalletsService {
    * Inicializa las wallets de un cliente aprobado.
    * Lee el bridge_customer_id del perfil del usuario si no se provee.
    * Lee la configuración de wallets desde app_settings.
-   * Crea wallets en Bridge API y guarda los datos en la DB.
+   *
+   * IMPORTANTE: Bridge crea UNA wallet por chain (no por currency).
+   * Una sola wallet Solana puede contener múltiples stablecoins (USDC, USDT, USDB, PYUSD, EURC).
+   * Por lo tanto, se crea UNA llamada a Bridge por network único y se inicializan
+   * filas de balance para TODAS las currencies soportadas en ese network.
    */
   async initializeClientWallets(
     userId: string,
@@ -172,50 +194,54 @@ export class WalletsService {
       );
     }
 
-    // Leer configuración desde app_settings
+    // Leer configuración desde app_settings (formato: [{network, currencies[]}])
     const walletConfigs = await this.getWalletConfigs();
     let initialized = 0;
 
+    // Iterar por NETWORKS únicos — Bridge crea UNA wallet por chain
     for (const wc of walletConfigs) {
-      // Verificar duplicados
+      // Verificar si ya existe una wallet para este network
       const { data: existing } = await this.supabase
         .from('wallets')
         .select('id')
         .eq('user_id', userId)
-        .eq('currency', wc.currency.toUpperCase())
         .eq('network', wc.network)
         .eq('is_active', true)
         .maybeSingle();
 
-      if (existing) continue;
+      if (existing) {
+        this.logger.log(
+          `Wallet ${wc.network} ya existe para user ${userId}, omitiendo creación en Bridge`,
+        );
+      } else {
+        // Crear UNA wallet en Bridge para este network
+        const bridgeWallet = await this.createBridgeWallet(
+          customerId,
+          wc.currencies[0] ?? 'usdc',
+          wc.network,
+        );
 
-      // Crear en Bridge API
-      const bridgeWallet = await this.createBridgeWallet(
-        customerId,
-        wc.currency,
-        wc.network,
+        // Guardar en DB — la currency principal es la primera de la lista
+        await this.supabase.from('wallets').insert({
+          user_id: userId,
+          currency: wc.currencies[0]?.toUpperCase() ?? 'USDC',
+          address: bridgeWallet.address,
+          network: wc.network,
+          provider_key: 'bridge',
+          provider_wallet_id: bridgeWallet.id,
+          label: `Wallet ${wc.network.charAt(0).toUpperCase() + wc.network.slice(1)}`,
+          is_active: true,
+        });
+
+        initialized++;
+      }
+
+      // Inicializar balances para TODAS las currencies de este network
+      await this.initializeBalances(
+        userId,
+        wc.currencies.map((c) => c.toUpperCase()),
       );
-
-      // Guardar en DB
-      await this.supabase.from('wallets').insert({
-        user_id: userId,
-        currency: wc.currency.toUpperCase(),
-        address: bridgeWallet.address,
-        network: wc.network,
-        provider_key: 'bridge',
-        provider_wallet_id: bridgeWallet.id,
-        label: `${wc.currency.toUpperCase()} (${wc.network})`,
-        is_active: true,
-      });
-
-      initialized++;
     }
-
-    // Inicializar balances
-    await this.initializeBalances(
-      userId,
-      walletConfigs.map((c) => c.currency.toUpperCase()),
-    );
 
     this.logger.log(
       `Wallets inicializados para usuario ${userId}: ${initialized} nuevas de ${walletConfigs.length} configuraciones`,
@@ -338,21 +364,63 @@ export class WalletsService {
   //  Helpers privados
   // ───────────────────────────────────────────────
 
+  /**
+   * Lee la configuración de wallets soportadas desde app_settings.
+   *
+   * Formato nuevo (multi-token):
+   *   [{"network":"solana","currencies":["usdc","usdt","usdb","pyusd","eurc"]}]
+   *
+   * Formato legacy (compatibilidad):
+   *   [{"currency":"usdc","network":"solana"}]
+   *
+   * Siempre retorna el formato normalizado: Array<{network, currencies[]}>.
+   * Fallback: Solana con USDC si la config no existe o es inválida.
+   */
   private async getWalletConfigs(): Promise<
-    Array<{ currency: string; network: string }>
+    Array<{ network: string; currencies: string[] }>
   > {
+    const SOLANA_FALLBACK = [{ network: 'solana', currencies: ['usdc'] }];
+
     const { data } = await this.supabase
       .from('app_settings')
       .select('value')
       .eq('key', 'SUPPORTED_WALLET_CONFIGS')
       .single();
 
-    try {
-      return JSON.parse(
-        data?.value ?? '[{"currency":"usdc","network":"ethereum"}]',
+    if (!data?.value) {
+      this.logger.warn(
+        'SUPPORTED_WALLET_CONFIGS no encontrado en app_settings — usando fallback Solana/USDC',
       );
+      return SOLANA_FALLBACK;
+    }
+
+    try {
+      const parsed = JSON.parse(data.value);
+      if (!Array.isArray(parsed) || parsed.length === 0) return SOLANA_FALLBACK;
+
+      // Detectar formato: nuevo {network, currencies[]} vs legacy {currency, network}
+      if (parsed[0].currencies && Array.isArray(parsed[0].currencies)) {
+        // Formato nuevo
+        return parsed;
+      }
+
+      // Formato legacy — agrupar por network
+      const grouped = new Map<string, string[]>();
+      for (const entry of parsed) {
+        const net = entry.network ?? 'solana';
+        const cur = entry.currency ?? 'usdc';
+        if (!grouped.has(net)) grouped.set(net, []);
+        grouped.get(net)!.push(cur);
+      }
+      return Array.from(grouped.entries()).map(([network, currencies]) => ({
+        network,
+        currencies,
+      }));
     } catch {
-      return [{ currency: 'usdc', network: 'ethereum' }];
+      this.logger.error(
+        'Error parseando SUPPORTED_WALLET_CONFIGS — usando fallback Solana/USDC',
+      );
+      return SOLANA_FALLBACK;
     }
   }
 
