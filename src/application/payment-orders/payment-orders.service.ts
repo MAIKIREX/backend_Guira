@@ -28,6 +28,9 @@ import {
   CompleteOrderDto,
   FailOrderDto,
 } from './dto/admin-order-action.dto';
+import {
+  ALLOWED_NETWORKS,
+} from '../../common/constants/guira-crypto-config.constants';
 
 @Injectable()
 export class PaymentOrdersService {
@@ -258,7 +261,7 @@ export class PaymentOrdersService {
         flow_category: 'interbank',
         requires_psav: false,
         amount: dto.amount,
-        currency: dto.source_currency?.toUpperCase() ?? 'USDT',
+        currency: dto.source_currency?.toUpperCase(),
         fee_amount,
         net_amount,
         source_address: dto.source_address,
@@ -268,8 +271,7 @@ export class PaymentOrdersService {
         destination_network: dto.destination_network,
         destination_currency:
           dto.destination_currency?.toUpperCase() ??
-          dto.source_currency?.toUpperCase() ??
-          'USDT',
+          dto.source_currency?.toUpperCase(),
         exchange_rate_applied: 1,
         amount_destination: net_amount,
         supplier_id: dto.supplier_id ?? null,
@@ -304,13 +306,13 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile.bridge_customer_id,
           source: {
-            payment_rail: dto.source_network?.toLowerCase() ?? 'polygon',
-            currency: dto.source_currency?.toLowerCase() ?? 'usdc',
+            payment_rail: dto.source_network?.toLowerCase(),
+            currency: dto.source_currency?.toLowerCase(),
             from_address: dto.source_address,
           },
           destination: {
-            payment_rail: dto.destination_network?.toLowerCase() ?? 'polygon',
-            currency: dto.destination_currency?.toLowerCase() ?? 'usdc',
+            payment_rail: dto.destination_network?.toLowerCase(),
+            currency: dto.destination_currency?.toLowerCase() ?? dto.source_currency?.toLowerCase(),
             to_address: dto.destination_address,
           },
           amount: dto.amount.toString(),
@@ -338,8 +340,7 @@ export class PaymentOrdersService {
         destination_payment_rail: dto.destination_network,
         destination_currency:
           dto.destination_currency?.toUpperCase() ??
-          dto.source_currency?.toUpperCase() ??
-          'USDC',
+          dto.source_currency?.toUpperCase(),
         bridge_raw_response: bridgeResult,
       });
 
@@ -712,12 +713,12 @@ export class PaymentOrdersService {
           on_behalf_of: profile.bridge_customer_id,
           source: {
             payment_rail: dto.source_network,
-            currency: 'usdt',
+            currency: (dto.source_currency ?? 'usdc').toLowerCase(),
             from_address: dto.source_address,
           },
           destination: {
             payment_rail: wallet.network,
-            currency: 'usdc', // Bridge fondea USDC en billetera crypto
+            currency: wallet.currency.toLowerCase(),
             to_address: wallet.address,
           },
           amount: dto.amount.toString(),
@@ -768,18 +769,18 @@ export class PaymentOrdersService {
         flow_category: 'wallet_ramp',
         requires_psav: false,
         amount: dto.amount,
-        currency: 'USDT',
+        currency: (dto.source_currency ?? wallet.currency).toUpperCase(),
         fee_amount,
         net_amount,
         source_type: 'crypto_external',
-        source_currency: 'USDT',
+        source_currency: (dto.source_currency ?? 'usdc').toUpperCase(),
         source_address: dto.source_address,
         source_network: dto.source_network,
         destination_type: 'bridge_wallet',
         destination_currency: wallet.currency,
         bridge_transfer_id: bridgeTransfer.id as string,
         bridge_source_deposit_instructions: depositInstructions,
-        notes: dto.notes ?? `On-ramp crypto: ${dto.amount} USDT (${dto.source_network}) → Bridge Wallet`,
+        notes: dto.notes ?? `On-ramp crypto: ${dto.amount} ${(dto.source_currency ?? 'usdc').toUpperCase()} (${dto.source_network}) → Bridge Wallet`,
         status: 'waiting_deposit',
       })
       .select()
@@ -911,12 +912,13 @@ export class PaymentOrdersService {
       dto.amount,
     );
 
-    // Verificar saldo disponible
+    // Verificar saldo disponible del token específico seleccionado
+    const sourceCurrency = (dto.source_currency ?? wallet.currency).toUpperCase();
     const { data: balance } = await this.supabase
       .from('balances')
       .select('available_amount')
       .eq('user_id', userId)
-      .eq('currency', wallet.currency)
+      .eq('currency', sourceCurrency)
       .single();
 
     const totalNeeded = dto.amount;
@@ -929,7 +931,7 @@ export class PaymentOrdersService {
     // Reservar saldo
     await this.supabase.rpc('reserve_balance', {
       p_user_id: userId,
-      p_currency: wallet.currency,
+      p_currency: sourceCurrency,
       p_amount: totalNeeded,
     });
 
@@ -951,7 +953,7 @@ export class PaymentOrdersService {
         flow_category: 'wallet_ramp',
         requires_psav: false,
         amount: dto.amount,
-        currency: wallet.currency,
+        currency: sourceCurrency,
         fee_amount,
         net_amount,
         destination_type: 'bank_bo',
@@ -990,14 +992,10 @@ export class PaymentOrdersService {
         .single();
 
       // Validar y normalizar la red del PSAV
-      const VALID_CRYPTO_RAILS = [
-        'arbitrum', 'avalanche_c_chain', 'base', 'celo',
-        'ethereum', 'optimism', 'polygon', 'solana', 'stellar', 'tron',
-      ];
       const psavRail = (psavAccount.crypto_network ?? 'polygon').toLowerCase().trim();
-      if (!VALID_CRYPTO_RAILS.includes(psavRail)) {
+      if (!ALLOWED_NETWORKS.includes(psavRail as any)) {
         throw new Error(
-          `Red PSAV inválida: "${psavAccount.crypto_network}" (normalizada: "${psavRail}"). Valores permitidos: ${VALID_CRYPTO_RAILS.join(', ')}`,
+          `Red PSAV inválida: "${psavAccount.crypto_network}" (normalizada: "${psavRail}"). Valores permitidos: ${ALLOWED_NETWORKS.join(', ')}`,
         );
       }
 
@@ -1005,7 +1003,7 @@ export class PaymentOrdersService {
         on_behalf_of: profile?.bridge_customer_id,
         source: {
           payment_rail: 'bridge_wallet',
-          currency: wallet.currency.toLowerCase(),
+          currency: sourceCurrency.toLowerCase(),
           bridge_wallet_id: wallet.provider_wallet_id,
         },
         destination: {
@@ -1043,7 +1041,7 @@ export class PaymentOrdersService {
         wallet_id: wallet.id,
         type: 'debit',
         amount: totalNeeded,
-        currency: wallet.currency,
+        currency: sourceCurrency,
         status: 'pending',
         reference_type: 'payment_order',
         reference_id: order.id,
@@ -1057,7 +1055,7 @@ export class PaymentOrdersService {
       // Revertir: liberar reserva + marcar failed
       await this.supabase.rpc('release_reserved_balance', {
         p_user_id: userId,
-        p_currency: wallet.currency,
+        p_currency: sourceCurrency,
         p_amount: totalNeeded,
       });
       await this.supabase
@@ -1096,12 +1094,13 @@ export class PaymentOrdersService {
       dto.amount,
     );
 
-    // Verificar saldo
+    // Verificar saldo del token específico
+    const sourceCurrency = (dto.source_currency ?? wallet.currency).toUpperCase();
     const { data: balance } = await this.supabase
       .from('balances')
       .select('available_amount')
       .eq('user_id', userId)
-      .eq('currency', wallet.currency)
+      .eq('currency', sourceCurrency)
       .single();
 
     const totalNeeded = dto.amount;
@@ -1114,7 +1113,7 @@ export class PaymentOrdersService {
     // Reservar saldo
     await this.supabase.rpc('reserve_balance', {
       p_user_id: userId,
-      p_currency: wallet.currency,
+      p_currency: sourceCurrency,
       p_amount: totalNeeded,
     });
 
@@ -1128,13 +1127,13 @@ export class PaymentOrdersService {
         flow_category: 'wallet_ramp',
         requires_psav: false,
         amount: dto.amount,
-        currency: wallet.currency,
+        currency: sourceCurrency,
         fee_amount,
         net_amount,
         destination_type: 'crypto_address',
         destination_address: dto.destination_address,
         destination_network: dto.destination_network,
-        destination_currency: dto.destination_currency ?? wallet.currency,
+        destination_currency: dto.destination_currency ?? sourceCurrency,
         notes: dto.notes,
         status: 'created',
       })
@@ -1144,7 +1143,7 @@ export class PaymentOrdersService {
     if (error) {
       await this.supabase.rpc('release_reserved_balance', {
         p_user_id: userId,
-        p_currency: wallet.currency,
+        p_currency: sourceCurrency,
         p_amount: totalNeeded,
       });
       throw new BadRequestException(error.message);
@@ -1160,14 +1159,10 @@ export class PaymentOrdersService {
         .single();
 
       // Validar y normalizar la red destino
-      const VALID_CRYPTO_RAILS = [
-        'arbitrum', 'avalanche_c_chain', 'base', 'celo',
-        'ethereum', 'optimism', 'polygon', 'solana', 'stellar', 'tron',
-      ];
       const destinationRail = (dto.destination_network ?? '').toLowerCase().trim();
-      if (!VALID_CRYPTO_RAILS.includes(destinationRail)) {
+      if (!ALLOWED_NETWORKS.includes(destinationRail as any)) {
         throw new Error(
-          `Red destino inválida: "${dto.destination_network}" (normalizada: "${destinationRail}"). Valores permitidos: ${VALID_CRYPTO_RAILS.join(', ')}`,
+          `Red destino inválida: "${dto.destination_network}" (normalizada: "${destinationRail}"). Valores permitidos: ${ALLOWED_NETWORKS.join(', ')}`,
         );
       }
 
@@ -1175,12 +1170,12 @@ export class PaymentOrdersService {
         on_behalf_of: profile?.bridge_customer_id,
         source: {
           payment_rail: 'bridge_wallet',
-          currency: wallet.currency.toLowerCase(),
+          currency: sourceCurrency.toLowerCase(),
           bridge_wallet_id: wallet.provider_wallet_id,
         },
         destination: {
           payment_rail: destinationRail,
-          currency: (dto.destination_currency ?? wallet.currency).toLowerCase(),
+          currency: (dto.destination_currency ?? sourceCurrency).toLowerCase(),
           to_address: dto.destination_address,
         },
         amount: dto.amount.toString(),
@@ -1213,12 +1208,12 @@ export class PaymentOrdersService {
         wallet_id: wallet.id,
         type: 'debit',
         amount: totalNeeded,
-        currency: wallet.currency,
+        currency: sourceCurrency,
         status: 'pending',
         reference_type: 'payment_order',
         reference_id: order.id,
         bridge_transfer_id: transferId,
-        description: `Off-ramp crypto: ${net_amount} ${wallet.currency} → ${dto.destination_address}`,
+        description: `Off-ramp crypto: ${net_amount} ${sourceCurrency} → ${dto.destination_address}`,
       });
 
       order.status = 'processing';
@@ -1227,7 +1222,7 @@ export class PaymentOrdersService {
       // Revertir
       await this.supabase.rpc('release_reserved_balance', {
         p_user_id: userId,
-        p_currency: wallet.currency,
+        p_currency: sourceCurrency,
         p_amount: totalNeeded,
       });
       await this.supabase
@@ -1278,12 +1273,13 @@ export class PaymentOrdersService {
       dto.amount,
     );
 
-    // Verificar saldo
+    // Verificar saldo del token específico
+    const sourceCurrency = (dto.source_currency ?? wallet.currency).toUpperCase();
     const { data: balance } = await this.supabase
       .from('balances')
       .select('available_amount')
       .eq('user_id', userId)
-      .eq('currency', wallet.currency)
+      .eq('currency', sourceCurrency)
       .single();
 
     const totalNeeded = dto.amount;
@@ -1296,7 +1292,7 @@ export class PaymentOrdersService {
     // Reservar saldo
     await this.supabase.rpc('reserve_balance', {
       p_user_id: userId,
-      p_currency: wallet.currency,
+      p_currency: sourceCurrency,
       p_amount: totalNeeded,
     });
 
@@ -1309,7 +1305,7 @@ export class PaymentOrdersService {
         flow_category: 'wallet_ramp',
         requires_psav: false,
         source_type: 'bridge_wallet',
-        source_currency: wallet.currency,
+        source_currency: sourceCurrency,
         amount: dto.amount,
         currency: wallet.currency,
         fee_amount,
@@ -1326,7 +1322,7 @@ export class PaymentOrdersService {
     if (error) {
       await this.supabase.rpc('release_reserved_balance', {
         p_user_id: userId,
-        p_currency: wallet.currency,
+        p_currency: sourceCurrency,
         p_amount: totalNeeded,
       });
       throw new BadRequestException(error.message);
@@ -1348,7 +1344,7 @@ export class PaymentOrdersService {
           on_behalf_of: profile?.bridge_customer_id,
           source: {
             payment_rail: 'bridge_wallet',
-            currency: wallet.currency.toLowerCase(),
+            currency: sourceCurrency.toLowerCase(),
             bridge_wallet_id: wallet.provider_wallet_id,
           },
           destination: {
@@ -1376,7 +1372,7 @@ export class PaymentOrdersService {
         wallet_id: wallet.id,
         type: 'debit',
         amount: totalNeeded,
-        currency: wallet.currency,
+        currency: sourceCurrency,
         status: 'pending',
         reference_type: 'payment_order',
         reference_id: order.id,
@@ -1389,7 +1385,7 @@ export class PaymentOrdersService {
       const message = err instanceof Error ? err.message : String(err);
       await this.supabase.rpc('release_reserved_balance', {
         p_user_id: userId,
-        p_currency: wallet.currency,
+        p_currency: sourceCurrency,
         p_amount: totalNeeded,
       });
       await this.supabase

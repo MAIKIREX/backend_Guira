@@ -76,7 +76,7 @@ export class SuppliersService {
         }
       : {
           wallet_address: dto.wallet_address,
-          wallet_network: dto.wallet_network,
+          wallet_network: dto.wallet_network?.toLowerCase(),
         };
 
     // Limpiar nulos/undefined visualmente

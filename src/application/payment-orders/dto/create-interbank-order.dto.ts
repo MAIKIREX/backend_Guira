@@ -5,11 +5,16 @@ import {
   IsOptional,
   IsUUID,
   IsEnum,
+  IsIn,
   Min,
   MaxLength,
   ValidateIf,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ALLOWED_NETWORKS,
+  ALLOWED_CRYPTO_CURRENCIES,
+} from '../../../common/constants/guira-crypto-config.constants';
 
 export enum InterbankFlowType {
   BOLIVIA_TO_WORLD = 'bolivia_to_world',
@@ -35,7 +40,7 @@ export class CreateInterbankOrderDto {
   @IsUUID()
   external_account_id?: string;
 
-  @ApiPropertyOptional({ example: 'usd' })
+  @ApiPropertyOptional({ example: 'usdc' })
   @ValidateIf((o) =>
     [
       'bolivia_to_world',
@@ -46,6 +51,7 @@ export class CreateInterbankOrderDto {
   )
   @IsOptional()
   @IsString()
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES, ...['usd', 'eur', 'mxn', 'brl', 'gbp', 'cop']], { message: 'Moneda de destino no soportada' })
   destination_currency?: string;
 
   // ── wallet_to_wallet: direcciones crypto ad-hoc ──
@@ -59,12 +65,14 @@ export class CreateInterbankOrderDto {
   @ValidateIf((o) => o.flow_type === 'wallet_to_wallet')
   @IsString()
   @IsNotEmpty()
+  @IsIn([...ALLOWED_NETWORKS], { message: `Red de origen no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
   source_network?: string;
 
   @ApiPropertyOptional()
   @ValidateIf((o) => o.flow_type === 'wallet_to_wallet')
   @IsString()
   @IsNotEmpty()
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Moneda de origen no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
   source_currency?: string;
 
   // ── destino crypto (wallet_to_wallet, bolivia_to_wallet) ──
@@ -82,6 +90,7 @@ export class CreateInterbankOrderDto {
   )
   @IsString()
   @IsNotEmpty()
+  @IsIn([...ALLOWED_NETWORKS], { message: `Red de destino no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
   destination_network?: string;
 
   // ── world_to_bolivia: destino es cuenta boliviana ──

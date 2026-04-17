@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsEmail,
   IsObject,
+  IsIn,
   MaxLength,
   MinLength,
   IsEnum,
@@ -12,6 +13,7 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BeneficiaryAddressDto } from '../../bridge/dto/create-virtual-account.dto';
+import { ALLOWED_NETWORKS } from '../../../common/constants/guira-crypto-config.constants';
 
 export class CreateSupplierDto {
   @ApiProperty({ example: 'Acme Logistics S.A.' })
@@ -157,6 +159,7 @@ export class CreateSupplierDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @IsIn([...ALLOWED_NETWORKS], { message: `Red no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
   wallet_network?: string;
 }
 
@@ -292,5 +295,6 @@ export class UpdateSupplierDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @IsIn([...ALLOWED_NETWORKS], { message: `Red no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
   wallet_network?: string;
 }

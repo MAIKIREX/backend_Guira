@@ -5,11 +5,16 @@ import {
   IsOptional,
   IsUUID,
   IsEnum,
+  IsIn,
   Min,
   MaxLength,
   ValidateIf,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ALLOWED_NETWORKS,
+  ALLOWED_CRYPTO_CURRENCIES,
+} from '../../../common/constants/guira-crypto-config.constants';
 
 export enum WalletRampFlowType {
   FIAT_BO_TO_BRIDGE_WALLET = 'fiat_bo_to_bridge_wallet',
@@ -53,12 +58,14 @@ export class CreateWalletRampOrderDto {
   @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_crypto')
   @IsString()
   @IsNotEmpty()
+  @IsIn([...ALLOWED_NETWORKS], { message: `Red de destino no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
   destination_network?: string;
 
   @ApiPropertyOptional()
   @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_crypto')
   @IsString()
   @IsNotEmpty()
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Moneda de destino no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
   destination_currency?: string;
 
   // ── destino fiat BO (bridge_wallet_to_fiat_bo) ──
@@ -101,6 +108,7 @@ export class CreateWalletRampOrderDto {
   @ValidateIf((o) => o.flow_type === 'crypto_to_bridge_wallet')
   @IsString()
   @IsNotEmpty()
+  @IsIn([...ALLOWED_NETWORKS], { message: `Red de origen no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
   source_network?: string;
 
   @ApiPropertyOptional()
@@ -108,6 +116,21 @@ export class CreateWalletRampOrderDto {
   @IsString()
   @IsNotEmpty()
   source_address?: string;
+
+  // ── Moneda origen explícita (todos los flujos ramp con wallet) ──
+  @ApiPropertyOptional({ description: 'Token del que se retiran/depositan fondos de la wallet (ej: usdc, usdt)' })
+  @ValidateIf((o) =>
+    [
+      'bridge_wallet_to_crypto',
+      'bridge_wallet_to_fiat_bo',
+      'bridge_wallet_to_fiat_us',
+      'crypto_to_bridge_wallet',
+    ].includes(o.flow_type),
+  )
+  @IsString()
+  @IsNotEmpty({ message: 'Debe especificar la moneda de origen (source_currency)' })
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Moneda de origen no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
+  source_currency?: string;
 
   // ── Campos comunes ──
   @ApiPropertyOptional()
