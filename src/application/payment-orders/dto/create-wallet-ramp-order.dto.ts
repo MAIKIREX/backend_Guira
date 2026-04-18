@@ -61,10 +61,16 @@ export class CreateWalletRampOrderDto {
   @IsIn([...ALLOWED_NETWORKS], { message: `Red de destino no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
   destination_network?: string;
 
-  @ApiPropertyOptional()
-  @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_crypto')
+  @ApiPropertyOptional({ description: 'Token de destino para on-ramp y off-ramp crypto (ej: usdc, usdt, usdb, pyusd, eurc)' })
+  @ValidateIf((o) =>
+    [
+      'bridge_wallet_to_crypto',
+      'fiat_bo_to_bridge_wallet',
+      'crypto_to_bridge_wallet',
+    ].includes(o.flow_type),
+  )
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Debe especificar la moneda de destino (destination_currency)' })
   @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Moneda de destino no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
   destination_currency?: string;
 

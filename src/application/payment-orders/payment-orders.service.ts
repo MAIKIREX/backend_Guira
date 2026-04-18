@@ -31,6 +31,11 @@ import {
 import {
   ALLOWED_NETWORKS,
 } from '../../common/constants/guira-crypto-config.constants';
+import {
+  isValidBridgeRampRoute,
+  isValidFiatBoDestination,
+  getMinAmount,
+} from '../../common/constants/bridge-route-catalog.constants';
 
 @Injectable()
 export class PaymentOrdersService {
@@ -625,6 +630,14 @@ export class PaymentOrdersService {
   ) {
     const wallet = await this.getUserWallet(userId, dto.wallet_id);
 
+    // ── Validar token destino contra catálogo fiat_bo (EURC excluido Etapa 1) ──
+    const resolvedFiatBoDest = (dto.destination_currency ?? wallet.currency).toLowerCase();
+    if (!isValidFiatBoDestination(resolvedFiatBoDest)) {
+      throw new BadRequestException(
+        `El token ${resolvedFiatBoDest.toUpperCase()} no está soportado para fondeo con BOB. Tokens permitidos: USDC, USDT, USDB, PYUSD.`,
+      );
+    }
+
     const psavAccount = await this.psavService.getDepositAccount(
       'bank_bo',
       'BOB',
@@ -654,7 +667,7 @@ export class PaymentOrdersService {
         fee_amount,
         net_amount,
         destination_type: 'bridge_wallet',
-        destination_currency: wallet.currency,
+        destination_currency: (dto.destination_currency ?? wallet.currency).toUpperCase(),
         exchange_rate_applied: rateData.effective_rate,
         amount_destination: parseFloat(
           (net_amount / rateData.effective_rate).toFixed(2),
@@ -702,6 +715,29 @@ export class PaymentOrdersService {
         'El usuario no tiene un bridge_customer_id configurado. Por favor, completa el registro.',
       );
     }
+    // ── Resolver moneda destino explícita (ya no se hereda de wallet.currency) ──
+    const resolvedDestCurrency = (dto.destination_currency ?? wallet.currency).toLowerCase();
+    const resolvedSourceCurrency = (dto.source_currency ?? 'usdc').toLowerCase();
+    const resolvedSourceNetwork = dto.source_network ?? wallet.network;
+
+    if (!resolvedSourceNetwork) {
+      throw new BadRequestException('Debe especificar la red de origen (source_network).');
+    }
+
+    // ── Validar compatibilidad de ruta contra catálogo Bridge ──
+    if (!isValidBridgeRampRoute(resolvedSourceNetwork, resolvedSourceCurrency, resolvedDestCurrency)) {
+      throw new BadRequestException(
+        `La combinación ${resolvedSourceNetwork}/${resolvedSourceCurrency} → ${resolvedDestCurrency} no es soportada por Bridge.`,
+      );
+    }
+
+    // ── Validar monto mínimo según catálogo Bridge ──
+    const minAmount = getMinAmount(resolvedSourceNetwork, resolvedSourceCurrency);
+    if (dto.amount < minAmount) {
+      throw new BadRequestException(
+        `El monto mínimo para ${resolvedSourceCurrency.toUpperCase()} en ${resolvedSourceNetwork} es ${minAmount}.`,
+      );
+    }
 
     // 1. Llamada a Bridge Transfer API
     let bridgeTransfer: Record<string, unknown>;
@@ -713,12 +749,12 @@ export class PaymentOrdersService {
           on_behalf_of: profile.bridge_customer_id,
           source: {
             payment_rail: dto.source_network,
-            currency: (dto.source_currency ?? 'usdc').toLowerCase(),
+            currency: resolvedSourceCurrency,
             from_address: dto.source_address,
           },
           destination: {
             payment_rail: wallet.network,
-            currency: wallet.currency.toLowerCase(),
+            currency: resolvedDestCurrency,
             to_address: wallet.address,
           },
           amount: dto.amount.toString(),
@@ -754,7 +790,7 @@ export class PaymentOrdersService {
       status: 'pending',
       source_payment_rail: dto.source_network,
       destination_payment_rail: wallet.network,
-      destination_currency: wallet.currency,
+      destination_currency: resolvedDestCurrency.toUpperCase(),
       bridge_raw_response: bridgeTransfer,
     })
       .select('id')
@@ -777,7 +813,7 @@ export class PaymentOrdersService {
         source_address: dto.source_address,
         source_network: dto.source_network,
         destination_type: 'bridge_wallet',
-        destination_currency: wallet.currency,
+        destination_currency: resolvedDestCurrency.toUpperCase(),
         bridge_transfer_id: bridgeTransfer.id as string,
         bridge_source_deposit_instructions: depositInstructions,
         notes: dto.notes ?? `On-ramp crypto: ${dto.amount} ${(dto.source_currency ?? 'usdc').toUpperCase()} (${dto.source_network}) → Bridge Wallet`,
@@ -793,12 +829,12 @@ export class PaymentOrdersService {
       wallet_id: wallet.id,
       type: 'credit',
       amount: net_amount,
-      currency: wallet.currency,
+      currency: resolvedDestCurrency.toUpperCase(),
       status: 'pending',
       reference_type: 'payment_order',
       reference_id: order.id,
       bridge_transfer_id: bridgeTransferRow?.id ?? null,
-      description: `On-ramp crypto: ${net_amount} ${wallet.currency} desde ${dto.source_address} (${dto.source_network})`,
+      description: `On-ramp crypto: ${net_amount} ${resolvedDestCurrency.toUpperCase()} desde ${dto.source_address} (${dto.source_network})`,
     });
 
     this.logger.log(
