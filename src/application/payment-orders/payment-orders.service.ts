@@ -35,6 +35,8 @@ import {
   isValidBridgeRampRoute,
   isValidFiatBoDestination,
   getMinAmount,
+  isValidOffRampRoute,
+  getOffRampMinAmount,
 } from '../../common/constants/bridge-route-catalog.constants';
 
 @Injectable()
@@ -1199,6 +1201,22 @@ export class PaymentOrdersService {
       if (!ALLOWED_NETWORKS.includes(destinationRail as any)) {
         throw new Error(
           `Red destino inválida: "${dto.destination_network}" (normalizada: "${destinationRail}"). Valores permitidos: ${ALLOWED_NETWORKS.join(', ')}`,
+        );
+      }
+
+      // Validar ruta off-ramp contra catálogo Bridge
+      const destCurrency = (dto.destination_currency ?? sourceCurrency).toLowerCase();
+      if (!isValidOffRampRoute(sourceCurrency.toLowerCase(), destinationRail, destCurrency)) {
+        throw new BadRequestException(
+          `Ruta off-ramp no soportada: ${sourceCurrency} → ${destinationRail} → ${destCurrency.toUpperCase()}. Verifica las combinaciones válidas.`,
+        );
+      }
+
+      // Validar monto mínimo según la ruta
+      const routeMin = getOffRampMinAmount(sourceCurrency.toLowerCase(), destinationRail, destCurrency);
+      if (routeMin > 0 && dto.amount < routeMin) {
+        throw new BadRequestException(
+          `Monto mínimo para esta ruta es ${routeMin} ${sourceCurrency}. Ingresaste ${dto.amount}.`,
         );
       }
 
