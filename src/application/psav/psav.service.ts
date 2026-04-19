@@ -68,6 +68,23 @@ export class PsavService {
     };
   }
 
+  /**
+   * Obtiene todas las cuentas PSAV crypto activas.
+   * Se usa para resolución dinámica del PSAV en flujos off-ramp
+   * donde la divisa de destino no es fija.
+   */
+  async getActiveCryptoAccounts() {
+    const { data, error } = await this.supabase
+      .from('psav_accounts')
+      .select('*')
+      .eq('type', 'crypto')
+      .eq('is_active', true)
+      .order('currency');
+
+    if (error) throw error;
+    return data ?? [];
+  }
+
   // ── Admin CRUD ─────────────────────────────────
 
   async listAccounts() {

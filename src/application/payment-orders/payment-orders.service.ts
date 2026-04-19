@@ -37,6 +37,8 @@ import {
   getMinAmount,
   isValidOffRampRoute,
   getOffRampMinAmount,
+  resolveFiatBoPsavMatch,
+  FIAT_BO_OFF_RAMP_SOURCE_CURRENCIES,
 } from '../../common/constants/bridge-route-catalog.constants';
 
 @Injectable()
@@ -975,11 +977,46 @@ export class PaymentOrdersService {
 
     const rateData = await this.exchangeRatesService.getRate('USD_BOB');
 
-    // Obtener dirección crypto del PSAV para recibir los fondos
-    const psavAccount = await this.psavService.getDepositAccount(
-      'crypto',
-      'USDC',
-    );
+    // Validar que el token de origen sea soportado para fiat_bo off-ramp
+    if (!FIAT_BO_OFF_RAMP_SOURCE_CURRENCIES.includes(sourceCurrency.toLowerCase())) {
+      await this.supabase.rpc('release_reserved_balance', {
+        p_user_id: userId,
+        p_currency: sourceCurrency,
+        p_amount: totalNeeded,
+      });
+      throw new BadRequestException(
+        `El token ${sourceCurrency} no está habilitado para retiro a Bolivia en este momento.`,
+      );
+    }
+
+    // Resolver dinámicamente la cuenta PSAV compatible con el token de origen
+    const activePsavAccounts = await this.psavService.getActiveCryptoAccounts();
+    const psavMatch = resolveFiatBoPsavMatch(sourceCurrency, activePsavAccounts);
+
+    if (!psavMatch) {
+      await this.supabase.rpc('release_reserved_balance', {
+        p_user_id: userId,
+        p_currency: sourceCurrency,
+        p_amount: totalNeeded,
+      });
+      throw new BadRequestException(
+        `No hay canal PSAV configurado compatible con ${sourceCurrency}. Contacta al administrador.`,
+      );
+    }
+
+    const { psavAccount, destCurrency: psavDestCurrency, minAmount: routeMinAmount } = psavMatch;
+
+    // Validar monto mínimo según la ruta Bridge resuelta
+    if (dto.amount < routeMinAmount) {
+      await this.supabase.rpc('release_reserved_balance', {
+        p_user_id: userId,
+        p_currency: sourceCurrency,
+        p_amount: totalNeeded,
+      });
+      throw new BadRequestException(
+        `El monto mínimo para retirar ${sourceCurrency.toUpperCase()} a Bolivia es ${routeMinAmount} ${sourceCurrency.toUpperCase()}.`,
+      );
+    }
 
     // Snapshot: los datos bancarios se copian en la orden para trazabilidad histórica
     const { data: order, error } = await this.supabase
@@ -1046,7 +1083,7 @@ export class PaymentOrdersService {
         },
         destination: {
           payment_rail: psavRail,
-          currency: wallet.currency.toLowerCase(),
+          currency: psavDestCurrency.toLowerCase(),
           to_address: psavAccount.crypto_address,
         },
         amount: dto.amount.toString(),
