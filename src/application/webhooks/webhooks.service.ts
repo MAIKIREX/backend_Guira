@@ -816,7 +816,7 @@ export class WebhooksService {
     // 2b. UPDATE payment_orders (si el transfer está vinculado a una order)
     const { data: paymentOrder } = await this.supabase
       .from('payment_orders')
-      .select('id, user_id, wallet_id, flow_type, amount, fee_amount, currency')
+      .select('id, user_id, wallet_id, flow_type, amount, fee_amount, currency, source_currency')
       .eq('bridge_transfer_id', bridgeTransferId)
       .in('status', ['waiting_deposit', 'processing', 'deposit_received']) // FIXED: Agregados estados pre-processing para flujos automatizados
       .maybeSingle();
@@ -841,7 +841,7 @@ export class WebhooksService {
         const totalReserved = parseFloat(paymentOrder.amount ?? '0');
         await this.supabase.rpc('release_reserved_balance', {
           p_user_id: paymentOrder.user_id,
-          p_currency: (paymentOrder.currency ?? 'USDC').toUpperCase(),
+          p_currency: (paymentOrder.source_currency ?? paymentOrder.currency ?? 'USDC').toUpperCase(),
           p_amount: totalReserved,
         });
 
@@ -922,7 +922,7 @@ export class WebhooksService {
         if (totalReserved > 0) {
           await this.supabase.rpc('release_reserved_balance', {
             p_user_id: paymentOrder.user_id,
-            p_currency: (paymentOrder.currency ?? 'USDC').toUpperCase(),
+            p_currency: (paymentOrder.source_currency ?? paymentOrder.currency ?? 'USDC').toUpperCase(),
             p_amount: totalReserved,
           });
           this.logger.log(

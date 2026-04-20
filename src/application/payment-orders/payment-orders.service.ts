@@ -1029,6 +1029,7 @@ export class PaymentOrdersService {
         requires_psav: false,
         amount: dto.amount,
         currency: sourceCurrency,
+        source_currency: sourceCurrency,
         fee_amount,
         net_amount,
         destination_type: 'bank_bo',
@@ -1052,7 +1053,7 @@ export class PaymentOrdersService {
       // Liberar reserva si falla la inserción
       await this.supabase.rpc('release_reserved_balance', {
         p_user_id: userId,
-        p_currency: wallet.currency,
+        p_currency: sourceCurrency,
         p_amount: totalNeeded,
       });
       throw new BadRequestException(error.message);
@@ -1111,6 +1112,21 @@ export class PaymentOrdersService {
         })
         .eq('id', order.id);
 
+      // Crear registro bridge_transfers para que el webhook pueda vincularlo
+      await this.supabase.from('bridge_transfers').insert({
+        user_id: userId,
+        bridge_transfer_id: transferId,
+        payment_order_id: order.id,
+        direction: 'off_ramp',
+        source_currency: sourceCurrency.toLowerCase(),
+        destination_currency: psavDestCurrency.toLowerCase(),
+        amount: dto.amount,
+        developer_fee: fee_amount,
+        status: 'pending',
+        bridge_state: 'awaiting_funds',
+        bridge_raw_response: bridgeResult,
+      });
+
       // Crear ledger entry (debit, pending — se asienta con webhook transfer.complete)
       await this.supabase.from('ledger_entries').insert({
         wallet_id: wallet.id,
@@ -1121,7 +1137,7 @@ export class PaymentOrdersService {
         reference_type: 'payment_order',
         reference_id: order.id,
         bridge_transfer_id: transferId,
-        description: `Off-ramp BO: ${net_amount} ${wallet.currency} → BOB (PSAV)`,
+        description: `Off-ramp BO: ${net_amount} ${sourceCurrency} → BOB (PSAV)`,
       });
 
       order.status = 'processing';
@@ -1147,7 +1163,7 @@ export class PaymentOrdersService {
     }
 
     this.logger.log(
-      `📋 Orden bridge_wallet_to_fiat_bo: ${order.id} — ${dto.amount} ${wallet.currency}→BOB (Bridge Transfer → PSAV)`,
+      `📋 Orden bridge_wallet_to_fiat_bo: ${order.id} — ${dto.amount} ${sourceCurrency}→BOB (Bridge Transfer → PSAV)`,
     );
     return order;
   }
