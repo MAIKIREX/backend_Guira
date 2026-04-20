@@ -13,7 +13,7 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BeneficiaryAddressDto } from '../../bridge/dto/create-virtual-account.dto';
-import { ALLOWED_NETWORKS } from '../../../common/constants/guira-crypto-config.constants';
+import { ALLOWED_NETWORKS, ALLOWED_CRYPTO_CURRENCIES } from '../../../common/constants/guira-crypto-config.constants';
 
 export class CreateSupplierDto {
   @ApiProperty({ example: 'Acme Logistics S.A.' })
@@ -161,6 +161,16 @@ export class CreateSupplierDto {
   @IsString()
   @IsIn([...ALLOWED_NETWORKS], { message: `Red no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
   wallet_network?: string;
+
+  @ApiPropertyOptional({
+    example: 'usdc',
+    enum: [...ALLOWED_CRYPTO_CURRENCIES],
+    description: 'Moneda/token que el proveedor crypto espera recibir (ej. usdc, usdt).',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Token no soportado. Permitidos: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
+  wallet_currency?: string;
 }
 
 export class UpdateSupplierDto {
@@ -297,4 +307,14 @@ export class UpdateSupplierDto {
   @IsString()
   @IsIn([...ALLOWED_NETWORKS], { message: `Red no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
   wallet_network?: string;
+
+  @ApiPropertyOptional({
+    example: 'usdc',
+    enum: [...ALLOWED_CRYPTO_CURRENCIES],
+    description: 'Moneda/token que el proveedor crypto espera recibir.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Token no soportado. Permitidos: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
+  wallet_currency?: string;
 }

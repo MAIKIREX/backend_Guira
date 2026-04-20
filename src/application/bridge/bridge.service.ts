@@ -580,6 +580,114 @@ export class BridgeService {
     return data;
   }
 
+  /**
+   * Actualiza una External Account en Bridge.
+   *
+   * Según la documentación de Bridge (PUT /external_accounts/{id}):
+   * - `address` es REQUERIDO (dirección del beneficiario)
+   * - `account` es OPCIONAL y solo aplica para cuentas US (routing_number, checking_or_savings)
+   *
+   * Los campos bancarios inmutables (account_number, iban, clabe, pix_key, etc.)
+   * NO pueden actualizarse; Bridge requiere crear una nueva External Account.
+   */
+  async updateExternalAccount(
+    userId: string,
+    bridgeEaDbId: string,
+    updatePayload: {
+      address: {
+        street_line_1: string;
+        street_line_2?: string;
+        city: string;
+        state?: string;
+        postal_code?: string;
+        country: string;
+      };
+      account?: {
+        routing_number?: string;
+        checking_or_savings?: 'checking' | 'savings';
+      };
+    },
+  ) {
+    const profile = await this.getVerifiedProfile(userId);
+
+    // Obtener el bridge_external_account_id real (UUID de Bridge)
+    const { data: eaRecord, error: eaError } = await this.supabase
+      .from('bridge_external_accounts')
+      .select('bridge_external_account_id')
+      .eq('id', bridgeEaDbId)
+      .eq('user_id', userId)
+      .single();
+
+    if (eaError || !eaRecord) {
+      throw new NotFoundException('External Account no encontrada en la DB local');
+    }
+
+    // Helper: alpha-2 → alpha-3 para address.country
+    const toAlpha3 = (code: string | undefined): string | undefined => {
+      if (!code) return undefined;
+      if (code.length === 3) return code.toUpperCase();
+      const map: Record<string, string> = {
+        US: 'USA', MX: 'MEX', BR: 'BRA', CO: 'COL', AR: 'ARG', CL: 'CHL',
+        PE: 'PER', EC: 'ECU', BO: 'BOL', PY: 'PRY', UY: 'URY', VE: 'VEN',
+        DE: 'DEU', FR: 'FRA', ES: 'ESP', IT: 'ITA', NL: 'NLD', GB: 'GBR',
+      };
+      return map[code.toUpperCase()] ?? code.toUpperCase();
+    };
+
+    // Construir payload para Bridge PUT
+    const bridgePayload: Record<string, unknown> = {
+      address: {
+        street_line_1: updatePayload.address.street_line_1,
+        ...(updatePayload.address.street_line_2
+          ? { street_line_2: updatePayload.address.street_line_2 }
+          : {}),
+        city: updatePayload.address.city,
+        ...(updatePayload.address.state
+          ? { state: updatePayload.address.state }
+          : {}),
+        ...(updatePayload.address.postal_code
+          ? { postal_code: updatePayload.address.postal_code }
+          : {}),
+        country: toAlpha3(updatePayload.address.country),
+      },
+    };
+
+    // Solo US: agregar account si hay campos
+    if (updatePayload.account) {
+      const accountFields: Record<string, unknown> = {};
+      if (updatePayload.account.routing_number) {
+        accountFields.routing_number = updatePayload.account.routing_number;
+      }
+      if (updatePayload.account.checking_or_savings) {
+        accountFields.checking_or_savings = updatePayload.account.checking_or_savings;
+      }
+      if (Object.keys(accountFields).length > 0) {
+        bridgePayload.account = accountFields;
+      }
+    }
+
+    const bridgeResponse = await this.bridgeApi.put<Record<string, unknown>>(
+      `/v0/customers/${profile.bridge_customer_id}/external_accounts/${eaRecord.bridge_external_account_id}`,
+      bridgePayload,
+    );
+
+    // Actualizar beneficiary_address_valid en DB local si Bridge lo devuelve
+    if (bridgeResponse.beneficiary_address_valid !== undefined) {
+      await this.supabase
+        .from('bridge_external_accounts')
+        .update({
+          beneficiary_address_valid: bridgeResponse.beneficiary_address_valid,
+        })
+        .eq('id', bridgeEaDbId);
+    }
+
+    this.logger.log(
+      `External Account ${eaRecord.bridge_external_account_id} actualizada en Bridge`,
+    );
+
+    return bridgeResponse;
+  }
+
   /** Lista cuentas externas activas. */
   async listExternalAccounts(userId: string) {
     const { data, error } = await this.supabase
