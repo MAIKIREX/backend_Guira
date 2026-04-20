@@ -180,7 +180,8 @@ export class AdminComplianceController {
   @Post('reviews/:id/approve')
   @Roles('staff', 'admin', 'super_admin')
   @ApiOperation({
-    summary: 'Aprobar review (ejecuta flujo dependiendo del subject)',
+    summary: 'Enviar expediente a Bridge para verificación KYC/KYB',
+    description: 'Staff valida los datos y envía a Bridge. La aprobación final depende del webhook de Bridge.',
   })
   approveReview(
     @Param('id', new ParseUUIDPipe()) id: string,

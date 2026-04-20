@@ -353,6 +353,11 @@ export class ComplianceActionsService {
 
   // ── DECISIONS (Inmutables) ────────────────────────────────────────
 
+  /**
+   * Staff valida los datos y envía al proveedor Bridge para verificación KYC/KYB.
+   * NO aprueba la cuenta directamente — la aprobación final viene del webhook de Bridge.
+   * El review permanece ABIERTO hasta recibir respuesta de Bridge.
+   */
   async approveReview(reviewId: string, actorId: string, reason: string) {
     const { data: review } = await this.supabase
       .from('compliance_reviews')
@@ -364,22 +369,19 @@ export class ComplianceActionsService {
     if (review.status === 'closed')
       throw new BadRequestException('El review ya está cerrado');
 
-    // 1. Inmutable Event
+    // 1. Inmutable Event — registrar que el staff validó y envió a Bridge
     await this.supabase.from('compliance_review_events').insert({
       review_id: reviewId,
       actor_id: actorId,
-      decision: 'APPROVED',
+      decision: 'SENT_TO_BRIDGE',
       reason,
     });
 
-    // 2. Cerrar Review
-    await this.supabase
-      .from('compliance_reviews')
-      .update({ status: 'closed', closed_at: new Date().toISOString() })
-      .eq('id', reviewId);
+    // 2. Review permanece ABIERTO — se cerrará cuando Bridge responda vía webhook
+    // No cerramos el review aquí.
 
-    // 3. Aplicar aprobación
-    await this.applyApprovalToSubject(
+    // 3. Enviar a Bridge (pone estados intermedios, NO aprueba)
+    await this.sendToBridgeSubject(
       review.subject_type,
       review.subject_id,
       actorId,
@@ -390,14 +392,198 @@ export class ComplianceActionsService {
     await this.supabase.from('audit_logs').insert({
       performed_by: actorId,
       role: 'staff',
-      action: 'APPROVE_COMPLIANCE_REVIEW',
+      action: 'SENT_TO_BRIDGE',
       table_name: 'compliance_reviews',
       record_id: reviewId,
       reason,
       source: 'admin_panel',
     });
 
-    return { message: 'Review aprobado y procesado' };
+    return { message: 'Expediente enviado a Bridge para verificación. La aprobación final depende de la respuesta de Bridge.' };
+  }
+
+  // ── BRIDGE WEBHOOK CALLBACKS ──────────────────────────────────────
+
+  /**
+   * Llamado por el webhook handler cuando Bridge aprueba la cuenta (status = 'active').
+   * ESTE es el único punto que marca la cuenta como 'approved' y habilita servicios.
+   */
+  async handleBridgeApproval(userId: string, bridgeCustomerId: string): Promise<void> {
+    this.logger.log(`Bridge aprobó cuenta para user ${userId} (customer ${bridgeCustomerId})`);
+
+    // 1. Buscar review abierto para este usuario
+    const review = await this.findOpenReviewForUser(userId);
+
+    if (review) {
+      // Registrar evento inmutable de aprobación por Bridge
+      await this.supabase.from('compliance_review_events').insert({
+        review_id: review.id,
+        actor_id: userId,
+        decision: 'BRIDGE_APPROVED',
+        reason: `Bridge confirmó verificación KYC/KYB — customer: ${bridgeCustomerId}`,
+      });
+
+      // Cerrar review
+      await this.supabase
+        .from('compliance_reviews')
+        .update({ status: 'closed', closed_at: new Date().toISOString() })
+        .eq('id', review.id);
+    }
+
+    // 2. Audit log
+    await this.supabase.from('audit_logs').insert({
+      performed_by: userId,
+      role: 'system',
+      action: 'BRIDGE_APPROVED',
+      table_name: 'profiles',
+      record_id: userId,
+      reason: `Bridge webhook confirmó aprobación — customer: ${bridgeCustomerId}`,
+      source: 'webhook',
+    });
+  }
+
+  /**
+   * Llamado por el webhook handler cuando Bridge rechaza la cuenta.
+   * Marca estados como 'bridge_rejected', notifica staff y cliente.
+   */
+  async handleBridgeRejection(
+    userId: string,
+    bridgeCustomerId: string,
+    issues: string[],
+  ): Promise<void> {
+    this.logger.warn(`Bridge rechazó cuenta para user ${userId} — issues: ${issues.join(', ')}`);
+
+    // 1. Actualizar kyc/kyb application
+    const { data: kycApp } = await this.supabase
+      .from('kyc_applications')
+      .select('id')
+      .eq('user_id', userId)
+      .in('status', ['sent_to_bridge'])
+      .maybeSingle();
+
+    if (kycApp) {
+      await this.supabase
+        .from('kyc_applications')
+        .update({ status: 'bridge_rejected' })
+        .eq('id', kycApp.id);
+    } else {
+      // Try KYB
+      await this.supabase
+        .from('kyb_applications')
+        .update({ status: 'bridge_rejected' })
+        .eq('user_id', userId)
+        .in('status', ['sent_to_bridge']);
+    }
+
+    // 2. Actualizar perfil
+    await this.supabase
+      .from('profiles')
+      .update({ onboarding_status: 'bridge_rejected' })
+      .eq('id', userId);
+
+    // 3. Buscar review abierto y registrar evento
+    const review = await this.findOpenReviewForUser(userId);
+    if (review) {
+      await this.supabase.from('compliance_review_events').insert({
+        review_id: review.id,
+        actor_id: userId,
+        decision: 'BRIDGE_REJECTED',
+        reason: `Bridge rechazó verificación — Issues: ${issues.join(', ')}`,
+        metadata: { bridge_issues: issues, bridge_customer_id: bridgeCustomerId },
+      });
+      // Review permanece abierto para que el staff pueda actuar
+    }
+
+    // 4. Notificar al staff (admins)
+    const { data: staffUsers } = await this.supabase
+      .from('profiles')
+      .select('id')
+      .in('role', ['staff', 'admin', 'super_admin'])
+      .eq('is_active', true);
+
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('full_name, email')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const clientName = profile?.full_name ?? profile?.email ?? userId;
+
+    for (const staff of staffUsers ?? []) {
+      await this.supabase.from('notifications').insert({
+        user_id: staff.id,
+        type: 'alert',
+        title: 'Bridge rechazó verificación',
+        message: `Bridge rechazó la verificación de ${clientName}. Issues: ${issues.join(', ')}`,
+      });
+    }
+
+    // 5. Notificar al cliente
+    await this.supabase.from('notifications').insert({
+      user_id: userId,
+      type: 'alert',
+      title: 'Observaciones en tu verificación',
+      message: 'Se encontraron observaciones durante la verificación de tu identidad. Nuestro equipo de soporte se pondrá en contacto contigo para los próximos pasos.',
+    });
+
+    // 6. Audit log
+    await this.supabase.from('audit_logs').insert({
+      performed_by: userId,
+      role: 'system',
+      action: 'BRIDGE_REJECTED',
+      table_name: 'profiles',
+      record_id: userId,
+      reason: `Bridge webhook rechazó — Issues: ${issues.join(', ')}`,
+      new_values: { bridge_issues: issues, bridge_customer_id: bridgeCustomerId },
+      source: 'webhook',
+    });
+  }
+
+  /**
+   * Busca el compliance_review abierto más reciente para un usuario.
+   */
+  private async findOpenReviewForUser(userId: string): Promise<{ id: string } | null> {
+    // Buscar por kyc_application
+    const { data: kycApp } = await this.supabase
+      .from('kyc_applications')
+      .select('id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (kycApp) {
+      const { data: review } = await this.supabase
+        .from('compliance_reviews')
+        .select('id')
+        .eq('subject_type', 'kyc_applications')
+        .eq('subject_id', kycApp.id)
+        .eq('status', 'open')
+        .maybeSingle();
+      if (review) return review;
+    }
+
+    // Buscar por kyb_application
+    const { data: kybApp } = await this.supabase
+      .from('kyb_applications')
+      .select('id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (kybApp) {
+      const { data: review } = await this.supabase
+        .from('compliance_reviews')
+        .select('id')
+        .eq('subject_type', 'kyb_applications')
+        .eq('subject_id', kybApp.id)
+        .eq('status', 'open')
+        .maybeSingle();
+      if (review) return review;
+    }
+
+    return null;
   }
 
   async rejectReview(reviewId: string, actorId: string, reason: string) {
@@ -549,7 +735,12 @@ export class ComplianceActionsService {
 
   // ── HELPERS: Subjects ─────────────────────────────────────────────
 
-  private async applyApprovalToSubject(
+  /**
+   * Envía los datos del sujeto a Bridge para verificación.
+   * Pone estados intermedios (sent_to_bridge / pending_bridge).
+   * NO aprueba la cuenta — eso lo hará el webhook de Bridge.
+   */
+  private async sendToBridgeSubject(
     subjectType: string,
     subjectId: string,
     actorId: string,
@@ -559,7 +750,7 @@ export class ComplianceActionsService {
       case 'kyc_applications': {
         const { data: kyc } = await this.supabase
           .from('kyc_applications')
-          .update({ status: 'approved', approved_at: new Date().toISOString() })
+          .update({ status: 'sent_to_bridge' })
           .eq('id', subjectId)
           .select('user_id, person_id')
           .single();
@@ -567,7 +758,7 @@ export class ComplianceActionsService {
         if (kyc?.user_id) {
           // Sincronizar full_name desde la tabla `people`
           const profileUpdate: Record<string, any> = {
-            onboarding_status: 'approved',
+            onboarding_status: 'pending_bridge',
           };
           if (kyc.person_id) {
             const { data: person } = await this.supabase
@@ -589,14 +780,25 @@ export class ComplianceActionsService {
             .eq('id', kyc.user_id);
 
           // Registra en Bridge (crea bridge_customer + bridge_kyc_link)
-          // BridgeCustomerService manejará la llamada y DB.
+          // La aprobación real vendrá del webhook — aquí solo mandamos los datos.
           try {
             await this.bridgeCustomerService.registerCustomerInBridge(
               kyc.user_id,
             );
           } catch (err) {
             this.logger.error(`Error registrando cliente en Bridge: ${err}`);
-            // No revertimos approval local, el staff lo gestionará por logs
+            // Revertir a needs_review para que el staff pueda reintentar
+            await this.supabase
+              .from('kyc_applications')
+              .update({ status: 'needs_review' })
+              .eq('id', subjectId);
+            await this.supabase
+              .from('profiles')
+              .update({ onboarding_status: 'kyc_started' })
+              .eq('id', kyc.user_id);
+            throw new BadRequestException(
+              `Error enviando a Bridge: ${(err as Error).message}. El expediente ha sido devuelto para revisión.`,
+            );
           }
         }
         break;
@@ -604,7 +806,7 @@ export class ComplianceActionsService {
       case 'kyb_applications': {
         const { data: kyb } = await this.supabase
           .from('kyb_applications')
-          .update({ status: 'approved', approved_at: new Date().toISOString() })
+          .update({ status: 'sent_to_bridge' })
           .eq('id', subjectId)
           .select('requester_user_id, business_id')
           .single();
@@ -612,7 +814,7 @@ export class ComplianceActionsService {
         if (kyb?.requester_user_id) {
           // Sincronizar full_name desde la tabla `businesses`
           const profileUpdate: Record<string, any> = {
-            onboarding_status: 'approved',
+            onboarding_status: 'pending_bridge',
           };
           if (kyb.business_id) {
             const { data: business } = await this.supabase
@@ -636,12 +838,23 @@ export class ComplianceActionsService {
             );
           } catch (err) {
             this.logger.error(`Error registrando negocio en Bridge: ${err}`);
+            await this.supabase
+              .from('kyb_applications')
+              .update({ status: 'needs_review' })
+              .eq('id', subjectId);
+            await this.supabase
+              .from('profiles')
+              .update({ onboarding_status: 'kyb_started' })
+              .eq('id', kyb.requester_user_id);
+            throw new BadRequestException(
+              `Error enviando a Bridge: ${(err as Error).message}. El expediente ha sido devuelto para revisión.`,
+            );
           }
         }
         break;
       }
       case 'payout_request': {
-        // Ejecutar payout en Bridge (que libera saldos, crea transfers, etc)
+        // Payouts se aprueban directamente (no van por flujo Bridge KYC)
         await this.bridgeService.approvePayout(subjectId, actorId);
         break;
       }

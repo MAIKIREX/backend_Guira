@@ -442,26 +442,25 @@ export class BridgeCustomerService {
     }
 
     // 4. Guardar bridge_customer_id en profiles
+    // NO ponemos 'approved' aquí — la aprobación final viene del webhook de Bridge.
+    // NO inicializamos wallets aquí — eso se hará cuando Bridge confirme vía webhook.
     await this.supabase
       .from('profiles')
       .update({
         bridge_customer_id: customerId,
-        onboarding_status: 'approved',
+        // onboarding_status se mantiene en 'pending_bridge' (seteado por sendToBridgeSubject)
       })
       .eq('id', userId);
 
-    // 5. Inicializar wallet y balance para el usuario
-    await this.initializeWallet(userId);
-
-    // 6. Log de éxito
+    // 5. Log de éxito (registro enviado, no aprobación)
     await this.logActivity(
       userId,
       'BRIDGE_CUSTOMER_REGISTERED',
-      `Customer registrado en Bridge: ${customerId}`,
+      `Customer registrado en Bridge: ${customerId}. Esperando verificación vía webhook.`,
     );
 
     this.logger.log(
-      `Bridge customer ${customerId} creado para usuario ${userId}`,
+      `Bridge customer ${customerId} creado para usuario ${userId} — pendiente de verificación webhook`,
     );
 
     return customerId;

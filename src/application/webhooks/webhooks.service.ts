@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
 import { BridgeApiClient } from '../bridge/bridge-api.client';
 import { WalletsService } from '../wallets/wallets.service';
+import { ComplianceActionsService } from '../compliance/compliance-actions.service';
 
 interface SinkEventDto {
   provider: string;
@@ -27,6 +28,7 @@ export class WebhooksService {
     private readonly config: ConfigService,
     private readonly bridgeApi: BridgeApiClient,
     private readonly walletsService: WalletsService,
+    private readonly complianceActions: ComplianceActionsService,
   ) {}
 
   // ═══════════════════════════════════════════════
@@ -334,14 +336,6 @@ export class WebhooksService {
 
     if (!customerId || !email) return;
 
-    // Solo actuar en transiciones a 'active' (customer completamente verificado)
-    if (newStatus !== 'active') {
-      this.logger.log(
-        `customer.updated: status=${newStatus} para customer ${customerId} — sin acción`,
-      );
-      return;
-    }
-
     const { data: profile } = await this.supabase
       .from('profiles')
       .select('id, bridge_customer_id, onboarding_status')
@@ -355,22 +349,102 @@ export class WebhooksService {
       return;
     }
 
-    // Actualizar bridge_customer_id y onboarding_status si es necesario
-    const updates: Record<string, unknown> = {};
-    if (!profile.bridge_customer_id) updates.bridge_customer_id = customerId;
-    if (profile.onboarding_status !== 'approved')
-      updates.onboarding_status = 'approved';
-
-    if (Object.keys(updates).length > 0) {
-      await this.supabase.from('profiles').update(updates).eq('id', profile.id);
+    // Actualizar bridge_customer_id si aún no está
+    if (!profile.bridge_customer_id) {
+      await this.supabase
+        .from('profiles')
+        .update({ bridge_customer_id: customerId })
+        .eq('id', profile.id);
     }
 
-    // Inicializar wallets si no existen aún
-    await this.initializeWalletsForUser(profile.id, customerId);
+    // ═══ FLUJO PRINCIPAL: actuar según el status de Bridge ═══
 
-    this.logger.log(
-      `customer.updated: customer ${customerId} → active, wallets inicializadas para user ${profile.id}`,
-    );
+    if (newStatus === 'active') {
+      // ── APROBACIÓN FINAL ──
+      // Bridge confirmó que el customer está verificado.
+      // ESTE es el único punto que marca la cuenta como 'approved'.
+      this.logger.log(
+        `customer.updated: customer ${customerId} → active, aprobando cuenta`,
+      );
+
+      // Determinar tipo de aplicación y aprobar
+      const { data: kycApp } = await this.supabase
+        .from('kyc_applications')
+        .select('id')
+        .eq('user_id', profile.id)
+        .in('status', ['sent_to_bridge', 'submitted', 'under_review', 'pending'])
+        .maybeSingle();
+
+      if (kycApp) {
+        await this.supabase
+          .from('kyc_applications')
+          .update({
+            status: 'approved',
+            approved_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', kycApp.id);
+      } else {
+        // Try KYB
+        await this.supabase
+          .from('kyb_applications')
+          .update({
+            status: 'approved',
+            approved_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', profile.id)
+          .in('status', ['sent_to_bridge', 'submitted', 'under_review', 'pending']);
+      }
+
+      // Actualizar perfil a approved
+      await this.supabase
+        .from('profiles')
+        .update({
+          onboarding_status: 'approved',
+          bridge_customer_id: customerId,
+        })
+        .eq('id', profile.id);
+
+      // Inicializar wallets
+      await this.initializeWalletsForUser(profile.id, customerId);
+
+      // Cerrar compliance review y registrar audit log
+      await this.complianceActions.handleBridgeApproval(profile.id, customerId);
+
+      // Notificación al cliente
+      await this.supabase.from('notifications').insert({
+        user_id: profile.id,
+        type: 'onboarding',
+        title: 'Verificación Aprobada',
+        message: 'Tu verificación ha sido aprobada. Ya puedes operar en la plataforma.',
+      });
+
+      this.logger.log(
+        `✅ customer.updated: customer ${customerId} → active, wallets inicializadas para user ${profile.id}`,
+      );
+
+    } else if (newStatus === 'rejected') {
+      // ── RECHAZO POR BRIDGE ──
+      // Extraer issues del payload si están disponibles
+      const rejectionReasons = this.extractBridgeIssues(eventObject);
+
+      this.logger.warn(
+        `customer.updated: customer ${customerId} → rejected. Issues: ${rejectionReasons.join(', ')}`,
+      );
+
+      // Delegar al ComplianceActionsService para manejar rechazo
+      await this.complianceActions.handleBridgeRejection(
+        profile.id,
+        customerId,
+        rejectionReasons,
+      );
+
+    } else {
+      this.logger.log(
+        `customer.updated: status=${newStatus} para customer ${customerId} — sin acción final`,
+      );
+    }
   }
 
   // ═══════════════════════════════════════════════
@@ -386,15 +460,6 @@ export class WebhooksService {
       | Record<string, unknown>
       | undefined;
     const kycStatus = eventObject?.kyc_status as string | undefined;
-
-    // Solo actuar si el KYC fue aprobado
-    if (kycStatus !== 'approved') {
-      this.logger.log(
-        `kyc_link.updated.status_transitioned: kyc_status=${kycStatus} — sin acción`,
-      );
-      return;
-    }
-
     const customerId = eventObject?.customer_id as string | undefined;
     const email = eventObject?.email as string | undefined;
     const customerType = (eventObject?.type as string) ?? 'individual';
@@ -433,61 +498,95 @@ export class WebhooksService {
     }
 
     const userId = profile.id;
-
-    // Actualizar la aplicación correcta según tipo de customer
-    if (customerType === 'business') {
-      await this.supabase
-        .from('kyb_applications')
-        .update({
-          status: 'approved',
-          approved_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', userId)
-        .in('status', ['submitted', 'under_review', 'pending']);
-    } else {
-      await this.supabase
-        .from('kyc_applications')
-        .update({
-          status: 'approved',
-          approved_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', userId)
-        .in('status', ['submitted', 'under_review', 'pending']);
-    }
-
-    // Actualizar perfil
-    await this.supabase
-      .from('profiles')
-      .update({
-        onboarding_status: 'approved',
-        bridge_customer_id: customerId,
-      })
-      .eq('id', userId);
-
-    // Inicializar wallets
-    await this.initializeWalletsForUser(userId, customerId);
-
-    // Notificación
     const typeLabel = customerType === 'business' ? 'KYB' : 'KYC';
-    await this.supabase.from('notifications').insert({
-      user_id: userId,
-      type: 'onboarding',
-      title: `Verificación ${typeLabel} Aprobada`,
-      message: `Tu verificación ${typeLabel} ha sido aprobada. Ya puedes operar en la plataforma.`,
-    });
 
-    // Activity log
-    await this.supabase.from('activity_logs').insert({
-      user_id: userId,
-      action: `${typeLabel}_APPROVED_WEBHOOK`,
-      description: `Verificación ${typeLabel} confirmada por Bridge webhook — customer: ${customerId}`,
-    });
+    if (kycStatus === 'approved') {
+      // ── APROBACIÓN FINAL vía KYC Link ──
 
-    this.logger.log(
-      `✅ kyc_link aprobado para customer ${customerId} (user ${userId})`,
-    );
+      // Actualizar la aplicación correcta según tipo de customer
+      if (customerType === 'business') {
+        await this.supabase
+          .from('kyb_applications')
+          .update({
+            status: 'approved',
+            approved_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', userId)
+          .in('status', ['sent_to_bridge', 'submitted', 'under_review', 'pending']);
+      } else {
+        await this.supabase
+          .from('kyc_applications')
+          .update({
+            status: 'approved',
+            approved_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', userId)
+          .in('status', ['sent_to_bridge', 'submitted', 'under_review', 'pending']);
+      }
+
+      // Actualizar perfil
+      await this.supabase
+        .from('profiles')
+        .update({
+          onboarding_status: 'approved',
+          bridge_customer_id: customerId,
+        })
+        .eq('id', userId);
+
+      // Inicializar wallets
+      await this.initializeWalletsForUser(userId, customerId);
+
+      // Cerrar compliance review
+      await this.complianceActions.handleBridgeApproval(userId, customerId);
+
+      // Notificación
+      await this.supabase.from('notifications').insert({
+        user_id: userId,
+        type: 'onboarding',
+        title: `Verificación ${typeLabel} Aprobada`,
+        message: `Tu verificación ${typeLabel} ha sido aprobada. Ya puedes operar en la plataforma.`,
+      });
+
+      // Activity log
+      await this.supabase.from('activity_logs').insert({
+        user_id: userId,
+        action: `${typeLabel}_APPROVED_WEBHOOK`,
+        description: `Verificación ${typeLabel} confirmada por Bridge webhook — customer: ${customerId}`,
+      });
+
+      this.logger.log(
+        `✅ kyc_link aprobado para customer ${customerId} (user ${userId})`,
+      );
+
+    } else if (kycStatus === 'rejected' || kycStatus === 'failed') {
+      // ── RECHAZO vía KYC Link ──
+      const rejectionReasons = this.extractBridgeIssues(eventObject);
+
+      this.logger.warn(
+        `kyc_link.updated.status_transitioned: kyc_status=${kycStatus} para customer ${customerId} — Issues: ${rejectionReasons.join(', ')}`,
+      );
+
+      // Delegar al ComplianceActionsService
+      await this.complianceActions.handleBridgeRejection(
+        userId,
+        customerId,
+        rejectionReasons,
+      );
+
+      // Activity log
+      await this.supabase.from('activity_logs').insert({
+        user_id: userId,
+        action: `${typeLabel}_REJECTED_WEBHOOK`,
+        description: `Verificación ${typeLabel} rechazada por Bridge — Issues: ${rejectionReasons.join(', ')}`,
+      });
+
+    } else {
+      this.logger.log(
+        `kyc_link.updated.status_transitioned: kyc_status=${kycStatus} — sin acción`,
+      );
+    }
   }
 
   // ═══════════════════════════════════════════════
@@ -1275,8 +1374,66 @@ export class WebhooksService {
   //  HELPERS
   // ═══════════════════════════════════════════════
 
+  // ═══════════════════════════════════════════════
+  //  HELPER: Extraer issues/razones de rechazo de Bridge
+  // ═══════════════════════════════════════════════
+
   /**
-   * Verifica la firma Bridge de un webhook.
+   * Extrae razones de rechazo del payload de Bridge.
+   * Bridge puede enviar issues en múltiples formatos dependiendo del evento:
+   *  - event_object.issues[] (array de strings)
+   *  - event_object.rejection_reasons[] (array de strings)
+   *  - event_object.status_reason (string)
+   *  - event_object.active_regulation_checks[].status (object array)
+   */
+  private extractBridgeIssues(
+    eventObject: Record<string, unknown> | undefined,
+  ): string[] {
+    if (!eventObject) return ['unknown_reason'];
+
+    const issues: string[] = [];
+
+    // Formato 1: issues[] (más común en customer.updated)
+    if (Array.isArray(eventObject.issues)) {
+      for (const issue of eventObject.issues) {
+        if (typeof issue === 'string') {
+          issues.push(issue);
+        } else if (typeof issue === 'object' && issue !== null) {
+          // Pueden ser objetos con type/message
+          const issueObj = issue as Record<string, unknown>;
+          const msg = (issueObj.message ?? issueObj.type ?? issueObj.code ?? JSON.stringify(issue)) as string;
+          issues.push(msg);
+        }
+      }
+    }
+
+    // Formato 2: rejection_reasons[]
+    if (Array.isArray(eventObject.rejection_reasons)) {
+      for (const reason of eventObject.rejection_reasons) {
+        if (typeof reason === 'string') issues.push(reason);
+      }
+    }
+
+    // Formato 3: status_reason (string simple)
+    if (typeof eventObject.status_reason === 'string' && eventObject.status_reason) {
+      issues.push(eventObject.status_reason);
+    }
+
+    // Formato 4: active_regulation_checks con status != 'approved'
+    if (Array.isArray(eventObject.active_regulation_checks)) {
+      for (const check of eventObject.active_regulation_checks) {
+        const checkObj = check as Record<string, unknown>;
+        if (checkObj.status && checkObj.status !== 'approved' && checkObj.status !== 'passed') {
+          issues.push(`${checkObj.type ?? 'check'}: ${checkObj.status}`);
+        }
+      }
+    }
+
+    return issues.length > 0 ? issues : ['rejected_by_bridge'];
+  }
+
+  /**
+   * Verificación de la firma Bridge usando RSA-SHA256.
    *
    * Formato del header X-Webhook-Signature:
    *   t=<unix_timestamp>,v0=<base64_encoded_signature>
