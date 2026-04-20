@@ -84,6 +84,7 @@ export class PaymentOrdersService {
   private async validateAmountLimits(
     amount: number,
     category: 'interbank' | 'wallet_ramp',
+    currency?: string,
   ): Promise<void> {
     const prefix = category === 'interbank' ? 'INTERBANK' : 'RAMP';
     const { data: minSetting } = await this.supabase
@@ -100,11 +101,27 @@ export class PaymentOrdersService {
     const min = parseFloat(minSetting?.value ?? '0');
     const max = parseFloat(maxSetting?.value ?? '999999');
 
-    if (amount < min) {
-      throw new BadRequestException(`El monto mínimo es $${min}`);
+    // Normalizar el monto a USD para comparación justa.
+    // BOB se convierte con el tipo de cambio actual.
+    // Stablecoins (USDC, USDT, USDB, PYUSD, EURC) se tratan como ~1:1 USD.
+    let amountUsd = amount;
+    const upperCurrency = (currency ?? 'USD').toUpperCase();
+
+    if (upperCurrency === 'BOB') {
+      const rateData = await this.exchangeRatesService.getRate('BOB_USD');
+      amountUsd = parseFloat((amount / rateData.effective_rate).toFixed(2));
     }
-    if (amount > max) {
-      throw new BadRequestException(`El monto máximo es $${max}`);
+    // Para USD, USDC, USDT, USDB, PYUSD → amountUsd = amount (1:1)
+
+    if (amountUsd < min) {
+      throw new BadRequestException(
+        `El monto mínimo es $${min} USD (tu monto equivale a ~$${amountUsd} USD)`,
+      );
+    }
+    if (amountUsd > max) {
+      throw new BadRequestException(
+        `El monto máximo es $${max} USD (tu monto equivale a ~$${amountUsd} USD)`,
+      );
     }
   }
 
@@ -133,7 +150,21 @@ export class PaymentOrdersService {
 
   async createInterbankOrder(userId: string, dto: CreateInterbankOrderDto) {
     await this.validateRateLimit(userId);
-    await this.validateAmountLimits(dto.amount, 'interbank');
+
+    // Resolver la moneda de entrada para normalizar límites a USD
+    let inputCurrency = 'USD';
+    switch (dto.flow_type) {
+      case InterbankFlowType.BOLIVIA_TO_WORLD:
+      case InterbankFlowType.BOLIVIA_TO_WALLET:
+        inputCurrency = 'BOB';
+        break;
+      case InterbankFlowType.WALLET_TO_WALLET:
+        inputCurrency = dto.source_currency?.toUpperCase() ?? 'USDC';
+        break;
+      // WORLD_TO_BOLIVIA, WORLD_TO_WALLET → USD (default)
+    }
+
+    await this.validateAmountLimits(dto.amount, 'interbank', inputCurrency);
 
     switch (dto.flow_type) {
       case InterbankFlowType.BOLIVIA_TO_WORLD:
@@ -408,6 +439,13 @@ export class PaymentOrdersService {
 
     const rateData = await this.exchangeRatesService.getRate('BOB_USD');
 
+    // Validar que se especificó el token destino (no asumimos USDC por defecto)
+    if (!dto.destination_currency) {
+      throw new BadRequestException(
+        'destination_currency es obligatorio para bolivia_to_wallet. Especifica el token destino (ej: usdc, usdt).',
+      );
+    }
+
     const { data: order, error } = await this.supabase
       .from('payment_orders')
       .insert({
@@ -422,7 +460,7 @@ export class PaymentOrdersService {
         destination_type: 'crypto_address',
         destination_address: dto.destination_address,
         destination_network: dto.destination_network,
-        destination_currency: dto.destination_currency?.toUpperCase() ?? 'USDC',
+        destination_currency: dto.destination_currency.toUpperCase(),
         supplier_id: dto.supplier_id ?? null,
         exchange_rate_applied: rateData.effective_rate,
         amount_destination: parseFloat(
@@ -604,7 +642,23 @@ export class PaymentOrdersService {
 
   async createWalletRampOrder(userId: string, dto: CreateWalletRampOrderDto) {
     await this.validateRateLimit(userId);
-    await this.validateAmountLimits(dto.amount, 'wallet_ramp');
+
+    // Resolver la moneda de entrada para normalizar límites a USD
+    let inputCurrency = 'USD';
+    switch (dto.flow_type) {
+      case WalletRampFlowType.FIAT_BO_TO_BRIDGE_WALLET:
+        inputCurrency = 'BOB';
+        break;
+      case WalletRampFlowType.CRYPTO_TO_BRIDGE_WALLET:
+      case WalletRampFlowType.BRIDGE_WALLET_TO_FIAT_BO:
+      case WalletRampFlowType.BRIDGE_WALLET_TO_CRYPTO:
+      case WalletRampFlowType.BRIDGE_WALLET_TO_FIAT_US:
+        inputCurrency = dto.source_currency?.toUpperCase() ?? 'USDC';
+        break;
+      // FIAT_US_TO_BRIDGE_WALLET → USD (default)
+    }
+
+    await this.validateAmountLimits(dto.amount, 'wallet_ramp', inputCurrency);
 
     switch (dto.flow_type) {
       case WalletRampFlowType.FIAT_BO_TO_BRIDGE_WALLET:

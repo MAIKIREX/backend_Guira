@@ -49,9 +49,9 @@ export class CreateInterbankOrderDto {
       'bolivia_to_wallet',
     ].includes(o.flow_type),
   )
-  @IsOptional()
   @IsString()
   @IsIn([...ALLOWED_CRYPTO_CURRENCIES, ...['usd', 'eur', 'mxn', 'brl', 'gbp', 'cop']], { message: 'Moneda de destino no soportada' })
+  @IsOptional()
   destination_currency?: string;
 
   // ── wallet_to_wallet: direcciones crypto ad-hoc ──
