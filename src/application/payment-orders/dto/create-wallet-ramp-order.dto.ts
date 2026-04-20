@@ -142,7 +142,6 @@ export class CreateWalletRampOrderDto {
   @ApiPropertyOptional()
   @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_fiat_us')
   @IsNotEmpty({ message: 'El motivo del retiro es obligatorio para retiros a cuenta bancaria US' })
-  @IsOptional()
   @IsString()
   @MaxLength(500)
   business_purpose?: string;

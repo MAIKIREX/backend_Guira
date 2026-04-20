@@ -1473,6 +1473,23 @@ export class PaymentOrdersService {
         })
         .eq('id', order.id);
 
+      // Crear registro bridge_transfers para que el webhook pueda vincularlo
+      // (consistente con bridge_wallet_to_fiat_bo y bridge_wallet_to_crypto)
+      const { data: btRow } = await this.supabase.from('bridge_transfers').insert({
+        user_id: userId,
+        bridge_transfer_id: transferId,
+        source_payment_rail: 'bridge_wallet',
+        source_currency: sourceCurrency.toLowerCase(),
+        destination_payment_rail: extAccount.payment_rail ?? 'ach',
+        destination_currency: (extAccount.currency ?? 'usd').toLowerCase(),
+        amount: dto.amount,
+        developer_fee_amount: fee_amount,
+        net_amount,
+        status: 'pending',
+        bridge_state: (bridgeResult?.state as string) ?? 'awaiting_funds',
+        bridge_raw_response: bridgeResult,
+      }).select('id').single();
+
       await this.supabase.from('ledger_entries').insert({
         wallet_id: wallet.id,
         type: 'debit',
@@ -1481,7 +1498,7 @@ export class PaymentOrdersService {
         status: 'pending',
         reference_type: 'payment_order',
         reference_id: order.id,
-        bridge_transfer_id: transferId,
+        bridge_transfer_id: btRow?.id ?? null,
         description: `Off-ramp fiat US: $${net_amount} → cuenta bancaria`,
       });
 
