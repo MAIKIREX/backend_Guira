@@ -1113,19 +1113,17 @@ export class PaymentOrdersService {
         .eq('id', order.id);
 
       // Crear registro bridge_transfers para que el webhook pueda vincularlo
-      await this.supabase.from('bridge_transfers').insert({
+      const { data: btRow } = await this.supabase.from('bridge_transfers').insert({
         user_id: userId,
         bridge_transfer_id: transferId,
-        payment_order_id: order.id,
-        direction: 'off_ramp',
         source_currency: sourceCurrency.toLowerCase(),
         destination_currency: psavDestCurrency.toLowerCase(),
         amount: dto.amount,
-        developer_fee: fee_amount,
+        developer_fee_amount: fee_amount,
         status: 'pending',
         bridge_state: 'awaiting_funds',
         bridge_raw_response: bridgeResult,
-      });
+      }).select('id').single();
 
       // Crear ledger entry (debit, pending — se asienta con webhook transfer.complete)
       await this.supabase.from('ledger_entries').insert({
@@ -1136,7 +1134,7 @@ export class PaymentOrdersService {
         status: 'pending',
         reference_type: 'payment_order',
         reference_id: order.id,
-        bridge_transfer_id: transferId,
+        bridge_transfer_id: btRow?.id ?? null,
         description: `Off-ramp BO: ${net_amount} ${sourceCurrency} → BOB (PSAV)`,
       });
 
