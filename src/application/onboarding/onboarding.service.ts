@@ -559,6 +559,28 @@ export class OnboardingService {
       );
     }
 
+    // ── Soft-Delete: marcar documentos previos del mismo tipo como 'superseded' ──
+    // Esto evita la acumulación de registros duplicados manteniendo historial de auditoría.
+    const { data: previousDocs } = await this.supabase
+      .from('documents')
+      .select('id, storage_path')
+      .eq('user_id', userId)
+      .eq('document_type', documentType)
+      .eq('subject_type', subjectType)
+      .eq('status', 'pending');
+
+    if (previousDocs && previousDocs.length > 0) {
+      const prevIds = previousDocs.map((d) => d.id);
+      await this.supabase
+        .from('documents')
+        .update({ status: 'superseded' })
+        .in('id', prevIds);
+
+      this.logger.log(
+        `Marked ${prevIds.length} previous '${documentType}' document(s) as superseded for user ${userId}`,
+      );
+    }
+
     // Registrar en tabla documents
     const { data, error } = await this.supabase
       .from('documents')
@@ -589,6 +611,7 @@ export class OnboardingService {
         'id, document_type, subject_type, file_name, mime_type, file_size_bytes, status, created_at',
       )
       .eq('user_id', userId)
+      .eq('status', 'pending') // Solo documentos activos (excluye superseded)
       .order('created_at', { ascending: false });
 
     if (subjectType) {
