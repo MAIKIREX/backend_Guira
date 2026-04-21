@@ -792,6 +792,31 @@ export class BridgeCustomerService {
   //  Address Builder
   // ───────────────────────────────────────
 
+  private static readonly BOLIVIA_SUBDIVISION_MAP: Record<string, string> = {
+    // Single-letter codes (pass-through)
+    b: 'B', c: 'C', h: 'H', l: 'L', n: 'N', o: 'O', p: 'P', s: 'S', t: 'T',
+    // ISO 3166-2 with prefix (BO-X)
+    'bo-b': 'B', 'bo-c': 'C', 'bo-h': 'H', 'bo-l': 'L',
+    'bo-n': 'N', 'bo-o': 'O', 'bo-p': 'P', 'bo-s': 'S', 'bo-t': 'T',
+    // Spanish department names
+    'el beni': 'B', beni: 'B',
+    cochabamba: 'C',
+    chuquisaca: 'H', sucre: 'H',
+    'la paz': 'L',
+    pando: 'N',
+    oruro: 'O',
+    'potosí': 'P', potosi: 'P',
+    'santa cruz': 'S',
+    tarija: 'T',
+  };
+
+  private normalizeSubdivision(state: string, country: string): string {
+    const alpha3 = this.toAlpha3(country);
+    if (alpha3 !== 'BOL') return state;
+    const code = BridgeCustomerService.BOLIVIA_SUBDIVISION_MAP[state.trim().toLowerCase()];
+    return code ?? state;
+  }
+
   /**
    * Construye un objeto Address compatible con Bridge API.
    * H05: country convertido a ISO alpha-3.
@@ -812,7 +837,7 @@ export class BridgeCustomerService {
     };
 
     if (fields.address2) address.street_line_2 = fields.address2;
-    if (fields.state) address.subdivision = fields.state; // H14: subdivision
+    if (fields.state) address.subdivision = this.normalizeSubdivision(fields.state, fields.country); // H14: subdivision
     if (fields.postal_code) address.postal_code = fields.postal_code;
 
     // Remove empty strings
