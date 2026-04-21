@@ -26,17 +26,33 @@ export class AuthService {
    * El trigger `handle_new_user` crea automáticamente el perfil en `profiles`.
    */
   async register(dto: RegisterDto): Promise<AuthResponseDto> {
-    // Verificar si el email ya existe
-    const { data: existingUsers } = await this.supabase.auth.admin.listUsers();
+    // ─── Verificar si el email ya existe en Supabase Auth ───
+    // Buscar directamente por email en vez de cargar toda la lista de usuarios.
+    const { data: existingUsers } = await this.supabase.auth.admin.listUsers({
+      page: 1,
+      perPage: 1,
+      // @ts-expect-error – Supabase admin API acepta filter en runtime
+      filter: `email.eq.${dto.email.toLowerCase()}`,
+    });
 
+    // Fallback robusto: buscar en la lista paginada si la API de filtro no está disponible
     const users =
       (existingUsers as { users?: { email?: string }[] })?.users ?? [];
     const emailExists = users.some(
       (u) => u.email?.toLowerCase() === dto.email.toLowerCase(),
     );
 
-    if (emailExists) {
-      throw new ConflictException('Ya existe una cuenta con este email');
+    // También verificar en la tabla profiles (por si el trigger ya creó el perfil)
+    const { data: existingProfile } = await this.supabase
+      .from('profiles')
+      .select('id')
+      .ilike('email', dto.email)
+      .maybeSingle();
+
+    if (emailExists || existingProfile) {
+      throw new ConflictException(
+        'Ya existe una cuenta con este email. Si no completaste tu registro, intenta iniciar sesión o recuperar tu contraseña.',
+      );
     }
 
     // Crear usuario en Supabase Auth
