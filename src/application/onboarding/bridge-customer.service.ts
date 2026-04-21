@@ -313,6 +313,56 @@ export class BridgeCustomerService {
     'selfie',
   ]);
 
+  /**
+   * Tax ID type por país (individual). ISO 3166-1 alpha-3 → Bridge identifying_information type.
+   * Referencia: https://apidocs.bridge.xyz/docs/individual-tax-identification-numbers-by-country
+   */
+  private static readonly COUNTRY_TAX_ID_INDIVIDUAL: Record<string, string> = {
+    ARG: 'cuil',
+    BOL: 'nit',
+    BRA: 'cpf',
+    CHL: 'rut',
+    COL: 'other',   // Cédula de Ciudadanía no está en el enum de Bridge
+    CRI: 'other',   // Cédula física no está en el enum de Bridge
+    DOM: 'other',   // Cédula de identidad dominicana no está en el enum
+    ECU: 'ruc',
+    SLV: 'nit',
+    GTM: 'nit',
+    GUY: 'tin',
+    HND: 'rtn',
+    MEX: 'curp',
+    PAN: 'ruc',
+    PRY: 'ruc',
+    PER: 'other',   // DNI peruano (individual) no está en el enum
+    SUR: 'other',
+    URY: 'rut',
+  };
+
+  /**
+   * Tax ID type por país (empresa). ISO 3166-1 alpha-3 → Bridge identifying_information type.
+   * Referencia: https://apidocs.bridge.xyz/docs/business-tax-identification-numbers-by-country
+   */
+  private static readonly COUNTRY_TAX_ID_BUSINESS: Record<string, string> = {
+    ARG: 'cuit',
+    BOL: 'nit',
+    BRA: 'cnpj',
+    CHL: 'rut',
+    COL: 'nit',
+    CRI: 'cedula_juridica',
+    DOM: 'rnc',
+    ECU: 'ruc',
+    SLV: 'nit',
+    GTM: 'nit',
+    GUY: 'tin',
+    HND: 'rtn',
+    MEX: 'rfc',
+    PAN: 'ruc',
+    PRY: 'ruc',
+    PER: 'ruc',
+    SUR: 'other',
+    URY: 'rut',
+  };
+
   /** Mapa de entity_type interno → business_type de Bridge. */
   private static readonly ENTITY_TYPE_TO_BRIDGE: Record<string, string> = {
     LLC: 'llc',
@@ -601,12 +651,12 @@ export class BridgeCustomerService {
     userId: string,
     tosContractId: string | null,
   ): Promise<Record<string, unknown>> {
+    const businessCountryAlpha3 = this.toAlpha3(business.country as string);
     const payload: Record<string, unknown> = {
       type: 'business',
       business_legal_name: business.legal_name, // H07: business_legal_name
       email: (business.email as string) ?? (profile.email as string),
-      // FIX D-06: tax_id is sent ONLY inside identifying_information[] below.
-      // Removed: tax_identification_number from root — Bridge v0 does not accept it here.
+      is_dao: false, // AUDIT: Bridge espera este campo; false por defecto
       registered_address: this.buildAddress({
         // H06: registered_address
         address1: business.address1 as string,
@@ -628,17 +678,6 @@ export class BridgeCustomerService {
       payload.business_type = this.mapEntityType(
         business.entity_type as string,
       );
-    }
-
-    // Incorporation country — H05: alpha-3
-    if (business.country_of_incorporation) {
-      payload.incorporation_country = this.toAlpha3(
-        business.country_of_incorporation as string,
-      );
-    }
-
-    if (business.incorporation_date) {
-      payload.incorporation_date = business.incorporation_date;
     }
 
     if (business.website) {
@@ -677,6 +716,12 @@ export class BridgeCustomerService {
 
     if (business.conducts_money_services !== undefined) {
       payload.conducts_money_services = business.conducts_money_services;
+
+      // Bridge requiere conducts_money_services_description cuando conducts_money_services=true
+      if (business.conducts_money_services && business.conducts_money_services_description) {
+        payload.conducts_money_services_description =
+          business.conducts_money_services_description;
+      }
     }
 
     if (business.uses_bridge_for_money_services !== undefined) {
@@ -735,10 +780,16 @@ export class BridgeCustomerService {
         business.source_of_funds_description;
     }
 
-    // P2: Physical address (operational location, different from registered)
-    if (business.physical_city && business.physical_country) {
+    // P2: Physical address — solo si street_line_1, city y country están presentes
+    // (Bridge requiere street_line_1 minLength:4; evitar enviar dirección incompleta)
+    if (
+      business.physical_address1 &&
+      (business.physical_address1 as string).trim().length >= 4 &&
+      business.physical_city &&
+      business.physical_country
+    ) {
       payload.physical_address = this.buildAddress({
-        address1: (business.physical_address1 as string) ?? '',
+        address1: business.physical_address1 as string,
         address2: business.physical_address2 as string | undefined,
         city: business.physical_city as string,
         state: business.physical_state as string | undefined,
@@ -752,18 +803,19 @@ export class BridgeCustomerService {
       payload.signed_agreement_id = tosContractId;
     }
 
-    // Identifying information (including Tax ID)
-    const identifyingInfo: Record<string, unknown>[] = [];
+    // Identifying information — Tax ID con tipo específico por país
     if (business.tax_id) {
-      identifyingInfo.push({
-        type: 'other',
-        description: 'Tax Identification Number',
-        issuing_country:
-          payload.incorporation_country ??
-          this.toAlpha3(business.country as string),
+      const taxIdType =
+        BridgeCustomerService.COUNTRY_TAX_ID_BUSINESS[businessCountryAlpha3] ?? 'other';
+      const taxIdEntry: Record<string, unknown> = {
+        type: taxIdType,
+        issuing_country: businessCountryAlpha3,
         number: business.tax_id,
-      });
-      payload.identifying_information = identifyingInfo;
+      };
+      if (taxIdType === 'other') {
+        taxIdEntry.description = 'Tax Identification Number';
+      }
+      payload.identifying_information = [taxIdEntry];
     }
 
     // Associated Persons (directors + UBOs) — H03
@@ -935,14 +987,19 @@ export class BridgeCustomerService {
       result.push(item);
     }
 
-    // P0-D: Tax ID se debe enviar como un elemento de identifying_information
+    // P0-D: Tax ID — tipo específico por país según spec Bridge
     if (entity.tax_id) {
-      result.push({
-        type: 'other',
-        description: 'Tax Identification Number',
+      const taxIdType =
+        BridgeCustomerService.COUNTRY_TAX_ID_INDIVIDUAL[countryAlpha3] ?? 'other';
+      const taxIdEntry: Record<string, unknown> = {
+        type: taxIdType,
         issuing_country: countryAlpha3,
         number: entity.tax_id,
-      });
+      };
+      if (taxIdType === 'other') {
+        taxIdEntry.description = 'Tax Identification Number';
+      }
+      result.push(taxIdEntry);
     }
 
     return result;
@@ -1084,10 +1141,10 @@ export class BridgeCustomerService {
           country: business.country as string,
         });
       }
-      // Last resort: minimal address to avoid Bridge rejection
+      // Last resort: dirección mínima para evitar rechazo de Bridge (street_line_1 mínimo 4 chars)
       return this.buildAddress({
-        address1: 'N/A',
-        city: 'N/A',
+        address1: 'N/A.',
+        city: 'N/A.',
         country: 'BOL',
       });
     };
