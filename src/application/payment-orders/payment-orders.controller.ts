@@ -7,6 +7,8 @@ import {
   Body,
   Query,
   ParseUUIDPipe,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -20,6 +22,8 @@ import type { AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
 import { PaymentOrdersService } from './payment-orders.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { PsavService } from '../psav/psav.service';
+import { PdfService } from '../../core/pdf/pdf.service';
+import { SuppliersService } from '../suppliers/suppliers.service';
 import { CreateInterbankOrderDto } from './dto/create-interbank-order.dto';
 import { CreateWalletRampOrderDto } from './dto/create-wallet-ramp-order.dto';
 import { ConfirmDepositDto } from './dto/confirm-deposit.dto';
@@ -41,6 +45,8 @@ export class PaymentOrdersController {
   constructor(
     private readonly paymentOrdersService: PaymentOrdersService,
     private readonly exchangeRatesService: ExchangeRatesService,
+    private readonly pdfService: PdfService,
+    private readonly suppliersService: SuppliersService,
   ) {}
 
   // ── Crear órdenes ──
@@ -107,6 +113,34 @@ export class PaymentOrdersController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.paymentOrdersService.getOrderById(user.id, id);
+  }
+
+  @Get(':id/pdf')
+  @ApiOperation({ summary: 'Generar comprobante operativo en PDF de la orden' })
+  async getOrderPdf(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: any,
+  ) {
+    const order = await this.paymentOrdersService.getOrderById(user.id, id);
+    let supplier = null;
+    if (order.supplier_id) {
+      try {
+        supplier = await this.suppliersService.findOne(order.supplier_id, user.id);
+      } catch (e) {
+        // Ignorar si no se encuentra
+      }
+    }
+
+    const buffer = await this.pdfService.generatePaymentPdf(order, supplier);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="payment-order-${id.slice(0, 8)}.pdf"`,
+      'Content-Length': buffer.length,
+    });
+
+    return new StreamableFile(buffer);
   }
 
   // ── Acciones del usuario ──

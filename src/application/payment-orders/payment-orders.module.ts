@@ -9,9 +9,10 @@ import { PsavModule } from '../psav/psav.module';
 import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
 import { BridgeModule } from '../bridge/bridge.module';
 import { ClientBankAccountsModule } from '../client-bank-accounts/client-bank-accounts.module';
+import { SuppliersModule } from '../suppliers/suppliers.module';
 
 @Module({
-  imports: [FeesModule, PsavModule, ExchangeRatesModule, BridgeModule, ClientBankAccountsModule],
+  imports: [FeesModule, PsavModule, ExchangeRatesModule, BridgeModule, ClientBankAccountsModule, SuppliersModule],
   controllers: [PaymentOrdersController, AdminPaymentOrdersController],
   providers: [PaymentOrdersService],
   exports: [PaymentOrdersService],

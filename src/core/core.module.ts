@@ -5,11 +5,13 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { CoreConfigModule } from './config/config.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { SupabaseAuthGuard } from './guards/supabase-auth.guard';
+import { PdfModule } from './pdf/pdf.module';
 
 @Module({
   imports: [
     CoreConfigModule, // Variables de entorno + validación Joi
     SupabaseModule, // Cliente Supabase (service_role) — global
+    PdfModule, // Generación de documentos PDF — global
     ScheduleModule.forRoot(), // CRON jobs con @nestjs/schedule
     ThrottlerModule.forRoot([
       {
