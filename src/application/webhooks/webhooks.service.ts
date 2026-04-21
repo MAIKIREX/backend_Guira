@@ -223,7 +223,7 @@ export class WebhooksService {
         break;
       // Alias legacy — Bridge enviaba este tipo en versiones anteriores
       case 'kyc_link.approved':
-        await this.handleKycApproved(payload);
+        await this.handleKycLinkStatusTransitioned(payload);
         break;
 
       // ── Transfers ─────────────────────────────────────────────────────────────
