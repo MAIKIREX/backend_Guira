@@ -664,16 +664,16 @@ export class ComplianceActionsService {
       .update({ priority: 'normal' })
       .eq('id', reviewId);
 
-    // 3. Actualizar estado del subject a 'needs_review'
+    // 3. Actualizar estado del subject a 'needs_review' y guardar la observación
     if (review.subject_type === 'kyc_applications') {
       await this.supabase
         .from('kyc_applications')
-        .update({ status: 'needs_review' })
+        .update({ status: 'needs_review', observations: reason })
         .eq('id', review.subject_id);
     } else if (review.subject_type === 'kyb_applications') {
       await this.supabase
         .from('kyb_applications')
-        .update({ status: 'needs_review' })
+        .update({ status: 'needs_review', observations: reason })
         .eq('id', review.subject_id);
     }
 
