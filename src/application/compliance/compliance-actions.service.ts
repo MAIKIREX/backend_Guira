@@ -173,6 +173,7 @@ export class ComplianceActionsService {
     // para que el frontend no necesite queries directas a Supabase.
     let userId: string | null = null;
     let applicationData: Record<string, any> = {};
+    let previousData: Record<string, any> | null = null;
     let onboardingType: 'personal' | 'company' = 'personal';
 
     if (review.subject_type === 'kyc_applications') {
@@ -184,6 +185,7 @@ export class ComplianceActionsService {
       if (kyc) {
         userId = kyc.user_id;
         applicationData = this.mapKycToFormData(kyc);
+        previousData = kyc.previous_data ?? null;
         onboardingType = 'personal';
       }
     } else if (review.subject_type === 'kyb_applications') {
@@ -195,6 +197,7 @@ export class ComplianceActionsService {
       if (kyb) {
         userId = kyb.requester_user_id;
         applicationData = kyb.businesses ?? kyb;
+        previousData = kyb.previous_data ?? null;
         onboardingType = 'company';
       }
     }
@@ -246,6 +249,7 @@ export class ComplianceActionsService {
       user_id: userId,
       onboarding_type: onboardingType,
       application_data: applicationData,
+      previous_data: previousData,
       profile: profileData,
       documents,
     };
@@ -668,22 +672,45 @@ export class ComplianceActionsService {
       .update({ priority: 'normal' })
       .eq('id', reviewId);
 
-    // 3. Actualizar estado del subject a 'needs_review', guardar observación global y por campo
-    const updatePayload = {
-      status: 'needs_review',
-      observations: reason,
-      field_observations: fieldObservations ?? {},
-    };
-
+    // 3. Snapshot datos actuales en previous_data para Diff View
+    //    y actualizar estado a 'needs_review' con observaciones
     if (review.subject_type === 'kyc_applications') {
+      // Leer datos actuales para el snapshot
+      const { data: currentApp } = await this.supabase
+        .from('kyc_applications')
+        .select('*, people (*)')
+        .eq('id', review.subject_id)
+        .maybeSingle();
+
+      const snapshotData = currentApp ? this.mapKycToFormData(currentApp) : {};
+
       await this.supabase
         .from('kyc_applications')
-        .update(updatePayload)
+        .update({
+          status: 'needs_review',
+          observations: reason,
+          field_observations: fieldObservations ?? {},
+          previous_data: snapshotData,
+        })
         .eq('id', review.subject_id);
     } else if (review.subject_type === 'kyb_applications') {
+      // Leer datos actuales para el snapshot
+      const { data: currentApp } = await this.supabase
+        .from('kyb_applications')
+        .select('*, businesses (*, business_directors(*), business_ubos(*))')
+        .eq('id', review.subject_id)
+        .maybeSingle();
+
+      const snapshotData = currentApp?.businesses ?? currentApp ?? {};
+
       await this.supabase
         .from('kyb_applications')
-        .update(updatePayload)
+        .update({
+          status: 'needs_review',
+          observations: reason,
+          field_observations: fieldObservations ?? {},
+          previous_data: snapshotData,
+        })
         .eq('id', review.subject_id);
     }
 
