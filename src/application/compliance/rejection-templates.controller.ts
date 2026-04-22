@@ -16,8 +16,8 @@ import {
   CreateRejectionTemplateDto,
   UpdateRejectionTemplateDto,
 } from './dto/rejection-templates.dto';
-import { RolesGuard } from '../../core/auth/roles.guard';
-import { Roles } from '../../core/auth/roles.decorator';
+import { RolesGuard } from '../../core/guards/roles.guard';
+import { Roles } from '../../core/decorators/roles.decorator';
 
 /**
  * Endpoints for staff to list quick-comment templates.
