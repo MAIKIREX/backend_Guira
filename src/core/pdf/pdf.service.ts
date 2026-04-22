@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-const PdfPrinter = require('pdfmake');
+const pdfmake = require('pdfmake');
 import { TDocumentDefinitions } from 'pdfmake/interfaces';
 
 @Injectable()
@@ -16,12 +16,12 @@ export class PdfService {
         bolditalics: 'Helvetica-BoldOblique',
       },
     };
-    this.printer = new PdfPrinter(fonts);
+    this.printer = pdfmake;
+    this.printer.setFonts(fonts);
   }
 
-  generatePaymentPdf(order: any, supplier: any | null): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      try {
+  async generatePaymentPdf(order: any, supplier: any | null): Promise<Buffer> {
+    try {
         const metadata = order.metadata ?? {};
 
         const orderType = order.flow_type ?? order.order_type ?? 'N/D';
@@ -122,25 +122,10 @@ export class PdfService {
           },
         };
 
-        const pdfDoc = this.printer.createPdfKitDocument(docDefinition);
-        const chunks: any[] = [];
-
-        pdfDoc.on('data', (chunk) => {
-          chunks.push(chunk);
-        });
-
-        pdfDoc.on('end', () => {
-          resolve(Buffer.concat(chunks));
-        });
-
-        pdfDoc.on('error', (err) => {
-          reject(err);
-        });
-
-        pdfDoc.end();
+        const pdf = this.printer.createPdf(docDefinition);
+        return await pdf.getBuffer();
       } catch (error) {
-        reject(error);
+        throw error;
       }
-    });
   }
 }
