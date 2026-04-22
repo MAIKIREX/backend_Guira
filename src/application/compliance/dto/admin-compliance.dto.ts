@@ -38,6 +38,17 @@ export class RequestChangesDto {
   })
   @IsOptional()
   required_actions?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Observaciones por campo. Clave = nombre del campo del formulario, valor = mensaje de error.',
+    example: {
+      id_front: 'Imagen borrosa, favor resubir en mejor resolución',
+      address1: 'No coincide con el comprobante de domicilio presentado',
+    },
+  })
+  @IsOptional()
+  field_observations?: Record<string, string>;
 }
 
 export class AddCommentDto {

@@ -232,6 +232,8 @@ export class OnboardingService {
         status: 'submitted',
         submitted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        observations: null,
+        field_observations: {},
       })
       .eq('id', app.id)
       .select()
@@ -470,6 +472,8 @@ export class OnboardingService {
         ubos_complete: true,
         documents_complete: true,
         updated_at: new Date().toISOString(),
+        observations: null,
+        field_observations: {},
       })
       .eq('id', app.id)
       .select()

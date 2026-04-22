@@ -638,6 +638,7 @@ export class ComplianceActionsService {
     actorId: string,
     reason: string,
     requiredActions?: string[],
+    fieldObservations?: Record<string, string>,
   ) {
     const { data: review } = await this.supabase
       .from('compliance_reviews')
@@ -655,7 +656,10 @@ export class ComplianceActionsService {
       actor_id: actorId,
       decision: 'NEEDS_CHANGES',
       reason,
-      metadata: requiredActions ? { required_actions: requiredActions } : null,
+      metadata: {
+        ...(requiredActions ? { required_actions: requiredActions } : {}),
+        ...(fieldObservations ? { field_observations: fieldObservations } : {}),
+      },
     });
 
     // 2. El review queda ABIERTO (no cerrado) — el cliente debe corregir
@@ -664,16 +668,22 @@ export class ComplianceActionsService {
       .update({ priority: 'normal' })
       .eq('id', reviewId);
 
-    // 3. Actualizar estado del subject a 'needs_review' y guardar la observación
+    // 3. Actualizar estado del subject a 'needs_review', guardar observación global y por campo
+    const updatePayload = {
+      status: 'needs_review',
+      observations: reason,
+      field_observations: fieldObservations ?? {},
+    };
+
     if (review.subject_type === 'kyc_applications') {
       await this.supabase
         .from('kyc_applications')
-        .update({ status: 'needs_review', observations: reason })
+        .update(updatePayload)
         .eq('id', review.subject_id);
     } else if (review.subject_type === 'kyb_applications') {
       await this.supabase
         .from('kyb_applications')
-        .update({ status: 'needs_review', observations: reason })
+        .update(updatePayload)
         .eq('id', review.subject_id);
     }
 

@@ -219,6 +219,7 @@ export class AdminComplianceController {
       actor.id,
       dto.reason,
       dto.required_actions,
+      dto.field_observations,
     );
   }
 }
