@@ -296,9 +296,23 @@ export class AdminPaymentOrdersController {
 
   @Post('psav-accounts')
   @Roles('admin', 'super_admin')
-  @ApiOperation({ summary: 'Crear cuenta PSAV' })
-  createPsavAccount(@Body() dto: Record<string, unknown>) {
+  @ApiOperation({ summary: 'Crear o actualizar cuenta PSAV (upsert)' })
+  upsertPsavAccount(@Body() dto: Record<string, unknown>) {
+    if (dto.id) {
+      const { id, ...rest } = dto;
+      return this.psavService.updateAccount(id as string, rest as any);
+    }
     return this.psavService.createAccount(dto as any);
+  }
+
+  @Patch('psav-accounts/:id')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Actualizar cuenta PSAV' })
+  updatePsavAccount(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.psavService.updateAccount(id, dto as any);
   }
 
   // ── Exchange Rates Admin ──

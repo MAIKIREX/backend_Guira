@@ -128,6 +128,8 @@ export class PsavService {
     id: string,
     dto: Partial<{
       name: string;
+      type: string;
+      currency: string;
       bank_name: string;
       account_number: string;
       routing_number: string;
