@@ -1506,6 +1506,7 @@ export class PaymentOrdersService {
         destination_currency: extAccount.currency ?? 'USD',
         external_account_id: dto.external_account_id,
         notes: dto.notes,
+        business_purpose: dto.business_purpose,
         status: 'created',
       })
       .select()
