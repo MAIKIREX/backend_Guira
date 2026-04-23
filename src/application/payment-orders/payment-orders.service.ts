@@ -2336,16 +2336,16 @@ export class PaymentOrdersService {
 
     // Ledger entries para on-ramp a wallet Bridge (PSAV)
     if (order.flow_type === 'fiat_bo_to_bridge_wallet') {
-      const netAmount = parseFloat(order.net_amount ?? order.amount);
+      const destinationAmount = parseFloat(order.amount_destination ?? order.net_amount ?? order.amount);
       await this.supabase.from('ledger_entries').insert({
         wallet_id: order.wallet_id,
         type: 'credit',
-        amount: netAmount,
+        amount: destinationAmount,
         currency: order.destination_currency ?? order.currency,
         status: 'settled',
         reference_type: 'payment_order',
         reference_id: orderId,
-        description: `On-ramp completado — ${netAmount} (PSAV)`,
+        description: `On-ramp completado — ${destinationAmount} (PSAV)`,
       });
     }
 
