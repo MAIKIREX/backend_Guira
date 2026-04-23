@@ -1180,12 +1180,15 @@ export class PaymentOrdersService {
       const { data: btRow } = await this.supabase.from('bridge_transfers').insert({
         user_id: userId,
         bridge_transfer_id: transferId,
+        source_payment_rail: 'bridge_wallet',
         source_currency: sourceCurrency.toLowerCase(),
+        destination_payment_rail: psavRail,
         destination_currency: psavDestCurrency.toLowerCase(),
         amount: dto.amount,
         developer_fee_amount: fee_amount,
+        net_amount,
         status: 'pending',
-        bridge_state: 'awaiting_funds',
+        bridge_state: (bridgeResult?.state as string) ?? 'awaiting_funds',
         bridge_raw_response: bridgeResult,
       }).select('id').single();
 
