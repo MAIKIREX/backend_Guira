@@ -801,8 +801,11 @@ export class PaymentOrdersService {
     }
 
     // 1. Llamada a Bridge Transfer API
+    // Pre-generar UUID para la orden — se reutiliza como idempotency key
+    // para que retries contra Bridge no dupliquen el transfer.
+    const orderId = crypto.randomUUID();
     let bridgeTransfer: Record<string, unknown>;
-    const idempotencyKey = `crypto-ramp-${userId}-${wallet.id}-${dto.amount}-${Date.now()}`;
+    const idempotencyKey = `po_c2bw_${orderId}`;
     try {
       bridgeTransfer = await this.bridgeApi.post<Record<string, unknown>>(
         '/v0/transfers',
@@ -835,7 +838,7 @@ export class PaymentOrdersService {
     // 2. Extraer instrucciones de depósito
     const bridgeInstr = bridgeTransfer.source_deposit_instructions as Record<string, string> | undefined;
     const depositInstructions = {
-      type: 'bridge_transfer',
+      type: 'liquidation_address',
       address: bridgeInstr?.to_address ?? bridgeInstr?.address ?? '',
       chain: bridgeInstr?.payment_rail ?? bridgeInstr?.chain ?? dto.source_network,
       label: `Transferencia Bridge (${dto.source_network})`,
@@ -860,6 +863,7 @@ export class PaymentOrdersService {
     const { data: order, error } = await this.supabase
       .from('payment_orders')
       .insert({
+        id: orderId,
         user_id: userId,
         wallet_id: wallet.id,
         flow_type: 'crypto_to_bridge_wallet',

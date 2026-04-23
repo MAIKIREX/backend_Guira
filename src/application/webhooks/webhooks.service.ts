@@ -909,7 +909,7 @@ export class WebhooksService {
     }
 
     // 2. UPDATE payout_requests
-    if (transfer.payout_request_id) {
+    if (transfer?.payout_request_id) {
       await this.supabase
         .from('payout_requests')
         .update({
