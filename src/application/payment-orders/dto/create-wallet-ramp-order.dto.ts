@@ -131,7 +131,7 @@ export class CreateWalletRampOrderDto {
   source_network?: string;
 
   @ApiPropertyOptional()
-  @ValidateIf((o) => ['crypto_to_bridge_wallet', 'wallet_to_fiat'].includes(o.flow_type))
+  @ValidateIf((o) => o.flow_type === 'wallet_to_fiat')
   @IsString()
   @IsNotEmpty()
   source_address?: string;

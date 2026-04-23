@@ -749,8 +749,8 @@ export class PaymentOrdersService {
   }
 
   /**
-   * 2.2 Crypto → Wallet Bridge (Liquidation Address)
-   * Crypto externo → Bridge liquidation address → wallet Bridge
+   * 2.2 Crypto → Wallet Bridge (Depósito directo vía bridge_wallet_id)
+   * Crypto externo → Bridge (allow_any_from_address) → wallet Bridge
    */
   private async createCryptoToBridgeWallet(
     userId: string,
@@ -814,17 +814,16 @@ export class PaymentOrdersService {
           source: {
             payment_rail: dto.source_network,
             currency: resolvedSourceCurrency,
-            from_address: dto.source_address,
           },
           destination: {
             payment_rail: wallet.network,
             currency: resolvedDestCurrency,
-            to_address: wallet.address,
+            bridge_wallet_id: wallet.provider_wallet_id,
           },
           amount: dto.amount.toString(),
           developer_fee: fee_amount.toString(),
-          return_instructions: {
-            address: dto.source_address,
+          features: {
+            allow_any_from_address: true,
           },
         },
         idempotencyKey,
@@ -875,7 +874,7 @@ export class PaymentOrdersService {
         net_amount,
         source_type: 'crypto_external',
         source_currency: (dto.source_currency ?? 'usdc').toUpperCase(),
-        source_address: dto.source_address,
+        source_address: dto.source_address ?? null,
         source_network: dto.source_network,
         destination_type: 'bridge_wallet',
         destination_currency: resolvedDestCurrency.toUpperCase(),
@@ -899,7 +898,7 @@ export class PaymentOrdersService {
       reference_type: 'payment_order',
       reference_id: order.id,
       bridge_transfer_id: bridgeTransferRow?.id ?? null,
-      description: `On-ramp crypto: ${net_amount} ${resolvedDestCurrency.toUpperCase()} desde ${dto.source_address} (${dto.source_network})`,
+      description: `On-ramp crypto: ${net_amount} ${resolvedDestCurrency.toUpperCase()} desde ${dto.source_address ?? 'cualquier dirección'} (${dto.source_network})`,
     });
 
     this.logger.log(
