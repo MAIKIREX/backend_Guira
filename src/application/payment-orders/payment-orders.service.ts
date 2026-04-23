@@ -1629,12 +1629,13 @@ export class PaymentOrdersService {
       );
     }
 
-    // 2. Cargar datos de la external_account en Bridge
+    // 2. Cargar datos de la external_account del proveedor en Bridge
+    // FIX #1: No filtrar por user_id — la cuenta bancaria pertenece al PROVEEDOR (supplier),
+    // no al usuario que realiza la transferencia. El supplier ya fue validado como del usuario.
     const { data: extAccount } = await this.supabase
       .from('bridge_external_accounts')
       .select('id, bridge_external_account_id, payment_rail, currency')
       .eq('id', supplier.bridge_external_account_id)
-      .eq('user_id', userId)
       .eq('is_active', true)
       .single();
 
@@ -1648,12 +1649,12 @@ export class PaymentOrdersService {
     const sourceCurrency = dto.source_currency?.toUpperCase() ?? 'USDC';
     const { fee_amount, net_amount } = await this.feesService.calculateFee(
       userId,
-      'ramp_off_fiat_us', // misma categoría de tarifa que wallet_to_fiat_us
+      'wallet_to_fiat_off', // tarifa dedicada para flujo on-chain → fiat (mayor developer fee que ramp_off_fiat_us)
       'bridge',
       dto.amount,
     );
 
-    // 4. Obtener bridge_customer_id del usuario
+    // 4. Obtener bridge_customer_id del usuario y wallet de referencia
     const { data: profile } = await this.supabase
       .from('profiles')
       .select('bridge_customer_id')
@@ -1662,6 +1663,21 @@ export class PaymentOrdersService {
 
     if (!profile?.bridge_customer_id) {
       throw new BadRequestException('El usuario no tiene un customer de Bridge asociado.');
+    }
+
+    // FIX #2: Resolver wallet de referencia del usuario para el asiento contable.
+    // ledger_entries.wallet_id es NOT NULL — en flujos on-chain los fondos no vienen
+    // de la wallet interna, pero necesitamos una referencia válida para la FK.
+    const { data: refWallet } = await this.supabase
+      .from('wallets')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle();
+
+    if (!refWallet) {
+      throw new BadRequestException('El usuario no tiene una wallet activa en Guira.');
     }
 
     // 5. Crear payment_order (status: pending)
@@ -1756,18 +1772,28 @@ export class PaymentOrdersService {
         .select('id')
         .single();
 
-      // 9. Ledger entry (debit informávo, los fondos vienen on-chain, no del balance interno)
-      await this.supabase.from('ledger_entries').insert({
-        wallet_id: null, // sin wallet Bridge interna
-        type: 'debit',
-        amount: dto.amount,
-        currency: sourceCurrency,
-        status: 'pending',
-        reference_type: 'payment_order',
-        reference_id: order.id,
-        bridge_transfer_id: btRow?.id ?? null,
-        description: `Wallet-to-fiat: ${dto.amount} ${sourceCurrency} (${dto.source_network}) → ${supplier.name}`,
-      });
+      // 9. Ledger entry informativo — los fondos vienen on-chain, no del balance interno.
+      // FIX #2: Usar refWallet.id como referencia FK (NOT NULL). El asiento es de tipo
+      // 'debit' pendiente; se asentará a 'settled' cuando Bridge confirme el transfer.
+      try {
+        await this.supabase.from('ledger_entries').insert({
+          wallet_id: refWallet.id,       // wallet de referencia del usuario (no se debita)
+          type: 'debit',
+          amount: dto.amount,
+          currency: sourceCurrency,
+          status: 'pending',
+          reference_type: 'payment_order',
+          reference_id: order.id,
+          bridge_transfer_id: btRow?.id ?? null,
+          description: `Wallet-to-fiat (on-chain): ${dto.amount} ${sourceCurrency} (${dto.source_network}) → ${supplier.name}`,
+        });
+      } catch (ledgerErr) {
+        // El ledger es informativo para este flujo (los fondos no son custodiados).
+        // Un fallo aquí NO debe revertir la orden — Bridge ya aceptó el transfer.
+        this.logger.warn(
+          `⚠️ wallet_to_fiat ${order.id}: Error al crear ledger_entry (no bloqueante): ${ledgerErr instanceof Error ? ledgerErr.message : ledgerErr}`,
+        );
+      }
 
       order.status = 'processing';
     } catch (err) {

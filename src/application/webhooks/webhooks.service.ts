@@ -878,6 +878,8 @@ export class WebhooksService {
     const receipt = data?.receipt as Record<string, unknown> | undefined;
 
     // 1. UPDATE bridge_transfers
+    // FIX #4: Usar maybeSingle() — si el INSERT de bridge_transfers falló previamente
+    // (ej: por el bug del ledger), esta línea no debe romper el webhook.
     const { data: transfer } = await this.supabase
       .from('bridge_transfers')
       .update({
@@ -895,10 +897,16 @@ export class WebhooksService {
       })
       .eq('bridge_transfer_id', bridgeTransferId)
       .select('id, user_id, payout_request_id, amount')
-      .single();
+      .maybeSingle();
 
-    if (!transfer)
-      throw new Error(`Bridge transfer no encontrada: ${bridgeTransferId}`);
+    // FIX #4: Continuar aunque no se encuentre bridge_transfers — loguear warning
+    // en lugar de lanzar excepción que marca el webhook como 'failed'.
+    if (!transfer) {
+      this.logger.warn(
+        `⚠️ handleTransferComplete: bridge_transfer no encontrada para ID: ${bridgeTransferId}. ` +
+        `Continuando con actualización de payment_order si existe.`,
+      );
+    }
 
     // 2. UPDATE payout_requests
     if (transfer.payout_request_id) {
@@ -913,11 +921,14 @@ export class WebhooksService {
     }
 
     // 2b. UPDATE payment_orders (si el transfer está vinculado a una order)
+    // FIX #3: Se agrega 'pending' a los estados válidos.
+    // Si el servidor caía entre la respuesta de Bridge y el UPDATE de status='processing',
+    // la orden queda en 'pending' indefinidamente sin este fix.
     const { data: paymentOrder } = await this.supabase
       .from('payment_orders')
       .select('id, user_id, wallet_id, flow_type, amount, fee_amount, currency, source_currency')
       .eq('bridge_transfer_id', bridgeTransferId)
-      .in('status', ['waiting_deposit', 'processing', 'deposit_received']) // FIXED: Agregados estados pre-processing para flujos automatizados
+      .in('status', ['pending', 'waiting_deposit', 'processing', 'deposit_received'])
       .maybeSingle();
 
     if (paymentOrder) {
@@ -1069,43 +1080,50 @@ export class WebhooksService {
       }
     }
 
-    // [GAP 1 FIX] 3. UPDATE ledger_entry existente: pending → settled
-    // NO crear uno nuevo — el trigger de balance solo se activa al cambiar a settled
-    await this.supabase
-      .from('ledger_entries')
-      .update({ status: 'settled' })
-      .eq('bridge_transfer_id', transfer.id)
-      .eq('status', 'pending');
+    // FIX #4: Solo ejecutar operaciones dependientes de transfer si el registro existe
+    if (transfer) {
+      // 3. UPDATE ledger_entry existente: pending → settled
+      // NO crear uno nuevo — el trigger de balance solo se activa al cambiar a settled
+      await this.supabase
+        .from('ledger_entries')
+        .update({ status: 'settled' })
+        .eq('bridge_transfer_id', transfer.id)
+        .eq('status', 'pending');
 
-    // 4. INSERT certificate
-    const certNumber = `CERT-${Date.now()}-${transfer.id.slice(0, 8)}`;
-    await this.supabase.from('certificates').insert({
-      user_id: transfer.user_id,
-      subject_type: 'bridge_transfer',
-      subject_id: transfer.id,
-      certificate_number: certNumber,
-      amount: transfer.amount,
-      currency: (data?.destination_currency as string) ?? 'usd',
-      issued_at: new Date().toISOString(),
-      metadata: receipt ?? {},
-    });
+      // 4. INSERT certificate
+      const certNumber = `CERT-${Date.now()}-${transfer.id.slice(0, 8)}`;
+      await this.supabase.from('certificates').insert({
+        user_id: transfer.user_id,
+        subject_type: 'bridge_transfer',
+        subject_id: transfer.id,
+        certificate_number: certNumber,
+        amount: transfer.amount,
+        currency: (data?.destination_currency as string) ?? 'usd',
+        issued_at: new Date().toISOString(),
+        metadata: receipt ?? {},
+      });
 
-    // 5. Notificación
-    await this.supabase.from('notifications').insert({
-      user_id: transfer.user_id,
-      type: 'financial',
-      title: 'Pago Completado',
-      message: `Tu pago de $${transfer.amount} ha sido completado exitosamente`,
-      reference_type: 'bridge_transfer',
-      reference_id: transfer.id,
-    });
+      // 5. Notificación
+      await this.supabase.from('notifications').insert({
+        user_id: transfer.user_id,
+        type: 'financial',
+        title: 'Pago Completado',
+        message: `Tu pago de $${transfer.amount} ha sido completado exitosamente`,
+        reference_type: 'bridge_transfer',
+        reference_id: transfer.id,
+      });
 
-    // 6. Activity log
-    await this.supabase.from('activity_logs').insert({
-      user_id: transfer.user_id,
-      action: 'TRANSFER_COMPLETED',
-      description: `Transfer ${bridgeTransferId} completado — $${transfer.amount}`,
-    });
+      // 6. Activity log
+      await this.supabase.from('activity_logs').insert({
+        user_id: transfer.user_id,
+        action: 'TRANSFER_COMPLETED',
+        description: `Transfer ${bridgeTransferId} completado — $${transfer.amount}`,
+      });
+    } else {
+      this.logger.warn(
+        `⚠️ handleTransferComplete: Skipping certificate/notification para ${bridgeTransferId} — bridge_transfer no encontrada en DB.`,
+      );
+    }
   }
 
   // ═══════════════════════════════════════════════

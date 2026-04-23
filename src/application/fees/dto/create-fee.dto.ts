@@ -117,12 +117,14 @@ export class CreateFeeOverrideDto {
       'interbank_bo_out', 'interbank_w2w', 'interbank_bo_wallet', 'interbank_bo_in',
       'ramp_on_fiat_us', 'ramp_on_bo', 'ramp_on_crypto',
       'ramp_off_bo', 'ramp_off_crypto', 'ramp_off_fiat_us',
+      'wallet_to_fiat_off',
     ],
   })
   @IsIn([
     'interbank_bo_out', 'interbank_w2w', 'interbank_bo_wallet', 'interbank_bo_in',
     'ramp_on_fiat_us', 'ramp_on_bo', 'ramp_on_crypto',
     'ramp_off_bo', 'ramp_off_crypto', 'ramp_off_fiat_us',
+    'wallet_to_fiat_off',
   ])
   operation_type: string;
 
