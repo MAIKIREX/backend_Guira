@@ -351,28 +351,29 @@ export class FeesService {
       return { fee_amount: 0, net_amount: amount };
     }
 
-    // 3. Calcular
-    let fee = 0;
+    // 3. Calcular en centavos enteros para evitar errores de punto flotante
+    const amountCents = Math.round(amount * 100);
     const feePercent = parseFloat(feeConfig.fee_percent ?? '0');
-    const feeFixed = parseFloat(feeConfig.fee_fixed ?? '0');
+    const feeFixedCents = Math.round(parseFloat(feeConfig.fee_fixed ?? '0') * 100);
 
+    let feeCents = 0;
     if (feeConfig.fee_type === 'percent') {
-      fee = amount * (feePercent / 100);
+      feeCents = Math.round(amountCents * feePercent / 100);
     } else if (feeConfig.fee_type === 'fixed') {
-      fee = feeFixed;
+      feeCents = feeFixedCents;
     } else if (feeConfig.fee_type === 'mixed') {
-      fee = feeFixed + amount * (feePercent / 100);
+      feeCents = feeFixedCents + Math.round(amountCents * feePercent / 100);
     }
 
-    // 4. Aplicar min/max
-    const minFee = parseFloat(feeConfig.min_fee ?? '0');
-    const maxFee = parseFloat(feeConfig.max_fee ?? '0');
-    if (minFee > 0) fee = Math.max(fee, minFee);
-    if (maxFee > 0) fee = Math.min(fee, maxFee);
+    // 4. Aplicar min/max en centavos
+    const minFeeCents = Math.round(parseFloat(feeConfig.min_fee ?? '0') * 100);
+    const maxFeeCents = Math.round(parseFloat(feeConfig.max_fee ?? '0') * 100);
+    if (minFeeCents > 0) feeCents = Math.max(feeCents, minFeeCents);
+    if (maxFeeCents > 0) feeCents = Math.min(feeCents, maxFeeCents);
 
     return {
-      fee_amount: parseFloat(fee.toFixed(2)),
-      net_amount: parseFloat((amount - fee).toFixed(2)),
+      fee_amount: feeCents / 100,
+      net_amount: (amountCents - feeCents) / 100,
     };
   }
 }

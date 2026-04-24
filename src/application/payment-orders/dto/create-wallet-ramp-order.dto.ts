@@ -15,6 +15,7 @@ import {
   ALLOWED_NETWORKS,
   ALLOWED_CRYPTO_CURRENCIES,
 } from '../../../common/constants/guira-crypto-config.constants';
+import { IsBlockchainAddressForNetwork } from '../../bridge/validators/is-blockchain-address.validator';
 
 /** Redes on-chain válidas para el flujo wallet_to_fiat */
 export const WALLET_TO_FIAT_ALLOWED_NETWORKS = [
@@ -60,8 +61,8 @@ export class CreateWalletRampOrderDto {
   // ── destino crypto (bridge_wallet_to_crypto) ──
   @ApiPropertyOptional()
   @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_crypto')
-  @IsString()
   @IsNotEmpty()
+  @IsBlockchainAddressForNetwork('destination_network')
   destination_address?: string;
 
   @ApiPropertyOptional()

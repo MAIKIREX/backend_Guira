@@ -33,6 +33,13 @@ import {
   CompleteOrderDto,
   FailOrderDto,
 } from './dto/admin-order-action.dto';
+import {
+  BRIDGE_RAMP_ON_ROUTES,
+  BRIDGE_RAMP_OFF_ROUTES,
+  FIAT_BO_OFF_RAMP_ROUTES,
+  FIAT_BO_ALLOWED_DESTINATION_CURRENCIES,
+  FIAT_BO_EXCLUDED_SOURCE_CURRENCIES,
+} from '../../common/constants/bridge-route-catalog.constants';
 
 // ═══════════════════════════════════════════════
 //  USER CONTROLLER — /payment-orders
@@ -90,6 +97,18 @@ export class PaymentOrdersController {
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
+  }
+
+  @Get('route-catalog')
+  @ApiOperation({ summary: 'Catálogo de rutas Bridge soportadas (on-ramp y off-ramp)' })
+  getRouteCatalog() {
+    return {
+      ramp_on: BRIDGE_RAMP_ON_ROUTES,
+      ramp_off: BRIDGE_RAMP_OFF_ROUTES,
+      fiat_bo_off_ramp: FIAT_BO_OFF_RAMP_ROUTES,
+      fiat_bo_allowed_destinations: FIAT_BO_ALLOWED_DESTINATION_CURRENCIES,
+      fiat_bo_excluded_sources: FIAT_BO_EXCLUDED_SOURCE_CURRENCIES,
+    };
   }
 
   @Get('exchange-rates')

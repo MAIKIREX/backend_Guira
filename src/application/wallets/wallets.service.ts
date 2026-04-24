@@ -439,7 +439,7 @@ export class WalletsService {
     bridgeCustomerId: string,
     network: string,
   ): Promise<{ id: string; address: string; chain: string }> {
-    const idempotencyKey = `wallet-${bridgeCustomerId}-${network}-${Date.now()}`;
+    const idempotencyKey = `wallet-${bridgeCustomerId}-${network}`;
 
     const response = await this.bridgeApi.post<{
       id: string;
