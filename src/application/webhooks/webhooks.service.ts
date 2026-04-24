@@ -926,7 +926,7 @@ export class WebhooksService {
     // la orden queda en 'pending' indefinidamente sin este fix.
     const { data: paymentOrder } = await this.supabase
       .from('payment_orders')
-      .select('id, user_id, wallet_id, flow_type, amount, fee_amount, currency, source_currency')
+      .select('id, user_id, wallet_id, flow_type, amount, fee_amount, currency, source_currency, destination_currency')
       .eq('bridge_transfer_id', bridgeTransferId)
       .in('status', ['pending', 'waiting_deposit', 'processing', 'deposit_received'])
       .maybeSingle();
@@ -1063,15 +1063,16 @@ export class WebhooksService {
           parseFloat(paymentOrder.fee_amount ?? '0');
         const creditAmount = receiptFinalAmount ?? fallbackNet;
 
+        const creditCurrency = (paymentOrder.destination_currency ?? paymentOrder.currency).toUpperCase();
         await this.supabase.from('ledger_entries').insert({
           wallet_id: paymentOrder.wallet_id,
           type: 'credit',
           amount: creditAmount,
-          currency: paymentOrder.currency,
+          currency: creditCurrency,
           status: 'settled',
           reference_type: 'payment_order',
           reference_id: paymentOrder.id,
-          description: `On-ramp completado (webhook): ${creditAmount} ${paymentOrder.currency}`,
+          description: `On-ramp completado (webhook): ${creditAmount} ${creditCurrency}`,
         });
         this.logger.warn(
           `⚠️ Safety net: ledger_entry credit settled creado para order ${paymentOrder.id} — monto real: ${creditAmount}`,
