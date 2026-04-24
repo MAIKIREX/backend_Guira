@@ -307,6 +307,43 @@ export class FeesService {
   // ───────────────────────────────────────────────
 
   /**
+   * Retorna el fee_percent configurado para una operación (override del cliente → global).
+   * Siempre devuelve string decimal (ej: "1.0", "0.5").
+   */
+  async getFeePercent(
+    userId: string,
+    operationType: string,
+    paymentRail: string,
+  ): Promise<string> {
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data: override } = await this.supabase
+      .from('customer_fee_overrides')
+      .select('fee_percent')
+      .eq('user_id', userId)
+      .eq('operation_type', operationType)
+      .eq('payment_rail', paymentRail)
+      .eq('is_active', true)
+      .or(`valid_from.is.null,valid_from.lte.${today}`)
+      .or(`valid_until.is.null,valid_until.gte.${today}`)
+      .maybeSingle();
+
+    if (override?.fee_percent != null) {
+      return parseFloat(override.fee_percent).toString();
+    }
+
+    const { data: globalFee } = await this.supabase
+      .from('fees_config')
+      .select('fee_percent')
+      .eq('operation_type', operationType)
+      .eq('payment_rail', paymentRail)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    return parseFloat(globalFee?.fee_percent ?? '0').toString();
+  }
+
+  /**
    * Calcula el fee para una operación, considerando overrides del cliente.
    * Retorna fee_amount y net_amount.
    */

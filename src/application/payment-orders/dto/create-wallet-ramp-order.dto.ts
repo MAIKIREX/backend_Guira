@@ -43,6 +43,7 @@ export class CreateWalletRampOrderDto {
 
   @ApiProperty({ example: 500.0 })
   @IsNumber()
+  @ValidateIf((o) => o.flow_type !== WalletRampFlowType.CRYPTO_TO_BRIDGE_WALLET)
   @Min(0.01)
   amount: number;
 

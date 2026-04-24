@@ -758,12 +758,10 @@ export class PaymentOrdersService {
   ) {
     const wallet = await this.getUserWallet(userId, dto.wallet_id);
 
-    const { fee_amount, net_amount } = await this.feesService.calculateFee(
-      userId,
-      'ramp_on_crypto',
-      'bridge',
-      dto.amount,
-    );
+    const [{ fee_amount, net_amount }, feePercent] = await Promise.all([
+      this.feesService.calculateFee(userId, 'ramp_on_crypto', 'bridge', dto.amount ?? 0),
+      this.feesService.getFeePercent(userId, 'ramp_on_crypto', 'bridge'),
+    ]);
 
     const { data: profile } = await this.supabase
       .from('profiles')
@@ -792,9 +790,9 @@ export class PaymentOrdersService {
       );
     }
 
-    // ── Validar monto mínimo según catálogo Bridge ──
+    // ── Validar monto mínimo según catálogo Bridge (solo si se envía monto) ──
     const minAmount = getMinAmount(resolvedSourceNetwork, resolvedSourceCurrency);
-    if (dto.amount < minAmount) {
+    if ((dto.amount ?? 0) > 0 && dto.amount < minAmount) {
       throw new BadRequestException(
         `El monto mínimo para ${resolvedSourceCurrency.toUpperCase()} en ${resolvedSourceNetwork} es ${minAmount}.`,
       );
@@ -820,10 +818,10 @@ export class PaymentOrdersService {
             currency: resolvedDestCurrency,
             bridge_wallet_id: wallet.provider_wallet_id,
           },
-          amount: dto.amount.toString(),
-          developer_fee: fee_amount.toString(),
+          developer_fee_percent: feePercent,
           features: {
             allow_any_from_address: true,
+            flexible_amount: true,
           },
         },
         idempotencyKey,
@@ -847,7 +845,7 @@ export class PaymentOrdersService {
     const { data: bridgeTransferRow } = await this.supabase.from('bridge_transfers').insert({
       user_id: userId,
       bridge_transfer_id: bridgeTransfer.id as string,
-      amount: dto.amount,
+      amount: dto.amount ?? 0,
       net_amount: net_amount,
       bridge_state: (bridgeTransfer.state as string) ?? 'payment_submitted',
       status: 'pending',
@@ -868,7 +866,7 @@ export class PaymentOrdersService {
         flow_type: 'crypto_to_bridge_wallet',
         flow_category: 'wallet_ramp',
         requires_psav: false,
-        amount: dto.amount,
+        amount: dto.amount ?? 0,
         currency: (dto.source_currency ?? wallet.currency).toUpperCase(),
         fee_amount,
         net_amount,
@@ -880,7 +878,7 @@ export class PaymentOrdersService {
         destination_currency: resolvedDestCurrency.toUpperCase(),
         bridge_transfer_id: bridgeTransfer.id as string,
         bridge_source_deposit_instructions: depositInstructions,
-        notes: dto.notes ?? `On-ramp crypto: ${dto.amount} ${(dto.source_currency ?? 'usdc').toUpperCase()} (${dto.source_network}) → Bridge Wallet`,
+        notes: dto.notes ?? `On-ramp crypto flexible: ${(dto.source_currency ?? 'usdc').toUpperCase()} (${dto.source_network}) → Bridge Wallet`,
         status: 'waiting_deposit',
       })
       .select()
@@ -902,7 +900,7 @@ export class PaymentOrdersService {
     });
 
     this.logger.log(
-      `📋 Orden crypto_to_bridge_wallet: ${order.id} — ${dto.amount}`,
+      `📋 Orden crypto_to_bridge_wallet: ${order.id} — flexible_amount (fee_percent: ${feePercent}%)`,
     );
     return order;
   }
