@@ -990,6 +990,7 @@ export class WebhooksService {
         );
       } else {
       // Comportamiento original: marcar orden como completed
+      const initialAmount = parseFloat(paymentOrder.amount ?? '0');
       await this.supabase
         .from('payment_orders')
         .update({
@@ -999,6 +1000,9 @@ export class WebhooksService {
           amount_destination: receipt?.final_amount
             ? parseFloat(receipt.final_amount as string)
             : null,
+          // Guardar metadata histórica si fue on-ramp flexible (amount original 0)
+          ...(initialAmount === 0 && receipt?.initial_amount ? { amount: parseFloat(receipt.initial_amount as string) } : {}),
+          ...(initialAmount === 0 && receipt?.developer_fee ? { fee_amount: parseFloat(receipt.developer_fee as string) } : {}),
         })
         .eq('id', paymentOrder.id);
 
@@ -1193,7 +1197,7 @@ export class WebhooksService {
     // 4b. UPDATE payment_orders (si el transfer está vinculado a una order)
     const { data: failedOrder } = await this.supabase
       .from('payment_orders')
-      .select('id, user_id, wallet_id, amount, fee_amount, currency')
+      .select('id, user_id, wallet_id, amount, fee_amount, currency, flow_type')
       .eq('bridge_transfer_id', bridgeTransferId)
       .in('status', ['processing', 'created', 'waiting_deposit'])
       .maybeSingle();
@@ -1209,8 +1213,13 @@ export class WebhooksService {
 
       // Liberar balance reservado de la payment_order
       // Solo se reserva amount (el fee lo gestiona Bridge vía developer_fee)
+      // FIX: Solo liberar balance para flujos de salida (off-ramps)
       const orderTotal = parseFloat(failedOrder.amount ?? '0');
-      if (orderTotal > 0) {
+      const offRampFlows = [
+        'bridge_wallet_to_crypto',
+        'bridge_wallet_to_fiat_us',
+      ];
+      if (orderTotal > 0 && offRampFlows.includes(failedOrder.flow_type)) {
         await this.supabase.rpc('release_reserved_balance', {
           p_user_id: failedOrder.user_id,
           p_currency: (failedOrder.currency ?? 'USDC').toUpperCase(),
