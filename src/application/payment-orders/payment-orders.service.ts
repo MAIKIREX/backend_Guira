@@ -1443,16 +1443,31 @@ export class PaymentOrdersService {
   ) {
     const wallet = await this.getUserWallet(userId, dto.wallet_id);
 
-    // Validar external_account
-    const { data: extAccount } = await this.supabase
-      .from('bridge_external_accounts')
-      .select('id, account_type, currency, bridge_external_account_id, payment_rail')
-      .eq('id', dto.external_account_id)
+    // 1. Validar proveedor: debe pertenecer al usuario y tener bridge_external_account_id
+    if (!dto.supplier_id) {
+      throw new BadRequestException('Debes especificar un proveedor (supplier_id) para el flujo bridge_wallet_to_fiat_us');
+    }
+    const { data: supplier } = await this.supabase
+      .from('suppliers')
+      .select('id, name, bridge_external_account_id')
+      .eq('id', dto.supplier_id)
       .eq('user_id', userId)
       .single();
 
-    if (!extAccount) {
-      throw new NotFoundException('Cuenta externa no encontrada');
+    if (!supplier || !supplier.bridge_external_account_id) {
+      throw new NotFoundException('Proveedor no encontrado o no tiene cuenta bancaria registrada en Bridge.');
+    }
+
+    // 2. Cargar external_account del proveedor (sin filtrar por user_id — pertenece al proveedor)
+    const { data: extAccount } = await this.supabase
+      .from('bridge_external_accounts')
+      .select('id, account_type, currency, bridge_external_account_id, payment_rail')
+      .eq('id', supplier.bridge_external_account_id)
+      .eq('is_active', true)
+      .single();
+
+    if (!extAccount || !extAccount.bridge_external_account_id) {
+      throw new NotFoundException('La cuenta bancaria del proveedor no está activa o no está registrada en Bridge.');
     }
 
     // Validar bridge_customer_id antes de operar con saldo
@@ -1514,7 +1529,8 @@ export class PaymentOrdersService {
         net_amount,
         destination_type: 'external_account',
         destination_currency: extAccount.currency ?? 'USD',
-        external_account_id: dto.external_account_id,
+        external_account_id: extAccount.id,
+        supplier_id: supplier.id,
         notes: dto.notes,
         business_purpose: dto.business_purpose,
         status: 'created',

@@ -115,11 +115,7 @@ export class CreateWalletRampOrderDto {
   @IsString()
   destination_qr_url?: string;
 
-  // ── destino fiat US (bridge_wallet_to_fiat_us) ──
-  @ApiPropertyOptional()
-  @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_fiat_us')
-  @IsUUID()
-  external_account_id?: string;
+  // ── destino fiat US (bridge_wallet_to_fiat_us) — se resuelve vía supplier ──
 
   // ── crypto_to_bridge_wallet: origen crypto ──
   @ApiPropertyOptional()
@@ -154,9 +150,9 @@ export class CreateWalletRampOrderDto {
   @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Moneda de origen no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
   source_currency?: string;
 
-  // ── wallet_to_fiat: proveedor fiat destino ──
-  @ApiPropertyOptional({ description: 'UUID del proveedor (supplier) con bridge_external_account_id registrado. Solo para wallet_to_fiat.' })
-  @ValidateIf((o) => o.flow_type === 'wallet_to_fiat')
+  // ── wallet_to_fiat / bridge_wallet_to_fiat_us: proveedor fiat destino ──
+  @ApiPropertyOptional({ description: 'UUID del proveedor (supplier) con bridge_external_account_id registrado.' })
+  @ValidateIf((o) => ['wallet_to_fiat', 'bridge_wallet_to_fiat_us'].includes(o.flow_type))
   @IsUUID()
   supplier_id?: string;
 
