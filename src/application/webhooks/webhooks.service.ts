@@ -241,7 +241,16 @@ export class WebhooksService {
         } else if (state === 'failed' || state === 'returned') {
           await this.handleTransferFailed(payload);
         } else {
-          this.logger.log(`transfer status_transitioned a ${state} - guardando progreso sin acción adicional`);
+          this.logger.log(`transfer status_transitioned a ${state} - actualizando bridge_state sin acción adicional`);
+          if (state && data?.id) {
+            await this.supabase
+              .from('bridge_transfers')
+              .update({
+                bridge_state: state,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('bridge_transfer_id', data.id as string);
+          }
         }
         break;
       }
