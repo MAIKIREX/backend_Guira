@@ -220,11 +220,11 @@ export class CreateExternalAccountDto {
 
   @ApiProperty({
     example: 'wire',
-    enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b'],
+    enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'faster_payments', 'co_bank_transfer'],
     description:
-      'Rail de pago. Se usa internamente para derivar el account_type de Bridge (us, iban, clabe, pix, bre_b).',
+      'Rail de pago. Se usa internamente para derivar el account_type de Bridge (us, iban, clabe, pix, bre_b, gb, co_bank_transfer).',
   })
-  @IsEnum(['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b'])
+  @IsEnum(['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'faster_payments', 'co_bank_transfer'])
   payment_rail: string;
 
   // ── Campos opcionales globales ──
@@ -282,13 +282,13 @@ export class CreateExternalAccountDto {
   account_number?: string;
 
   @ApiPropertyOptional({
-    enum: ['checking', 'savings'],
+    enum: ['checking', 'savings', 'electronic_deposit'],
     description:
-      'Tipo de cuenta bancaria US. Se envía a Bridge como checking_or_savings.',
+      'Tipo de cuenta. Para US: checking o savings. Para CO Bank Transfer: checking, savings o electronic_deposit.',
     example: 'checking',
   })
   @IsOptional()
-  @IsEnum(['checking', 'savings'])
+  @IsEnum(['checking', 'savings', 'electronic_deposit'])
   checking_or_savings?: string;
 
   // ── SEPA / IBAN ──
@@ -403,6 +403,44 @@ export class CreateExternalAccountDto {
   @IsOptional()
   @IsString()
   bre_b_key?: string;
+
+  // ── FPS — Faster Payments (Reino Unido) ──
+
+  @ApiPropertyOptional({
+    example: '123456',
+    description: 'Sort code UK, exactamente 6 dígitos sin guiones (requerido para faster_payments).',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(6)
+  @MaxLength(6)
+  sort_code?: string;
+
+  // ── CO Bank Transfer (Colombia) ──
+
+  @ApiPropertyOptional({
+    example: '1007',
+    description: 'Código del banco colombiano. Ej: 1007 = Bancolombia, 1051 = Davivienda, 1507 = Nequi.',
+  })
+  @IsOptional()
+  @IsString()
+  bank_code?: string;
+
+  @ApiPropertyOptional({
+    enum: ['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'],
+    description: 'Tipo de documento del titular (Colombia). cc=Cédula, nit=NIT empresarial, etc.',
+  })
+  @IsOptional()
+  @IsEnum(['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'])
+  document_type?: string;
+
+  @ApiPropertyOptional({
+    example: '+573001234567',
+    description: 'Teléfono del titular en formato E.164 (requerido para co_bank_transfer).',
+  })
+  @IsOptional()
+  @IsString()
+  phone_number?: string;
 }
 
 // ═══════════════════════════════════════════════════

@@ -34,6 +34,7 @@ export const PAYMENT_RAIL_TO_BRIDGE_ACCOUNT_TYPE: Readonly<Record<string, string
   pix: 'pix',
   bre_b: 'bre_b',
   faster_payments: 'gb',
+  co_bank_transfer: 'co_bank_transfer',
 } as const;
 
 // ── Monedas soportadas para Virtual Accounts ────────────────────────

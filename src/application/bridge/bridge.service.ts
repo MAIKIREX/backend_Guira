@@ -290,6 +290,49 @@ export class BridgeService {
       );
     }
 
+    // ── Validación temprana para CO Bank Transfer ──
+    if (dto.payment_rail === 'co_bank_transfer') {
+      if (!dto.account_owner_type) {
+        throw new BadRequestException(
+          'account_owner_type es obligatorio para CO Bank Transfer (individual o business).',
+        );
+      }
+      if (dto.account_owner_type === 'individual' && (!dto.first_name || !dto.last_name)) {
+        throw new BadRequestException(
+          'first_name y last_name son obligatorios cuando account_owner_type es "individual" para CO Bank Transfer.',
+        );
+      }
+      if (dto.account_owner_type === 'business' && !dto.business_name) {
+        throw new BadRequestException(
+          'business_name es obligatorio cuando account_owner_type es "business" para CO Bank Transfer.',
+        );
+      }
+    }
+
+    // ── Validación temprana para SEPA (B-4) ──
+    if (dto.payment_rail === 'sepa') {
+      if (!dto.iban_country) {
+        throw new BadRequestException(
+          'iban_country es obligatorio para cuentas SEPA (código ISO alpha-3, ej. NLD, DEU, ESP).',
+        );
+      }
+      if (!dto.account_owner_type) {
+        throw new BadRequestException(
+          'account_owner_type es obligatorio para cuentas SEPA (individual o business).',
+        );
+      }
+      if (dto.account_owner_type === 'business' && !dto.business_name) {
+        throw new BadRequestException(
+          'business_name es obligatorio cuando account_owner_type es "business".',
+        );
+      }
+      if (dto.account_owner_type === 'individual' && (!dto.first_name || !dto.last_name)) {
+        throw new BadRequestException(
+          'first_name y last_name son obligatorios cuando account_owner_type es "individual".',
+        );
+      }
+    }
+
     // Derivar account_type de Bridge desde payment_rail
     const bridgeAccountType = this.getBridgeAccountType(dto.payment_rail);
 
@@ -398,7 +441,7 @@ export class BridgeService {
       bridgePayload.iban = {
         account_number: dto.iban,
         bic: dto.swift_bic,
-        ...(dto.iban_country ? { country: dto.iban_country } : {}),
+        country: dto.iban_country, // obligatorio — garantizado por validación previa (B-4)
       };
 
       // owner_type/name fields (opcionales según Bridge, pero recomendados)
@@ -511,6 +554,68 @@ export class BridgeService {
       bridgePayload.account = {
         bre_b_key: dto.bre_b_key,
       };
+    } else if (dto.payment_rail === 'faster_payments') {
+      // FPS — Faster Payments (Reino Unido): account_number 8 dígitos + sort_code 6 dígitos
+      if (!dto.account_number || dto.account_number.length !== 8) {
+        throw new BadRequestException(
+          'Faster Payments requiere account_number de exactamente 8 dígitos.',
+        );
+      }
+      if (!dto.sort_code || dto.sort_code.length !== 6) {
+        throw new BadRequestException(
+          'Faster Payments requiere sort_code de exactamente 6 dígitos (sin guiones).',
+        );
+      }
+      bridgePayload.account = {
+        account_number: dto.account_number,
+        sort_code: dto.sort_code,
+      };
+
+      if (dto.account_owner_type) {
+        bridgePayload.account_owner_type = dto.account_owner_type;
+        if (dto.account_owner_type === 'individual') {
+          if (dto.first_name) bridgePayload.first_name = dto.first_name;
+          if (dto.last_name) bridgePayload.last_name = dto.last_name;
+        } else if (dto.account_owner_type === 'business') {
+          if (dto.business_name) bridgePayload.business_name = dto.business_name;
+        }
+      }
+
+      if (dto.address) {
+        bridgePayload.address = {
+          street_line_1: dto.address.street_line_1,
+          ...(dto.address.street_line_2 ? { street_line_2: dto.address.street_line_2 } : {}),
+          city: dto.address.city,
+          ...(dto.address.state ? { state: dto.address.state } : {}),
+          ...(dto.address.postal_code ? { postal_code: dto.address.postal_code } : {}),
+          country: toAlpha3(dto.address.country),
+        };
+      }
+    } else if (dto.payment_rail === 'co_bank_transfer') {
+      // CO Bank Transfer (Colombia): cuenta bancaria tradicional con datos completos
+      if (!dto.account_number || !dto.bank_code || !dto.document_type || !dto.document_number || !dto.phone_number) {
+        throw new BadRequestException(
+          'CO Bank Transfer requiere: account_number, bank_code, document_type, document_number y phone_number.',
+        );
+      }
+      bridgePayload.account = {
+        account_number: dto.account_number,
+        bank_code: dto.bank_code,
+        account_type: dto.checking_or_savings ?? 'savings',
+        document_type: dto.document_type,
+        document_number: dto.document_number,
+        phone_number: dto.phone_number,
+      };
+
+      if (dto.account_owner_type) {
+        bridgePayload.account_owner_type = dto.account_owner_type;
+        if (dto.account_owner_type === 'individual') {
+          if (dto.first_name) bridgePayload.first_name = dto.first_name;
+          if (dto.last_name) bridgePayload.last_name = dto.last_name;
+        } else if (dto.account_owner_type === 'business') {
+          if (dto.business_name) bridgePayload.business_name = dto.business_name;
+        }
+      }
     }
 
     // ── Llamar Bridge API ──

@@ -39,7 +39,7 @@ export class SuppliersService {
         // ACH/Wire
         account_number: dto.account_number,
         routing_number: dto.routing_number,
-        checking_or_savings: dto.checking_or_savings as 'checking' | 'savings',
+        checking_or_savings: dto.checking_or_savings,
         address: dto.address,
         // SEPA
         iban: dto.iban,
@@ -57,6 +57,12 @@ export class SuppliersService {
         document_number: dto.document_number,
         // Bre-B
         bre_b_key: dto.bre_b_key,
+        // FPS
+        sort_code: dto.sort_code,
+        // CO Bank Transfer
+        bank_code: dto.bank_code,
+        document_type: dto.document_type,
+        phone_number: dto.phone_number,
       });
 
       bridge_external_account_id = ea.id;
@@ -70,11 +76,21 @@ export class SuppliersService {
           checking_or_savings: dto.checking_or_savings,
           iban: dto.iban,
           swift_bic: dto.swift_bic,
+          iban_country: dto.iban_country,
           clabe: dto.clabe,
           pix_key: dto.pix_key,
           br_code: dto.br_code,
+          document_number: dto.document_number,
           bre_b_key: dto.bre_b_key,
-          bank_address: dto.address?.street_line_1,
+          sort_code: dto.sort_code,
+          bank_code: dto.bank_code,
+          document_type: dto.document_type,
+          phone_number: dto.phone_number,
+          account_owner_type: dto.account_owner_type,
+          first_name: dto.first_name,
+          last_name: dto.last_name,
+          business_name: dto.business_name,
+          address: dto.address ?? null,
           bank_country: dto.country,
         }
       : {

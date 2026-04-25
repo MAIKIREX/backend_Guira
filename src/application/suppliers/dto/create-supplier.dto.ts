@@ -3,7 +3,6 @@ import {
   IsNotEmpty,
   IsOptional,
   IsEmail,
-  IsObject,
   IsIn,
   MaxLength,
   MinLength,
@@ -34,10 +33,9 @@ export class CreateSupplierDto {
 
   @ApiProperty({
     example: 'spei',
-    enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'crypto'],
+    enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'faster_payments', 'co_bank_transfer', 'crypto'],
   })
-  @IsString()
-  @IsNotEmpty()
+  @IsIn(['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'faster_payments', 'co_bank_transfer', 'crypto'])
   payment_rail: string;
 
   @ApiPropertyOptional({ example: 'Proveedor principal de logística' })
@@ -71,10 +69,10 @@ export class CreateSupplierDto {
   @MaxLength(9)
   routing_number?: string;
 
-  @ApiPropertyOptional({ enum: ['checking', 'savings'] })
+  @ApiPropertyOptional({ enum: ['checking', 'savings', 'electronic_deposit'] })
   @IsOptional()
-  @IsEnum(['checking', 'savings'])
-  checking_or_savings?: 'checking' | 'savings';
+  @IsEnum(['checking', 'savings', 'electronic_deposit'])
+  checking_or_savings?: 'checking' | 'savings' | 'electronic_deposit';
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -150,6 +148,30 @@ export class CreateSupplierDto {
   @IsString()
   bre_b_key?: string;
 
+  // ── FPS — Faster Payments (Reino Unido) ──
+  @ApiPropertyOptional({ example: '123456', description: 'Sort code UK, exactamente 6 dígitos sin guiones' })
+  @IsOptional()
+  @IsString()
+  @MinLength(6)
+  @MaxLength(6)
+  sort_code?: string;
+
+  // ── CO Bank Transfer (Colombia) ──
+  @ApiPropertyOptional({ example: '1007', description: 'Código del banco colombiano' })
+  @IsOptional()
+  @IsString()
+  bank_code?: string;
+
+  @ApiPropertyOptional({ enum: ['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'] })
+  @IsOptional()
+  @IsEnum(['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'])
+  document_type?: string;
+
+  @ApiPropertyOptional({ example: '+573001234567' })
+  @IsOptional()
+  @IsString()
+  phone_number?: string;
+
   // ── Crypto Wallet ──
   @ApiPropertyOptional()
   @IsOptional()
@@ -221,10 +243,10 @@ export class UpdateSupplierDto {
   @IsString()
   routing_number?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ enum: ['checking', 'savings', 'electronic_deposit'] })
   @IsOptional()
-  @IsEnum(['checking', 'savings'])
-  checking_or_savings?: 'checking' | 'savings';
+  @IsEnum(['checking', 'savings', 'electronic_deposit'])
+  checking_or_savings?: 'checking' | 'savings' | 'electronic_deposit';
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -295,6 +317,30 @@ export class UpdateSupplierDto {
   @IsOptional()
   @IsString()
   bre_b_key?: string;
+
+  // FPS — Faster Payments (Reino Unido)
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MinLength(6)
+  @MaxLength(6)
+  sort_code?: string;
+
+  // CO Bank Transfer (Colombia)
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  bank_code?: string;
+
+  @ApiPropertyOptional({ enum: ['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'] })
+  @IsOptional()
+  @IsEnum(['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'])
+  document_type?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  phone_number?: string;
 
   // Crypto
   @ApiPropertyOptional()
