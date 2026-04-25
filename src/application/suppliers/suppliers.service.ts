@@ -257,7 +257,7 @@ export class SuppliersService {
               ? {
                   account: {
                     ...(dto.routing_number ? { routing_number: dto.routing_number } : {}),
-                    ...(dto.checking_or_savings ? { checking_or_savings: dto.checking_or_savings } : {}),
+                    ...(dto.checking_or_savings ? { checking_or_savings: dto.checking_or_savings as 'checking' | 'savings' } : {}),
                   },
                 }
               : {}),
