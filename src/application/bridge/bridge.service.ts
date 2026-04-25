@@ -290,6 +290,13 @@ export class BridgeService {
       );
     }
 
+    // Observación #1: address es REQUIRED por Bridge para cuentas US (ACH/Wire)
+    if ((dto.payment_rail === 'ach' || dto.payment_rail === 'wire') && !dto.address) {
+      throw new BadRequestException(
+        'address es obligatoria para transferencias ACH/Wire. Bridge la requiere para validar beneficiary_address_valid.',
+      );
+    }
+
     // ── Validación temprana para CO Bank Transfer ──
     if (dto.payment_rail === 'co_bank_transfer') {
       if (!dto.account_owner_type) {
@@ -441,7 +448,8 @@ export class BridgeService {
       bridgePayload.iban = {
         account_number: dto.iban,
         bic: dto.swift_bic,
-        country: dto.iban_country, // obligatorio — garantizado por validación previa (B-4)
+        // Observación #2: aplicar toAlpha3 para ser consistente con address.country
+        country: toAlpha3(dto.iban_country), // obligatorio — garantizado por validación previa
       };
 
       // owner_type/name fields (opcionales según Bridge, pero recomendados)

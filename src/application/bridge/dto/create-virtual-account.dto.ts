@@ -274,7 +274,8 @@ export class CreateExternalAccountDto {
   @ApiPropertyOptional({
     example: '1210002481111',
     description:
-      'Número de cuenta bancaria (requerido para ACH/Wire). Bridge: mín 1 char.',
+      'Número de cuenta bancaria. Requerido para ACH/Wire (mín 1 char) y CO Bank Transfer. ' +
+      'Para faster_payments debe tener exactamente 8 dígitos (validado en tiempo de ejecución).',
   })
   @IsOptional()
   @IsString()
@@ -284,7 +285,10 @@ export class CreateExternalAccountDto {
   @ApiPropertyOptional({
     enum: ['checking', 'savings', 'electronic_deposit'],
     description:
-      'Tipo de cuenta. Para US: checking o savings. Para CO Bank Transfer: checking, savings o electronic_deposit.',
+      'Tipo de cuenta bancaria. ' +
+      'Para ACH/Wire (US): "checking" (default) o "savings". ' +
+      'Para CO Bank Transfer (Colombia): "checking", "savings" o "electronic_deposit" — ' +
+      'este valor se asigna al campo account.account_type en Bridge, no a checking_or_savings.',
     example: 'checking',
   })
   @IsOptional()
