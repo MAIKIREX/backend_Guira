@@ -1455,6 +1455,19 @@ export class PaymentOrdersService {
       throw new NotFoundException('Cuenta externa no encontrada');
     }
 
+    // Validar bridge_customer_id antes de operar con saldo
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('bridge_customer_id')
+      .eq('id', userId)
+      .single();
+
+    if (!profile?.bridge_customer_id) {
+      throw new BadRequestException(
+        'El usuario no tiene una cuenta Bridge activa. Completa el KYC antes de realizar retiros.',
+      );
+    }
+
     const { fee_amount, net_amount } = await this.feesService.calculateFee(
       userId,
       'ramp_off_fiat_us',
@@ -1520,18 +1533,11 @@ export class PaymentOrdersService {
 
     // Ejecutar payout vía Bridge API usando external_account_id
     try {
-      // Obtener bridge_customer_id del usuario
-      const { data: profile } = await this.supabase
-        .from('profiles')
-        .select('bridge_customer_id')
-        .eq('id', userId)
-        .single();
-
       const idempotencyKey = `po_w2f_${order.id}`;
       const bridgeResult = await this.bridgeApi.post<Record<string, unknown>>(
         '/v0/transfers',
         {
-          on_behalf_of: profile?.bridge_customer_id,
+          on_behalf_of: profile.bridge_customer_id,
           source: {
             payment_rail: 'bridge_wallet',
             currency: sourceCurrency.toLowerCase(),
@@ -1542,12 +1548,9 @@ export class PaymentOrdersService {
             currency: (extAccount.currency ?? 'usd').toLowerCase(),
             external_account_id: extAccount.bridge_external_account_id,
           },
-          amount: dto.amount.toString(),
-          developer_fee: fee_amount.toString(),
+          amount: dto.amount.toFixed(2),
+          developer_fee: fee_amount.toFixed(2),
           client_reference_id: order.id,
-          return_instructions: {
-            address: wallet.address,
-          },
         },
         idempotencyKey,
       );
