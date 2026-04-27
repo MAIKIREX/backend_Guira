@@ -52,6 +52,7 @@ export class PaymentOrdersController {
   constructor(
     private readonly paymentOrdersService: PaymentOrdersService,
     private readonly exchangeRatesService: ExchangeRatesService,
+    private readonly psavService: PsavService,
     private readonly pdfService: PdfService,
     private readonly suppliersService: SuppliersService,
   ) {}
@@ -109,6 +110,20 @@ export class PaymentOrdersController {
       fiat_bo_allowed_destinations: FIAT_BO_ALLOWED_DESTINATION_CURRENCIES,
       fiat_bo_excluded_sources: FIAT_BO_EXCLUDED_SOURCE_CURRENCIES,
     };
+  }
+
+  @Get('psav-configs')
+  @ApiOperation({ summary: 'Cuentas PSAV crypto activas para resolución de rutas de retiro (sin campos sensibles)' })
+  async getActivePsavCryptoConfigs() {
+    const accounts = await this.psavService.getActiveCryptoAccounts();
+    return accounts.map(({ id, name, type, currency, crypto_network, is_active }) => ({
+      id,
+      name,
+      type,
+      currency,
+      crypto_network,
+      is_active,
+    }));
   }
 
   @Get('exchange-rates')

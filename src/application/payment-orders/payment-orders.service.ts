@@ -1110,8 +1110,33 @@ export class PaymentOrdersService {
       dto.amount,
     );
 
-    // Verificar saldo disponible del token específico seleccionado
     const sourceCurrency = (dto.source_currency ?? wallet.currency).toUpperCase();
+
+    // Validar token y ruta PSAV antes de tocar el saldo — sin coste de rollback si falla
+    if (!FIAT_BO_OFF_RAMP_SOURCE_CURRENCIES.includes(sourceCurrency.toLowerCase())) {
+      throw new BadRequestException(
+        `El token ${sourceCurrency} no está habilitado para retiro a Bolivia en este momento.`,
+      );
+    }
+
+    const activePsavAccounts = await this.psavService.getActiveCryptoAccounts();
+    const psavMatch = resolveFiatBoPsavMatch(sourceCurrency, activePsavAccounts);
+
+    if (!psavMatch) {
+      throw new BadRequestException(
+        `No hay canal PSAV configurado compatible con ${sourceCurrency}. Contacta al administrador.`,
+      );
+    }
+
+    const { psavAccount, destCurrency: psavDestCurrency, minAmount: routeMinAmount } = psavMatch;
+
+    if (dto.amount < routeMinAmount) {
+      throw new BadRequestException(
+        `El monto mínimo para retirar ${sourceCurrency.toUpperCase()} a Bolivia es ${routeMinAmount} ${sourceCurrency.toUpperCase()}.`,
+      );
+    }
+
+    // Verificar saldo disponible del token específico seleccionado
     const { data: balance } = await this.supabase
       .from('balances')
       .select('available_amount')
@@ -1134,47 +1159,6 @@ export class PaymentOrdersService {
     });
 
     const rateData = await this.exchangeRatesService.getRate('USD_BOB');
-
-    // Validar que el token de origen sea soportado para fiat_bo off-ramp
-    if (!FIAT_BO_OFF_RAMP_SOURCE_CURRENCIES.includes(sourceCurrency.toLowerCase())) {
-      await this.supabase.rpc('release_reserved_balance', {
-        p_user_id: userId,
-        p_currency: sourceCurrency,
-        p_amount: totalNeeded,
-      });
-      throw new BadRequestException(
-        `El token ${sourceCurrency} no está habilitado para retiro a Bolivia en este momento.`,
-      );
-    }
-
-    // Resolver dinámicamente la cuenta PSAV compatible con el token de origen
-    const activePsavAccounts = await this.psavService.getActiveCryptoAccounts();
-    const psavMatch = resolveFiatBoPsavMatch(sourceCurrency, activePsavAccounts);
-
-    if (!psavMatch) {
-      await this.supabase.rpc('release_reserved_balance', {
-        p_user_id: userId,
-        p_currency: sourceCurrency,
-        p_amount: totalNeeded,
-      });
-      throw new BadRequestException(
-        `No hay canal PSAV configurado compatible con ${sourceCurrency}. Contacta al administrador.`,
-      );
-    }
-
-    const { psavAccount, destCurrency: psavDestCurrency, minAmount: routeMinAmount } = psavMatch;
-
-    // Validar monto mínimo según la ruta Bridge resuelta
-    if (dto.amount < routeMinAmount) {
-      await this.supabase.rpc('release_reserved_balance', {
-        p_user_id: userId,
-        p_currency: sourceCurrency,
-        p_amount: totalNeeded,
-      });
-      throw new BadRequestException(
-        `El monto mínimo para retirar ${sourceCurrency.toUpperCase()} a Bolivia es ${routeMinAmount} ${sourceCurrency.toUpperCase()}.`,
-      );
-    }
 
     // Snapshot: los datos bancarios se copian en la orden para trazabilidad histórica
     const { data: order, error } = await this.supabase
@@ -1208,7 +1192,6 @@ export class PaymentOrdersService {
       .single();
 
     if (error) {
-      // Liberar reserva si falla la inserción
       await this.supabase.rpc('release_reserved_balance', {
         p_user_id: userId,
         p_currency: sourceCurrency,
@@ -2296,7 +2279,6 @@ export class PaymentOrdersService {
         world_to_bolivia: 'USD_BOB',
         bolivia_to_wallet: 'BOB_USD',
         fiat_bo_to_bridge_wallet: 'BOB_USD',
-        bridge_wallet_to_fiat_bo: 'USD_BOB',
       };
       const pair = pairMap[order.flow_type];
       if (pair) {
@@ -2448,21 +2430,6 @@ export class PaymentOrdersService {
       .single();
 
     if (error) throw new BadRequestException(error.message);
-
-    // Ledger entries para on-ramp a wallet Bridge (PSAV)
-    if (order.flow_type === 'fiat_bo_to_bridge_wallet') {
-      const destinationAmount = parseFloat(order.amount_destination ?? order.net_amount ?? order.amount);
-      await this.supabase.from('ledger_entries').insert({
-        wallet_id: order.wallet_id,
-        type: 'credit',
-        amount: destinationAmount,
-        currency: order.destination_currency ?? order.currency,
-        status: 'settled',
-        reference_type: 'payment_order',
-        reference_id: orderId,
-        description: `On-ramp completado — ${destinationAmount} (PSAV)`,
-      });
-    }
 
     // Off-ramp PSAV a fiat BO — El ledger debit y la liberación de reserva
     // ahora se manejan automáticamente en el webhook transfer.complete (Tramo 1).

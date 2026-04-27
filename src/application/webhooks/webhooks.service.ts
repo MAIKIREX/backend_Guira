@@ -935,7 +935,7 @@ export class WebhooksService {
     // la orden queda en 'pending' indefinidamente sin este fix.
     const { data: paymentOrder } = await this.supabase
       .from('payment_orders')
-      .select('id, user_id, wallet_id, flow_type, amount, fee_amount, currency, source_currency, destination_currency')
+      .select('id, user_id, wallet_id, flow_type, amount, fee_amount, amount_destination, currency, source_currency, destination_currency')
       .eq('bridge_transfer_id', bridgeTransferId)
       .in('status', ['pending', 'waiting_deposit', 'processing', 'deposit_received'])
       .maybeSingle();
@@ -1066,10 +1066,12 @@ export class WebhooksService {
         paymentOrder.wallet_id &&
         onRampFlows.includes(paymentOrder.flow_type)
       ) {
-        // Usar receipt.final_amount (monto real) > net_amount interno como fallback
-        const fallbackNet =
-          parseFloat(paymentOrder.amount) -
-          parseFloat(paymentOrder.fee_amount ?? '0');
+        // Usar receipt.final_amount (monto real) como fuente primaria.
+        // Fallback: fiat_bo guarda `amount` en BOB — usar amount_destination (USDC) para no sobre-acreditar.
+        // Otros on-ramp guardan `amount` ya en la moneda destino.
+        const fallbackNet = paymentOrder.flow_type === 'fiat_bo_to_bridge_wallet'
+          ? parseFloat(paymentOrder.amount_destination ?? '0')
+          : parseFloat(paymentOrder.amount) - parseFloat(paymentOrder.fee_amount ?? '0');
         const creditAmount = receiptFinalAmount ?? fallbackNet;
 
         const creditCurrency = (paymentOrder.destination_currency ?? paymentOrder.currency).toUpperCase();
@@ -1132,15 +1134,18 @@ export class WebhooksService {
         metadata: receipt ?? {},
       });
 
-      // 5. Notificación
-      await this.supabase.from('notifications').insert({
-        user_id: transfer.user_id,
-        type: 'financial',
-        title: 'Pago Completado',
-        message: `Tu pago de $${transfer.amount} ha sido completado exitosamente`,
-        reference_type: 'bridge_transfer',
-        reference_id: transfer.id,
-      });
+      // 5. Notificación genérica — se omite para fiat_bo_to_bridge_wallet porque
+      // esa orden ya emite su propia notificación específica en el bloque de paymentOrder.
+      if (paymentOrder?.flow_type !== 'fiat_bo_to_bridge_wallet') {
+        await this.supabase.from('notifications').insert({
+          user_id: transfer.user_id,
+          type: 'financial',
+          title: 'Pago Completado',
+          message: `Tu pago de $${transfer.amount} ha sido completado exitosamente`,
+          reference_type: 'bridge_transfer',
+          reference_id: transfer.id,
+        });
+      }
 
       // 6. Activity log
       await this.supabase.from('activity_logs').insert({
