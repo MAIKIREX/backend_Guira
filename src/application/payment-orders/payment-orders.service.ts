@@ -752,7 +752,7 @@ export class PaymentOrdersService {
           on_behalf_of: profile.bridge_customer_id,
           source: psavSource,
           destination: {
-            payment_rail: 'bridge_wallet',
+            payment_rail: wallet.network,
             currency: resolvedFiatBoDest,
             bridge_wallet_id: wallet.provider_wallet_id,
           },
