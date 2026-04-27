@@ -1088,6 +1088,21 @@ export class WebhooksService {
         );
       }
 
+      // Notificación específica para on-ramp fiat_bo (el canal genérico de bridge_transfers
+      // no siempre incluye el monto real en destCurrency — esta notificación lo hace explícito)
+      if (paymentOrder.flow_type === 'fiat_bo_to_bridge_wallet') {
+        const creditAmount = receiptFinalAmount ?? parseFloat(paymentOrder.amount ?? '0');
+        const destCurrency = (paymentOrder.destination_currency ?? 'USDC').toUpperCase();
+        await this.supabase.from('notifications').insert({
+          user_id: paymentOrder.user_id,
+          type: 'financial',
+          title: 'Fondeo Completado',
+          message: `Tu fondeo de ${creditAmount} ${destCurrency} ha sido acreditado en tu wallet Bridge.`,
+          reference_type: 'payment_order',
+          reference_id: paymentOrder.id,
+        });
+      }
+
       this.logger.log(
         `✅ Payment order ${paymentOrder.id} completada vía webhook (transfer ${bridgeTransferId})`,
       );

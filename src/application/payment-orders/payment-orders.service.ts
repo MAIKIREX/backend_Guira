@@ -2371,6 +2371,11 @@ export class PaymentOrdersService {
       .single();
 
     if (!order) throw new NotFoundException('Orden no encontrada');
+    if (order.flow_type === 'fiat_bo_to_bridge_wallet') {
+      throw new BadRequestException(
+        'Este flujo se completa automáticamente por webhook de Bridge. markSent no está disponible para fiat_bo_to_bridge_wallet.',
+      );
+    }
     if (order.status !== 'processing') {
       throw new BadRequestException(
         `No se puede marcar como enviada una orden en estado "${order.status}"`,
