@@ -8,7 +8,6 @@
 //  - Solo destino Solana (wallet custodial actual)
 //  - Solo tokens destino en ALLOWED_CRYPTO_CURRENCIES
 //  - Solo tokens origen en ALLOWED_CRYPTO_CURRENCIES
-//  - EURC excluido de fiat_bo_to_bridge_wallet (requiere tasa BOB_EUR)
 //
 //  El frontend tiene su réplica en:
 //  m-guira/features/payments/lib/bridge-route-catalog.ts
@@ -58,15 +57,33 @@ export const BRIDGE_RAMP_ON_ROUTES: Record<
 };
 
 /**
- * Tokens destino permitidos para fiat_bo_to_bridge_wallet (Etapa 1).
- * EURC excluido porque requiere tasa BOB_EUR no disponible.
+ * Tokens destino permitidos para fiat_bo_to_bridge_wallet.
+ * PSAV envía USDC en Solana para usdc/usdb/pyusd/eurc, USDT en Ethereum para usdt.
  */
 export const FIAT_BO_ALLOWED_DESTINATION_CURRENCIES = [
   'usdc',
   'usdt',
   'usdb',
   'pyusd',
+  'eurc',
 ] as const;
+
+/**
+ * Resuelve la red y moneda de origen del PSAV para fiat_bo_to_bridge_wallet.
+ * Hardcoded Etapa 1 — PSAV opera en Solana (USDC) y Ethereum (USDT).
+ *
+ * destino usdt  → ethereum/usdt (único token disponible en Ethereum para PSAV)
+ * resto         → solana/usdc   (usdc, usdb, pyusd, eurc)
+ */
+export function resolvePsavCryptoSource(destCurrency: string): {
+  payment_rail: string;
+  currency: string;
+} {
+  if (destCurrency.toLowerCase() === 'usdt') {
+    return { payment_rail: 'ethereum', currency: 'usdt' };
+  }
+  return { payment_rail: 'solana', currency: 'usdc' };
+}
 
 /** Dado una red, retorna las monedas de origen válidas */
 export function getSourceCurrencies(network: string): string[] {

@@ -38,6 +38,7 @@ import {
   isValidOffRampRoute,
   getOffRampMinAmount,
   resolveFiatBoPsavMatch,
+  resolvePsavCryptoSource,
   FIAT_BO_OFF_RAMP_SOURCE_CURRENCIES,
 } from '../../common/constants/bridge-route-catalog.constants';
 
@@ -691,20 +692,28 @@ export class PaymentOrdersService {
   ) {
     const wallet = await this.getUserWallet(userId, dto.wallet_id);
 
-    // ── Validar token destino contra catálogo fiat_bo (EURC excluido Etapa 1) ──
     const resolvedFiatBoDest = (dto.destination_currency ?? wallet.currency).toLowerCase();
     if (!isValidFiatBoDestination(resolvedFiatBoDest)) {
       throw new BadRequestException(
-        `El token ${resolvedFiatBoDest.toUpperCase()} no está soportado para fondeo con BOB. Tokens permitidos: USDC, USDT, USDB, PYUSD.`,
+        `El token ${resolvedFiatBoDest.toUpperCase()} no está soportado para fondeo con BOB. Tokens permitidos: USDC, USDT, USDB, PYUSD, EURC.`,
       );
     }
 
-    const psavAccount = await this.psavService.getDepositAccount(
-      'bank_bo',
-      'BOB',
-    );
-    const depositInstructions =
-      this.psavService.formatDepositInstructions(psavAccount);
+    // ── Validar bridge_customer_id (requerido por Bridge API) ──
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('bridge_customer_id')
+      .eq('id', userId)
+      .single();
+
+    if (!profile?.bridge_customer_id) {
+      throw new BadRequestException(
+        'El usuario no tiene un bridge_customer_id configurado. Por favor, completa el registro.',
+      );
+    }
+
+    const psavAccount = await this.psavService.getDepositAccount('bank_bo', 'BOB');
+    const depositInstructions = this.psavService.formatDepositInstructions(psavAccount);
 
     const { fee_amount, net_amount } = await this.feesService.calculateFee(
       userId,
@@ -715,9 +724,84 @@ export class PaymentOrdersService {
 
     const rateData = await this.exchangeRatesService.getRate('BOB_USD');
 
+    // ── Resolver fuente del PSAV según token destino ──
+    const psavSource = resolvePsavCryptoSource(resolvedFiatBoDest);
+
+    // ── Convertir montos BOB → USDC para Bridge ──
+    // amount = monto bruto que el PSAV enviará (dto.amount convertido)
+    // developer_fee = fee de Guira convertido; Bridge lo deduce antes de acreditar la wallet
+    const bridgeAmount = (dto.amount / rateData.effective_rate).toFixed(2);
+    const bridgeDeveloperFee = (fee_amount / rateData.effective_rate).toFixed(2);
+    const netAmountUsdc = parseFloat(
+      (net_amount / rateData.effective_rate).toFixed(2),
+    );
+
+    // ── Pre-generar orderId como idempotency key ──
+    const orderId = crypto.randomUUID();
+    const idempotencyKey = `po_fiat_bo_${orderId}`;
+
+    // ── Llamada a Bridge Transfer API ──
+    let bridgeTransfer: Record<string, unknown>;
+    try {
+      bridgeTransfer = await this.bridgeApi.post<Record<string, unknown>>(
+        '/v0/transfers',
+        {
+          on_behalf_of: profile.bridge_customer_id,
+          source: psavSource,
+          destination: {
+            payment_rail: wallet.network,
+            currency: resolvedFiatBoDest,
+            bridge_wallet_id: wallet.provider_wallet_id,
+          },
+          amount: bridgeAmount,
+          developer_fee: bridgeDeveloperFee,
+          client_reference_id: orderId,
+          features: {
+            allow_any_from_address: true,
+          },
+        },
+        idempotencyKey,
+      );
+    } catch (err: any) {
+      this.logger.error('Error llamando a Bridge Transfer API (fiat_bo):', err);
+      const bridgeError = err?.response?.data?.message || err?.message || 'Error desconocido';
+      throw new BadRequestException(
+        'No se pudieron generar las instrucciones de depósito en Bridge. Razón: ' + bridgeError,
+      );
+    }
+
+    // ── Extraer dirección de liquidación para el PSAV ──
+    const bridgeInstr = bridgeTransfer.source_deposit_instructions as Record<string, string> | undefined;
+    const bridgeDepositInstructions = {
+      type: 'liquidation_address',
+      to_address: bridgeInstr?.to_address ?? '',
+      payment_rail: psavSource.payment_rail,
+      currency: psavSource.currency,
+      label: `PSAV deposita ${psavSource.currency.toUpperCase()} en ${psavSource.payment_rail}`,
+    };
+
+    // ── Registrar en bridge_transfers ──
+    const { data: bridgeTransferRow } = await this.supabase
+      .from('bridge_transfers')
+      .insert({
+        user_id: userId,
+        bridge_transfer_id: bridgeTransfer.id as string,
+        amount: parseFloat(bridgeAmount),
+        net_amount: netAmountUsdc,
+        bridge_state: (bridgeTransfer.state as string) ?? 'awaiting_funds',
+        status: 'pending',
+        source_payment_rail: psavSource.payment_rail,
+        destination_payment_rail: wallet.network,
+        destination_currency: resolvedFiatBoDest.toUpperCase(),
+        bridge_raw_response: bridgeTransfer,
+      })
+      .select('id')
+      .single();
+
     const { data: order, error } = await this.supabase
       .from('payment_orders')
       .insert({
+        id: orderId,
         user_id: userId,
         wallet_id: wallet.id,
         flow_type: 'fiat_bo_to_bridge_wallet',
@@ -727,12 +811,15 @@ export class PaymentOrdersService {
         currency: 'BOB',
         fee_amount,
         net_amount,
+        source_type: 'psav_bo',
+        source_network: psavSource.payment_rail,
+        source_currency: psavSource.currency.toUpperCase(),
         destination_type: 'bridge_wallet',
-        destination_currency: (dto.destination_currency ?? wallet.currency).toUpperCase(),
+        destination_currency: resolvedFiatBoDest.toUpperCase(),
+        bridge_transfer_id: bridgeTransfer.id as string,
+        bridge_source_deposit_instructions: bridgeDepositInstructions,
         exchange_rate_applied: rateData.effective_rate,
-        amount_destination: parseFloat(
-          (net_amount / rateData.effective_rate).toFixed(2),
-        ),
+        amount_destination: netAmountUsdc,
         psav_deposit_instructions: depositInstructions,
         notes: dto.notes,
         status: 'waiting_deposit',
@@ -742,8 +829,21 @@ export class PaymentOrdersService {
 
     if (error) throw new BadRequestException(error.message);
 
+    // ── Ledger entry pendiente — se liquida con webhook ──
+    await this.supabase.from('ledger_entries').insert({
+      wallet_id: wallet.id,
+      type: 'credit',
+      amount: netAmountUsdc,
+      currency: resolvedFiatBoDest.toUpperCase(),
+      status: 'pending',
+      reference_type: 'payment_order',
+      reference_id: orderId,
+      bridge_transfer_id: bridgeTransferRow?.id ?? null,
+      description: `On-ramp BOB: ${dto.amount} BOB → ${netAmountUsdc} ${resolvedFiatBoDest.toUpperCase()} vía PSAV (${psavSource.payment_rail})`,
+    });
+
     this.logger.log(
-      `📋 Orden fiat_bo_to_bridge_wallet: ${order.id} — ${dto.amount} BOB`,
+      `📋 Orden fiat_bo_to_bridge_wallet: ${orderId} — ${dto.amount} BOB → ${netAmountUsdc} ${resolvedFiatBoDest.toUpperCase()} | Bridge transfer: ${bridgeTransfer.id}`,
     );
     return order;
   }
