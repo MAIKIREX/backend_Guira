@@ -727,14 +727,17 @@ export class PaymentOrdersService {
     // ── Resolver fuente del PSAV según token destino ──
     const psavSource = resolvePsavCryptoSource(resolvedFiatBoDest);
 
-    // ── Convertir montos BOB → USDC para Bridge ──
-    // amount = monto bruto que el PSAV enviará (dto.amount convertido)
-    // developer_fee = fee de Guira convertido; Bridge lo deduce antes de acreditar la wallet
-    const bridgeAmount = (dto.amount / rateData.effective_rate).toFixed(2);
-    const bridgeDeveloperFee = (fee_amount / rateData.effective_rate).toFixed(2);
+    // ── Convertir montos BOB → USDC (estimado interno, no se envía a Bridge) ──
+    // Con flexible_amount Bridge acepta cualquier monto; usamos el estimado solo para
+    // el registro interno (bridge_transfers, ledger_entry pendiente, amount_destination).
+    const bridgeAmountEstimated = (dto.amount / rateData.effective_rate).toFixed(2);
     const netAmountUsdc = parseFloat(
       (net_amount / rateData.effective_rate).toFixed(2),
     );
+
+    // ── developer_fee_percent: fee BOB / amount BOB * 100 (el tipo de cambio se cancela) ──
+    const developerFeePercent =
+      dto.amount > 0 ? ((fee_amount / dto.amount) * 100).toFixed(4) : '0.0000';
 
     // ── Pre-generar orderId como idempotency key ──
     const orderId = crypto.randomUUID();
@@ -749,14 +752,14 @@ export class PaymentOrdersService {
           on_behalf_of: profile.bridge_customer_id,
           source: psavSource,
           destination: {
-            payment_rail: wallet.network,
+            payment_rail: 'bridge_wallet',
             currency: resolvedFiatBoDest,
             bridge_wallet_id: wallet.provider_wallet_id,
           },
-          amount: bridgeAmount,
-          developer_fee: bridgeDeveloperFee,
+          developer_fee_percent: developerFeePercent,
           client_reference_id: orderId,
           features: {
+            flexible_amount: true,
             allow_any_from_address: true,
           },
         },
@@ -786,7 +789,7 @@ export class PaymentOrdersService {
       .insert({
         user_id: userId,
         bridge_transfer_id: bridgeTransfer.id as string,
-        amount: parseFloat(bridgeAmount),
+        amount: parseFloat(bridgeAmountEstimated),
         net_amount: netAmountUsdc,
         bridge_state: (bridgeTransfer.state as string) ?? 'awaiting_funds',
         status: 'pending',
@@ -1129,6 +1132,12 @@ export class PaymentOrdersService {
     }
 
     const { psavAccount, destCurrency: psavDestCurrency, minAmount: routeMinAmount } = psavMatch;
+
+    if (!psavAccount.crypto_address) {
+      throw new BadRequestException(
+        `La cuenta PSAV para ${sourceCurrency} no tiene dirección crypto configurada. Contacta al administrador.`,
+      );
+    }
 
     if (dto.amount < routeMinAmount) {
       throw new BadRequestException(

@@ -948,20 +948,14 @@ export class WebhooksService {
         paymentOrder.flow_type === 'bridge_wallet_to_fiat_bo';
 
       if (isDualLegFlow) {
-        // Asentar ledger entries (debit confirmed on-chain)
-        await this.supabase
-          .from('ledger_entries')
-          .update({ status: 'settled' })
-          .eq('reference_type', 'payment_order')
-          .eq('reference_id', paymentOrder.id)
-          .eq('status', 'pending');
-
-        // Liberar saldo reservado (el debit ya es definitivo)
+        // Asentar ledger (debit confirmed on-chain) y liberar reserva en una sola
+        // transacción atómica — evita la ventana donde available_amount sería negativo.
         const totalReserved = parseFloat(paymentOrder.amount ?? '0');
-        await this.supabase.rpc('release_reserved_balance', {
+        await this.supabase.rpc('settle_and_release_reserved', {
           p_user_id: paymentOrder.user_id,
           p_currency: (paymentOrder.source_currency ?? paymentOrder.currency ?? 'USDC').toUpperCase(),
           p_amount: totalReserved,
+          p_reference_id: paymentOrder.id,
         });
 
         // Notificar staff que el PSAV recibió el crypto
