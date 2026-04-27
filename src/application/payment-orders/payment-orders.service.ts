@@ -1084,7 +1084,7 @@ export class PaymentOrdersService {
         wallet_id: wallet.id,
         flow_type: 'bridge_wallet_to_fiat_bo',
         flow_category: 'wallet_ramp',
-        requires_psav: false,
+        requires_psav: true,
         amount: dto.amount,
         currency: sourceCurrency,
         source_currency: sourceCurrency,
@@ -1148,9 +1148,6 @@ export class PaymentOrdersService {
         amount: dto.amount.toString(),
         developer_fee: fee_amount.toString(),
         client_reference_id: order.id,
-        return_instructions: {
-          address: wallet.address,
-        },
       };
 
       this.logger.log(
@@ -1350,9 +1347,6 @@ export class PaymentOrdersService {
         amount: dto.amount.toString(),
         developer_fee: fee_amount.toString(),
         client_reference_id: order.id,
-        return_instructions: {
-          address: wallet.address,
-        },
       };
 
       this.logger.log(

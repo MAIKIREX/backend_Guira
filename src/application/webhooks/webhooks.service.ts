@@ -1197,20 +1197,31 @@ export class WebhooksService {
       .eq('bridge_transfer_id', transfer.id)
       .eq('status', 'pending');
 
-    // 4. Liberar saldo reservado
-    await this.supabase.rpc('release_reserved_balance', {
-      p_user_id: transfer.user_id,
-      p_currency: currency.toUpperCase(),
-      p_amount: payoutAmount,
-    });
-
-    // 4b. UPDATE payment_orders (si el transfer está vinculado a una order)
+    // 4b. UPDATE payment_orders — consultado ANTES del release para conocer flow_type y
+    // moneda de origen (la moneda reservada puede diferir de destination_currency).
     const { data: failedOrder } = await this.supabase
       .from('payment_orders')
       .select('id, user_id, wallet_id, amount, fee_amount, currency, flow_type')
       .eq('bridge_transfer_id', bridgeTransferId)
       .in('status', ['processing', 'created', 'waiting_deposit'])
       .maybeSingle();
+
+    // Flujos off-ramp de wallet reservan en source_currency (USDC), no en destination_currency.
+    // Su liberación se hace en el bloque failedOrder usando failedOrder.currency (correcto).
+    // Si se liberara aquí con transfer.destination_currency se usaría la moneda incorrecta (USD
+    // para fiat_us) o se liberaría doble (USDC para crypto). Por eso se omite en esos casos.
+    const offRampWalletFlows = ['bridge_wallet_to_crypto', 'bridge_wallet_to_fiat_us'];
+    const isOffRampWalletFlow =
+      failedOrder != null && offRampWalletFlows.includes(failedOrder.flow_type);
+
+    // 4. Liberar saldo reservado (solo para flujos que no tienen liberación propia)
+    if (!isOffRampWalletFlow) {
+      await this.supabase.rpc('release_reserved_balance', {
+        p_user_id: transfer.user_id,
+        p_currency: currency.toUpperCase(),
+        p_amount: payoutAmount,
+      });
+    }
 
     if (failedOrder) {
       await this.supabase
@@ -1221,15 +1232,10 @@ export class WebhooksService {
         })
         .eq('id', failedOrder.id);
 
-      // Liberar balance reservado de la payment_order
-      // Solo se reserva amount (el fee lo gestiona Bridge vía developer_fee)
-      // FIX: Solo liberar balance para flujos de salida (off-ramps)
+      // Liberar balance reservado con la moneda de origen correcta (source_currency).
+      // Solo aplica a flujos off-ramp wallet donde se hizo reserve_balance al inicio.
       const orderTotal = parseFloat(failedOrder.amount ?? '0');
-      const offRampFlows = [
-        'bridge_wallet_to_crypto',
-        'bridge_wallet_to_fiat_us',
-      ];
-      if (orderTotal > 0 && offRampFlows.includes(failedOrder.flow_type)) {
+      if (orderTotal > 0 && offRampWalletFlows.includes(failedOrder.flow_type)) {
         await this.supabase.rpc('release_reserved_balance', {
           p_user_id: failedOrder.user_id,
           p_currency: (failedOrder.currency ?? 'USDC').toUpperCase(),

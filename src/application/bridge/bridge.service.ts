@@ -926,10 +926,10 @@ export class BridgeService {
     if (reqErr || !req)
       throw new NotFoundException('Payout request no encontrado');
 
-    // Obtener wallet address
+    // Obtener wallet address y provider_wallet_id (Bridge Wallet ID)
     const { data: wallet } = await this.supabase
       .from('wallets')
-      .select('address')
+      .select('address, provider_wallet_id')
       .eq('id', req.wallet_id)
       .single();
 
@@ -952,9 +952,9 @@ export class BridgeService {
         {
           on_behalf_of: bridgeCustomerId,
           source: {
-            payment_rail: 'usdc',
-            currency: 'usdc',
-            from_address: wallet?.address,
+            payment_rail: 'bridge_wallet',
+            currency: req.currency.toLowerCase(),
+            bridge_wallet_id: wallet?.provider_wallet_id,
           },
           destination: {
             payment_rail: req.payment_rail,
