@@ -217,13 +217,13 @@ export class ExchangeRatesService {
         ? 1 + spreadPercent / 100
         : 1 - spreadPercent / 100;
         
-      const effectiveRate = baseRate * spreadMultiplier;
+      const effectiveRate = Math.round(baseRate * spreadMultiplier * 100) / 100;
 
       return {
         ...row,
         base_rate: baseRate,
         spread_percent: spreadPercent,
-        effective_rate: parseFloat(effectiveRate.toFixed(6)),
+        effective_rate: effectiveRate,
       };
     });
   }
