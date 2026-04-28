@@ -161,13 +161,13 @@ export class ExchangeRatesService {
     const spreadMultiplier = isBobPair
       ? 1 + spreadPercent / 100  // subir tasa para penalizar al dividir
       : 1 - spreadPercent / 100; // bajar tasa para penalizar al multiplicar
-    const effectiveRate = baseRate * spreadMultiplier;
+    const effectiveRate = Math.round(baseRate * spreadMultiplier * 100) / 100;
 
     return {
       pair: data.pair,
       base_rate: baseRate,
       spread_percent: spreadPercent,
-      effective_rate: parseFloat(effectiveRate.toFixed(6)),
+      effective_rate: effectiveRate,
       updated_at: data.updated_at,
     };
   }
