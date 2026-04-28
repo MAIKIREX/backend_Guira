@@ -1218,7 +1218,12 @@ export class PaymentOrdersService {
         .single();
 
       // Validar y normalizar la red del PSAV
-      const psavRail = (psavAccount.crypto_network ?? 'polygon').toLowerCase().trim();
+      if (!psavAccount.crypto_network || psavAccount.crypto_network.trim() === '') {
+        throw new Error(
+          `La cuenta PSAV para ${sourceCurrency} no tiene red crypto configurada. Contacta al administrador.`,
+        );
+      }
+      const psavRail = psavAccount.crypto_network.toLowerCase().trim();
       if (!ALLOWED_NETWORKS.includes(psavRail as any)) {
         throw new Error(
           `Red PSAV inválida: "${psavAccount.crypto_network}" (normalizada: "${psavRail}"). Valores permitidos: ${ALLOWED_NETWORKS.join(', ')}`,
