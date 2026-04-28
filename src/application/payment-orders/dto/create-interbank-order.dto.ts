@@ -10,6 +10,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ALLOWED_NETWORKS,
@@ -49,6 +50,7 @@ export class CreateInterbankOrderDto {
       'bolivia_to_wallet',
     ].includes(o.flow_type),
   )
+  @Transform(({ value }) => (typeof value === 'string' ? value.toLowerCase() : value))
   @IsString()
   @IsIn([...ALLOWED_CRYPTO_CURRENCIES, ...['usd', 'eur', 'mxn', 'brl', 'gbp', 'cop']], { message: 'Moneda de destino no soportada' })
   @IsOptional()
