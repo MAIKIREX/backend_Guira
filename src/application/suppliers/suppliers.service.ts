@@ -13,6 +13,17 @@ import {
 } from './dto/create-supplier.dto';
 import { BridgeService } from '../bridge/bridge.service';
 
+const FIAT_RAIL_TO_CURRENCY: Record<string, string> = {
+  ach: 'usd',
+  wire: 'usd',
+  sepa: 'eur',
+  spei: 'mxn',
+  pix: 'brl',
+  bre_b: 'cop',
+  co_bank_transfer: 'cop',
+  faster_payments: 'gbp',
+};
+
 @Injectable()
 export class SuppliersService {
   private readonly logger = new Logger(SuppliersService.name);
@@ -27,6 +38,7 @@ export class SuppliersService {
     const isFiat = dto.payment_rail !== 'crypto';
 
     let bridge_external_account_id: string | null = null;
+    let bridge_liquidation_address_id: string | null = null;
 
     if (isFiat) {
       // Registrar cuenta externa en Bridge (valida KYC internamente)
@@ -66,6 +78,43 @@ export class SuppliersService {
       });
 
       bridge_external_account_id = ea.id;
+
+      // Crear liquidation address apuntando a la external account recién creada
+      try {
+        const destinationCurrency =
+          FIAT_RAIL_TO_CURRENCY[dto.payment_rail] ?? dto.currency.toLowerCase();
+
+        const la = await this.bridgeService.createLiquidationAddress(userId, {
+          currency: dto.source_currency ?? 'usdc',
+          chain: dto.source_chain ?? 'base',
+          external_account_id: ea.bridge_external_account_id as string,
+          destination_payment_rail: dto.payment_rail,
+          destination_currency: destinationCurrency,
+        });
+
+        bridge_liquidation_address_id = la.bridge_liquidation_address_id as string;
+      } catch (err) {
+        this.logger.warn(
+          `Proveedor ${dto.name}: external account creada (${ea.id}) pero falló la liquidation address: ${err.message}`,
+        );
+      }
+    } else {
+      // Proveedor crypto: crear liquidation address apuntando a la wallet del proveedor
+      try {
+        const la = await this.bridgeService.createLiquidationAddress(userId, {
+          currency: dto.wallet_currency ?? 'usdc',
+          chain: dto.wallet_network ?? 'base',
+          destination_address: dto.wallet_address,
+          destination_payment_rail: dto.wallet_network ?? 'base',
+          destination_currency: dto.wallet_currency ?? 'usdc',
+        });
+
+        bridge_liquidation_address_id = la.bridge_liquidation_address_id as string;
+      } catch (err) {
+        this.logger.warn(
+          `Proveedor crypto ${dto.name}: falló la creación de liquidation address: ${err.message}`,
+        );
+      }
     }
 
     const bank_details = isFiat
@@ -124,6 +173,7 @@ export class SuppliersService {
         contact_email: dto.contact_email ?? null,
         notes: dto.notes ?? null,
         bridge_external_account_id,
+        bridge_liquidation_address_id,
         is_active: true,
         is_verified: false,
       })

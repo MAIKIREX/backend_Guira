@@ -172,6 +172,33 @@ export class CreateSupplierDto {
   @IsString()
   phone_number?: string;
 
+  // ── Liquidation Address: fuente crypto (solo para proveedores fiat) ──
+  @ApiPropertyOptional({
+    example: 'usdc',
+    description:
+      'Moneda crypto origen para la liquidation address (proveedores fiat). ' +
+      'Define qué token recibirá Bridge para convertir a fiat. Default: usdc.',
+    enum: ['usdb', 'usdc', 'usdt', 'dai', 'pyusd', 'eurc'],
+  })
+  @IsOptional()
+  @IsIn(['usdb', 'usdc', 'usdt', 'dai', 'pyusd', 'eurc'], {
+    message: 'source_currency debe ser uno de: usdb, usdc, usdt, dai, pyusd, eurc',
+  })
+  source_currency?: string;
+
+  @ApiPropertyOptional({
+    example: 'base',
+    description:
+      'Red blockchain origen para la liquidation address (proveedores fiat). ' +
+      'Define en qué chain escucha Bridge el depósito crypto. Default: base.',
+    enum: ['arbitrum', 'avalanche_c_chain', 'base', 'celo', 'ethereum', 'optimism', 'polygon', 'solana', 'stellar', 'tempo', 'tron'],
+  })
+  @IsOptional()
+  @IsIn(['arbitrum', 'avalanche_c_chain', 'base', 'celo', 'ethereum', 'optimism', 'polygon', 'solana', 'stellar', 'tempo', 'tron'], {
+    message: 'source_chain debe ser una de: arbitrum, avalanche_c_chain, base, celo, ethereum, optimism, polygon, solana, stellar, tempo, tron',
+  })
+  source_chain?: string;
+
   // ── Crypto Wallet ──
   @ApiPropertyOptional()
   @IsOptional()

@@ -16,8 +16,8 @@ import { CreatePayoutRequestDto } from './dto/create-payout.dto';
 import {
   CreateVirtualAccountDto,
   CreateExternalAccountDto,
-  CreateLiquidationAddressDto,
 } from './dto/create-virtual-account.dto';
+import { CreateLiquidationAddressDto } from './dto/create-liquidation-address.dto';
 import { UpdateVirtualAccountDto } from './dto/update-virtual-account.dto';
 
 @Injectable()
@@ -1216,11 +1216,41 @@ export class BridgeService {
         ...(dto.external_account_id
           ? { external_account_id: dto.external_account_id }
           : {}),
+        ...(dto.destination_address
+          ? { destination_address: dto.destination_address }
+          : {}),
       },
       `la-${userId}-${dto.currency}-${dto.chain}-${Date.now()}`,
     );
 
-    return bridgeLA;
+    const { data, error } = await this.supabase
+      .from('bridge_liquidation_addresses')
+      .insert({
+        user_id: userId,
+        bridge_liquidation_address_id: bridgeLA.id as string,
+        bridge_customer_id: profile.bridge_customer_id,
+        chain: bridgeLA.chain as string,
+        currency: bridgeLA.currency as string,
+        address: bridgeLA.address as string ?? null,
+        destination_payment_rail: bridgeLA.destination_payment_rail as string ?? dto.destination_payment_rail,
+        destination_currency: bridgeLA.destination_currency as string ?? dto.destination_currency,
+        destination_external_account_id: dto.external_account_id ?? null,
+        destination_address: dto.destination_address ?? null,
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      this.logger.error(
+        `Error guardando liquidation address en DB para usuario ${userId}: ${error.message}`,
+      );
+      throw new BadRequestException(
+        `Liquidation address creada en Bridge pero no pudo guardarse localmente: ${error.message}`,
+      );
+    }
+
+    return data;
   }
 
   async listLiquidationAddresses(userId: string) {

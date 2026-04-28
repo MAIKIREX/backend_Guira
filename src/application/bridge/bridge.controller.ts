@@ -24,8 +24,8 @@ import { CreatePayoutRequestDto } from './dto/create-payout.dto';
 import {
   CreateVirtualAccountDto,
   CreateExternalAccountDto,
-  CreateLiquidationAddressDto,
 } from './dto/create-virtual-account.dto';
+import { CreateLiquidationAddressDto } from './dto/create-liquidation-address.dto';
 import { UpdateVirtualAccountDto } from './dto/update-virtual-account.dto';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
