@@ -2356,6 +2356,108 @@ export class PaymentOrdersService {
       reference_id: orderId,
     });
 
+    // ── Bolivia-to-World: crear Bridge Transfer para que PSAV reciba instrucciones Solana ──
+    // El transfer source es USDC/Solana con monto flexible (PSAV convierte BOB→USDC y envía).
+    // Bridge notifica via webhook (payment_processed) cuando el pago fiat llegó al destino.
+    if (order.flow_type === 'bolivia_to_world') {
+      // 1. Cargar datos de la cuenta externa registrada en Bridge
+      const { data: extAccount } = await this.supabase
+        .from('bridge_external_accounts')
+        .select('bridge_external_account_id, payment_rail, currency')
+        .eq('id', order.external_account_id)
+        .single();
+
+      if (!extAccount?.bridge_external_account_id) {
+        throw new BadRequestException(
+          'La cuenta externa del cliente no tiene bridge_external_account_id. ' +
+          'Registra la cuenta en Bridge antes de aprobar.',
+        );
+      }
+
+      // 2. Cargar bridge_customer_id del cliente
+      const { data: profile } = await this.supabase
+        .from('profiles')
+        .select('bridge_customer_id')
+        .eq('id', order.user_id)
+        .single();
+
+      if (!profile?.bridge_customer_id) {
+        throw new BadRequestException(
+          'El cliente no tiene bridge_customer_id. Debe completar el KYC de Bridge primero.',
+        );
+      }
+
+      // 3. Obtener fee percent (override del cliente → global fees_config)
+      const feePercent = await this.feesService.getFeePercent(
+        order.user_id,
+        'interbank_bo_out',
+        'psav',
+      );
+
+      // 4. Llamar Bridge API — idempotency key = orderId evita duplicados en reintentos
+      const bridgePayload = {
+        on_behalf_of: profile.bridge_customer_id,
+        source: { currency: 'usdc', payment_rail: 'solana' },
+        destination: {
+          payment_rail: extAccount.payment_rail,
+          currency: (extAccount.currency as string).toLowerCase(),
+          external_account_id: extAccount.bridge_external_account_id,
+        },
+        developer_fee_percent: feePercent,
+        // amount se omite intencionalmente: flexible_amount requiere ausencia del campo
+        features: { allow_any_from_address: true, flexible_amount: true },
+      };
+
+      const bridgeResult = await this.bridgeApi.post<Record<string, unknown>>(
+        '/v0/transfers',
+        bridgePayload,
+        orderId,
+      );
+
+      const transferId = bridgeResult.id as string;
+      const sourceDepositInstructions = (bridgeResult.source_deposit_instructions ?? {}) as Record<string, unknown>;
+      const feePercentNumeric = parseFloat(feePercent);
+
+      // 5. Persistir bridge_transfer_id e instrucciones de depósito Solana en la orden
+      await this.supabase
+        .from('payment_orders')
+        .update({
+          bridge_transfer_id: transferId,
+          bridge_source_deposit_instructions: sourceDepositInstructions,
+        })
+        .eq('id', orderId);
+
+      // 6. Registrar en bridge_transfers para que el webhook actualice estado al recibir el pago
+      await this.supabase.from('bridge_transfers').insert({
+        user_id: order.user_id,
+        bridge_transfer_id: transferId,
+        idempotency_key: orderId,
+        transfer_kind: 'interbank_offramp',
+        source_payment_rail: 'solana',
+        source_currency: 'usdc',
+        destination_payment_rail: extAccount.payment_rail,
+        destination_currency: (extAccount.currency as string).toLowerCase(),
+        destination_type: 'external_account',
+        destination_id: extAccount.bridge_external_account_id,
+        amount: parseFloat(order.net_amount ?? order.amount),
+        net_amount: parseFloat(order.net_amount ?? order.amount),
+        developer_fee_percent: feePercentNumeric,
+        bridge_state: (bridgeResult.state as string) ?? 'awaiting_funds',
+        source_deposit_instructions: sourceDepositInstructions,
+        bridge_raw_response: bridgeResult,
+        status: 'pending',
+      });
+
+      // Propagar cambios al objeto que se retorna
+      updated.bridge_transfer_id = transferId;
+      updated.bridge_source_deposit_instructions = sourceDepositInstructions;
+
+      this.logger.log(
+        `🌉 Bridge Transfer ${transferId} creado para orden bolivia_to_world ${orderId}. ` +
+        `PSAV debe enviar USDC a Solana: ${sourceDepositInstructions?.to_address ?? 'ver source_deposit_instructions'}`,
+      );
+    }
+
     return updated;
   }
 
@@ -2367,9 +2469,9 @@ export class PaymentOrdersService {
       .single();
 
     if (!order) throw new NotFoundException('Orden no encontrada');
-    if (order.flow_type === 'fiat_bo_to_bridge_wallet') {
+    if (['fiat_bo_to_bridge_wallet', 'bolivia_to_world'].includes(order.flow_type ?? '')) {
       throw new BadRequestException(
-        'Este flujo se completa automáticamente por webhook de Bridge. markSent no está disponible para fiat_bo_to_bridge_wallet.',
+        'Este flujo se completa automáticamente por webhook de Bridge. markSent no está disponible.',
       );
     }
     if (order.status !== 'processing') {
