@@ -45,7 +45,9 @@ export class BridgeController {
   // ── Virtual Accounts ──────────────────
 
   @Post('virtual-accounts')
-  @Throttle({ default: { limit: VA_THROTTLE_CONFIG.limit, ttl: VA_THROTTLE_CONFIG.ttl } })
+  @Throttle({
+    default: { limit: VA_THROTTLE_CONFIG.limit, ttl: VA_THROTTLE_CONFIG.ttl },
+  })
   @ApiOperation({
     summary: 'Crear Virtual Account para recepción de depósitos',
   })
@@ -55,7 +57,8 @@ export class BridgeController {
   })
   @ApiResponse({
     status: 429,
-    description: 'Rate limit excedido — máximo 6 creaciones de VA cada 10 minutos',
+    description:
+      'Rate limit excedido — máximo 6 creaciones de VA cada 10 minutos',
   })
   createVirtualAccount(
     @CurrentUser() user: AuthenticatedUser,
@@ -250,7 +253,9 @@ export class AdminBridgeController {
 
   @Get('va-fee-defaults')
   @Roles('staff', 'admin', 'super_admin')
-  @ApiOperation({ summary: 'Listar fees globales por defecto (6 monedas × 2 destinos)' })
+  @ApiOperation({
+    summary: 'Listar fees globales por defecto (6 monedas × 2 destinos)',
+  })
   listVaFeeDefaults() {
     return this.bridgeService.listVaFeeDefaults();
   }
@@ -263,14 +268,23 @@ export class AdminBridgeController {
       type: 'object',
       properties: {
         source_currency: { type: 'string', example: 'usd' },
-        destination_type: { type: 'string', example: 'wallet_bridge', enum: ['wallet_bridge', 'wallet_external'] },
+        destination_type: {
+          type: 'string',
+          example: 'wallet_bridge',
+          enum: ['wallet_bridge', 'wallet_external'],
+        },
         fee_percent: { type: 'number', example: 1.5 },
       },
       required: ['source_currency', 'destination_type', 'fee_percent'],
     },
   })
   updateVaFeeDefault(
-    @Body() body: { source_currency: string; destination_type: string; fee_percent: number },
+    @Body()
+    body: {
+      source_currency: string;
+      destination_type: string;
+      fee_percent: number;
+    },
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.bridgeService.updateVaFeeDefault(
@@ -286,30 +300,48 @@ export class AdminBridgeController {
   @Get('users/:userId/va-fee-overrides')
   @Roles('staff', 'admin', 'super_admin')
   @ApiOperation({ summary: 'Listar fee overrides de un usuario' })
-  listVaFeeOverrides(
-    @Param('userId', new ParseUUIDPipe()) userId: string,
-  ) {
+  listVaFeeOverrides(@Param('userId', new ParseUUIDPipe()) userId: string) {
     return this.bridgeService.listVaFeeOverrides(userId);
   }
 
   @Patch('users/:userId/va-fee-overrides')
   @Roles('admin', 'super_admin')
-  @ApiOperation({ summary: 'Establecer/actualizar un fee override para un usuario' })
+  @ApiOperation({
+    summary: 'Establecer/actualizar un fee override para un usuario',
+  })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
         source_currency: { type: 'string', example: 'usd' },
-        destination_type: { type: 'string', example: 'wallet_bridge', enum: ['wallet_bridge', 'wallet_external'] },
+        destination_type: {
+          type: 'string',
+          example: 'wallet_bridge',
+          enum: ['wallet_bridge', 'wallet_external'],
+        },
         fee_percent: { type: 'number', example: 0.5 },
-        reason: { type: 'string', example: 'Tarifa preferencial para cliente VIP' },
+        reason: {
+          type: 'string',
+          example: 'Tarifa preferencial para cliente VIP',
+        },
       },
-      required: ['source_currency', 'destination_type', 'fee_percent', 'reason'],
+      required: [
+        'source_currency',
+        'destination_type',
+        'fee_percent',
+        'reason',
+      ],
     },
   })
   setVaFeeOverride(
     @Param('userId', new ParseUUIDPipe()) userId: string,
-    @Body() body: { source_currency: string; destination_type: string; fee_percent: number; reason: string },
+    @Body()
+    body: {
+      source_currency: string;
+      destination_type: string;
+      fee_percent: number;
+      reason: string;
+    },
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.bridgeService.setVaFeeOverride(userId, body, actor.id);
@@ -323,7 +355,11 @@ export class AdminBridgeController {
       type: 'object',
       properties: {
         source_currency: { type: 'string', example: 'usd' },
-        destination_type: { type: 'string', example: 'wallet_bridge', enum: ['wallet_bridge', 'wallet_external'] },
+        destination_type: {
+          type: 'string',
+          example: 'wallet_bridge',
+          enum: ['wallet_bridge', 'wallet_external'],
+        },
       },
       required: ['source_currency', 'destination_type'],
     },
@@ -333,17 +369,22 @@ export class AdminBridgeController {
     @Body() body: { source_currency: string; destination_type: string },
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    return this.bridgeService.clearVaFeeOverride(userId, body.source_currency, body.destination_type, actor.id);
+    return this.bridgeService.clearVaFeeOverride(
+      userId,
+      body.source_currency,
+      body.destination_type,
+      actor.id,
+    );
   }
 
   // ── VA Fee Matrix (resuelto) ─────────────────
 
   @Get('users/:userId/va-fee-matrix')
   @Roles('staff', 'admin', 'super_admin')
-  @ApiOperation({ summary: 'Obtener matriz de fees resueltos (12 combinaciones) con fuente' })
-  getVaFeeMatrix(
-    @Param('userId', new ParseUUIDPipe()) userId: string,
-  ) {
+  @ApiOperation({
+    summary: 'Obtener matriz de fees resueltos (12 combinaciones) con fuente',
+  })
+  getVaFeeMatrix(@Param('userId', new ParseUUIDPipe()) userId: string) {
     return this.bridgeService.getResolvedVaFeeMatrix(userId);
   }
 
@@ -362,7 +403,9 @@ export class AdminBridgeController {
 
   @Patch('virtual-accounts/:id')
   @Roles('admin', 'super_admin')
-  @ApiOperation({ summary: 'Actualizar VA existente (fee, destino, moneda) via PUT a Bridge' })
+  @ApiOperation({
+    summary: 'Actualizar VA existente (fee, destino, moneda) via PUT a Bridge',
+  })
   updateVirtualAccount(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateVirtualAccountDto,

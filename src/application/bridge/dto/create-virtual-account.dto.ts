@@ -220,11 +220,29 @@ export class CreateExternalAccountDto {
 
   @ApiProperty({
     example: 'wire',
-    enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'faster_payments', 'co_bank_transfer'],
+    enum: [
+      'ach',
+      'wire',
+      'sepa',
+      'spei',
+      'pix',
+      'bre_b',
+      'faster_payments',
+      'co_bank_transfer',
+    ],
     description:
       'Rail de pago. Se usa internamente para derivar el account_type de Bridge (us, iban, clabe, pix, bre_b, gb, co_bank_transfer).',
   })
-  @IsEnum(['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'faster_payments', 'co_bank_transfer'])
+  @IsEnum([
+    'ach',
+    'wire',
+    'sepa',
+    'spei',
+    'pix',
+    'bre_b',
+    'faster_payments',
+    'co_bank_transfer',
+  ])
   payment_rail: string;
 
   // ── Campos opcionales globales ──
@@ -412,7 +430,8 @@ export class CreateExternalAccountDto {
 
   @ApiPropertyOptional({
     example: '123456',
-    description: 'Sort code UK, exactamente 6 dígitos sin guiones (requerido para faster_payments).',
+    description:
+      'Sort code UK, exactamente 6 dígitos sin guiones (requerido para faster_payments).',
   })
   @IsOptional()
   @IsString()
@@ -424,23 +443,50 @@ export class CreateExternalAccountDto {
 
   @ApiPropertyOptional({
     example: '1007',
-    description: 'Código del banco colombiano. Ej: 1007 = Bancolombia, 1051 = Davivienda, 1507 = Nequi.',
+    description:
+      'Código del banco colombiano. Ej: 1007 = Bancolombia, 1051 = Davivienda, 1507 = Nequi.',
   })
   @IsOptional()
   @IsString()
   bank_code?: string;
 
   @ApiPropertyOptional({
-    enum: ['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'],
-    description: 'Tipo de documento del titular (Colombia). cc=Cédula, nit=NIT empresarial, etc.',
+    enum: [
+      'cc',
+      'ce',
+      'nit',
+      'rut',
+      'pa',
+      'ppt',
+      'ti',
+      'rc',
+      'te',
+      'die',
+      'nd',
+    ],
+    description:
+      'Tipo de documento del titular (Colombia). cc=Cédula, nit=NIT empresarial, etc.',
   })
   @IsOptional()
-  @IsEnum(['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'])
+  @IsEnum([
+    'cc',
+    'ce',
+    'nit',
+    'rut',
+    'pa',
+    'ppt',
+    'ti',
+    'rc',
+    'te',
+    'die',
+    'nd',
+  ])
   document_type?: string;
 
   @ApiPropertyOptional({
     example: '+573001234567',
-    description: 'Teléfono del titular en formato E.164 (requerido para co_bank_transfer).',
+    description:
+      'Teléfono del titular en formato E.164 (requerido para co_bank_transfer).',
   })
   @IsOptional()
   @IsString()

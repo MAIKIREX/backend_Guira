@@ -391,15 +391,17 @@ export class FeesService {
     // 3. Calcular en centavos enteros para evitar errores de punto flotante
     const amountCents = Math.round(amount * 100);
     const feePercent = parseFloat(feeConfig.fee_percent ?? '0');
-    const feeFixedCents = Math.round(parseFloat(feeConfig.fee_fixed ?? '0') * 100);
+    const feeFixedCents = Math.round(
+      parseFloat(feeConfig.fee_fixed ?? '0') * 100,
+    );
 
     let feeCents = 0;
     if (feeConfig.fee_type === 'percent') {
-      feeCents = Math.round(amountCents * feePercent / 100);
+      feeCents = Math.round((amountCents * feePercent) / 100);
     } else if (feeConfig.fee_type === 'fixed') {
       feeCents = feeFixedCents;
     } else if (feeConfig.fee_type === 'mixed') {
-      feeCents = feeFixedCents + Math.round(amountCents * feePercent / 100);
+      feeCents = feeFixedCents + Math.round((amountCents * feePercent) / 100);
     }
 
     // 4. Aplicar min/max en centavos
@@ -414,4 +416,3 @@ export class FeesService {
     };
   }
 }
-

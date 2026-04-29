@@ -171,13 +171,19 @@ export class ClientBankAccountsService {
 
     // 4. Construir los cambios pendientes
     const pendingChanges: Record<string, any> = {};
-    if (dto.bank_name !== undefined) pendingChanges.bank_name = dto.bank_name.trim();
-    if (dto.account_number !== undefined) pendingChanges.account_number = dto.account_number.trim();
-    if (dto.account_holder !== undefined) pendingChanges.account_holder = dto.account_holder.trim();
-    if (dto.account_type !== undefined) pendingChanges.account_type = dto.account_type;
+    if (dto.bank_name !== undefined)
+      pendingChanges.bank_name = dto.bank_name.trim();
+    if (dto.account_number !== undefined)
+      pendingChanges.account_number = dto.account_number.trim();
+    if (dto.account_holder !== undefined)
+      pendingChanges.account_holder = dto.account_holder.trim();
+    if (dto.account_type !== undefined)
+      pendingChanges.account_type = dto.account_type;
 
     if (Object.keys(pendingChanges).length === 0) {
-      throw new BadRequestException('No se proporcionaron cambios para actualizar.');
+      throw new BadRequestException(
+        'No se proporcionaron cambios para actualizar.',
+      );
     }
 
     const { data: updated, error } = await this.supabase
@@ -209,7 +215,10 @@ export class ClientBankAccountsService {
         account_holder: account.account_holder,
         account_type: account.account_type,
       },
-      new_values: { ...pendingChanges, change_reason: dto.change_reason.trim() },
+      new_values: {
+        ...pendingChanges,
+        change_reason: dto.change_reason.trim(),
+      },
       source: 'client_profile',
     });
 
@@ -291,7 +300,9 @@ export class ClientBankAccountsService {
 
     if (!account) throw new NotFoundException('Cuenta bancaria no encontrada.');
     if (account.status !== 'pending_approval') {
-      throw new BadRequestException('Esta cuenta no tiene cambios pendientes de aprobación.');
+      throw new BadRequestException(
+        'Esta cuenta no tiene cambios pendientes de aprobación.',
+      );
     }
 
     const pendingChanges = account.pending_changes ?? {};
@@ -303,10 +314,14 @@ export class ClientBankAccountsService {
       updated_at: new Date().toISOString(),
     };
 
-    if (pendingChanges.bank_name) updateData.bank_name = pendingChanges.bank_name;
-    if (pendingChanges.account_number) updateData.account_number = pendingChanges.account_number;
-    if (pendingChanges.account_holder) updateData.account_holder = pendingChanges.account_holder;
-    if (pendingChanges.account_type) updateData.account_type = pendingChanges.account_type;
+    if (pendingChanges.bank_name)
+      updateData.bank_name = pendingChanges.bank_name;
+    if (pendingChanges.account_number)
+      updateData.account_number = pendingChanges.account_number;
+    if (pendingChanges.account_holder)
+      updateData.account_holder = pendingChanges.account_holder;
+    if (pendingChanges.account_type)
+      updateData.account_type = pendingChanges.account_type;
 
     const { data: updated, error } = await this.supabase
       .from('client_bank_accounts')
@@ -452,7 +467,7 @@ export class ClientBankAccountsService {
         .select('full_name, email')
         .eq('id', userId)
         .single();
-        
+
       const userName = profile?.full_name || profile?.email || 'Un usuario';
 
       // Obtener IDs de staff/admin

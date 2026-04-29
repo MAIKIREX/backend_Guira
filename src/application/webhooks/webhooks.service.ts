@@ -232,7 +232,10 @@ export class WebhooksService {
         break;
       case 'transfer.updated.status_transitioned':
       case 'transfer.updated': {
-        const data = (payload.event_object || payload.data) as Record<string, unknown>;
+        const data = (payload.event_object || payload.data) as Record<
+          string,
+          unknown
+        >;
         const state = data?.state as string;
         if (state === 'payment_processed') {
           await this.handleTransferPaymentProcessed(payload);
@@ -241,7 +244,9 @@ export class WebhooksService {
         } else if (state === 'failed' || state === 'returned') {
           await this.handleTransferFailed(payload);
         } else {
-          this.logger.log(`transfer status_transitioned a ${state} - actualizando bridge_state sin acción adicional`);
+          this.logger.log(
+            `transfer status_transitioned a ${state} - actualizando bridge_state sin acción adicional`,
+          );
           if (state && data?.id) {
             await this.supabase
               .from('bridge_transfers')
@@ -273,6 +278,14 @@ export class WebhooksService {
       // ── Liquidation ───────────────────────────────────────────────────────────
       case 'liquidation_address.payment_completed':
         await this.handleLiquidationPayment(payload);
+        break;
+
+      // ── Liquidation Address Drains (bolivia_to_world) ──────────────────────
+      case 'liquidation_address.drain.created':
+        await this.handleDrainCreated(payload);
+        break;
+      case 'liquidation_address.drain.updated.status_transitioned':
+        await this.handleDrainUpdated(payload);
         break;
 
       default:
@@ -381,7 +394,12 @@ export class WebhooksService {
         .from('kyc_applications')
         .select('id')
         .eq('user_id', profile.id)
-        .in('status', ['sent_to_bridge', 'submitted', 'under_review', 'pending'])
+        .in('status', [
+          'sent_to_bridge',
+          'submitted',
+          'under_review',
+          'pending',
+        ])
         .maybeSingle();
 
       if (kycApp) {
@@ -403,7 +421,12 @@ export class WebhooksService {
             updated_at: new Date().toISOString(),
           })
           .eq('user_id', profile.id)
-          .in('status', ['sent_to_bridge', 'submitted', 'under_review', 'pending']);
+          .in('status', [
+            'sent_to_bridge',
+            'submitted',
+            'under_review',
+            'pending',
+          ]);
       }
 
       // Actualizar perfil a approved
@@ -426,13 +449,13 @@ export class WebhooksService {
         user_id: profile.id,
         type: 'onboarding',
         title: 'Verificación Aprobada',
-        message: 'Tu verificación ha sido aprobada. Ya puedes operar en la plataforma.',
+        message:
+          'Tu verificación ha sido aprobada. Ya puedes operar en la plataforma.',
       });
 
       this.logger.log(
         `✅ customer.updated: customer ${customerId} → active, wallets inicializadas para user ${profile.id}`,
       );
-
     } else if (newStatus === 'rejected') {
       // ── RECHAZO POR BRIDGE ──
       // Extraer issues del payload si están disponibles
@@ -448,7 +471,6 @@ export class WebhooksService {
         customerId,
         rejectionReasons,
       );
-
     } else {
       this.logger.log(
         `customer.updated: status=${newStatus} para customer ${customerId} — sin acción final`,
@@ -522,7 +544,12 @@ export class WebhooksService {
             updated_at: new Date().toISOString(),
           })
           .eq('user_id', userId)
-          .in('status', ['sent_to_bridge', 'submitted', 'under_review', 'pending']);
+          .in('status', [
+            'sent_to_bridge',
+            'submitted',
+            'under_review',
+            'pending',
+          ]);
       } else {
         await this.supabase
           .from('kyc_applications')
@@ -532,7 +559,12 @@ export class WebhooksService {
             updated_at: new Date().toISOString(),
           })
           .eq('user_id', userId)
-          .in('status', ['sent_to_bridge', 'submitted', 'under_review', 'pending']);
+          .in('status', [
+            'sent_to_bridge',
+            'submitted',
+            'under_review',
+            'pending',
+          ]);
       }
 
       // Actualizar perfil
@@ -568,7 +600,6 @@ export class WebhooksService {
       this.logger.log(
         `✅ kyc_link aprobado para customer ${customerId} (user ${userId})`,
       );
-
     } else if (kycStatus === 'rejected' || kycStatus === 'failed') {
       // ── RECHAZO vía KYC Link ──
       const rejectionReasons = this.extractBridgeIssues(eventObject);
@@ -590,7 +621,6 @@ export class WebhooksService {
         action: `${typeLabel}_REJECTED_WEBHOOK`,
         description: `Verificación ${typeLabel} rechazada por Bridge — Issues: ${rejectionReasons.join(', ')}`,
       });
-
     } else {
       this.logger.log(
         `kyc_link.updated.status_transitioned: kyc_status=${kycStatus} — sin acción`,
@@ -880,7 +910,10 @@ export class WebhooksService {
     payload: Record<string, unknown>,
     bridgeState: string = 'complete',
   ): Promise<void> {
-    const data = (payload?.event_object || payload?.data) as Record<string, unknown>;
+    const data = (payload?.event_object || payload?.data) as Record<
+      string,
+      unknown
+    >;
     const bridgeTransferId = data?.id as string;
     if (!bridgeTransferId) throw new Error('transfer.complete sin transfer ID');
 
@@ -913,7 +946,7 @@ export class WebhooksService {
     if (!transfer) {
       this.logger.warn(
         `⚠️ handleTransferComplete: bridge_transfer no encontrada para ID: ${bridgeTransferId}. ` +
-        `Continuando con actualización de payment_order si existe.`,
+          `Continuando con actualización de payment_order si existe.`,
       );
     }
 
@@ -935,9 +968,16 @@ export class WebhooksService {
     // la orden queda en 'pending' indefinidamente sin este fix.
     const { data: paymentOrder } = await this.supabase
       .from('payment_orders')
-      .select('id, user_id, wallet_id, flow_type, amount, fee_amount, amount_destination, currency, source_currency, destination_currency')
+      .select(
+        'id, user_id, wallet_id, flow_type, amount, fee_amount, amount_destination, currency, source_currency, destination_currency',
+      )
       .eq('bridge_transfer_id', bridgeTransferId)
-      .in('status', ['pending', 'waiting_deposit', 'processing', 'deposit_received'])
+      .in('status', [
+        'pending',
+        'waiting_deposit',
+        'processing',
+        'deposit_received',
+      ])
       .maybeSingle();
 
     if (paymentOrder) {
@@ -953,7 +993,11 @@ export class WebhooksService {
         const totalReserved = parseFloat(paymentOrder.amount ?? '0');
         await this.supabase.rpc('settle_and_release_reserved', {
           p_user_id: paymentOrder.user_id,
-          p_currency: (paymentOrder.source_currency ?? paymentOrder.currency ?? 'USDC').toUpperCase(),
+          p_currency: (
+            paymentOrder.source_currency ??
+            paymentOrder.currency ??
+            'USDC'
+          ).toUpperCase(),
           p_amount: totalReserved,
           p_reference_id: paymentOrder.id,
         });
@@ -992,116 +1036,133 @@ export class WebhooksService {
           `🔄 Payment order ${paymentOrder.id} (bridge_wallet_to_fiat_bo): Tramo 1 completado — crypto en PSAV. Pendiente payout BOB manual.`,
         );
       } else {
-      // Comportamiento original: marcar orden como completed
-      const initialAmount = parseFloat(paymentOrder.amount ?? '0');
-      await this.supabase
-        .from('payment_orders')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-          tx_hash: (data?.destination_tx_hash as string) ?? null,
-          amount_destination: receipt?.final_amount
-            ? parseFloat(receipt.final_amount as string)
-            : null,
-          // Guardar metadata histórica si fue on-ramp flexible (amount original 0)
-          ...(initialAmount === 0 && receipt?.initial_amount ? { amount: parseFloat(receipt.initial_amount as string) } : {}),
-          ...(initialAmount === 0 && receipt?.developer_fee ? { fee_amount: parseFloat(receipt.developer_fee as string) } : {}),
-        })
-        .eq('id', paymentOrder.id);
+        // Comportamiento original: marcar orden como completed
+        const initialAmount = parseFloat(paymentOrder.amount ?? '0');
+        await this.supabase
+          .from('payment_orders')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            tx_hash: (data?.destination_tx_hash as string) ?? null,
+            amount_destination: receipt?.final_amount
+              ? parseFloat(receipt.final_amount as string)
+              : null,
+            // Guardar metadata histórica si fue on-ramp flexible (amount original 0)
+            ...(initialAmount === 0 && receipt?.initial_amount
+              ? { amount: parseFloat(receipt.initial_amount as string) }
+              : {}),
+            ...(initialAmount === 0 && receipt?.developer_fee
+              ? { fee_amount: parseFloat(receipt.developer_fee as string) }
+              : {}),
+          })
+          .eq('id', paymentOrder.id);
 
-      // Asentar ledger entries vinculadas a la payment_order
-      // Si tenemos receipt.final_amount de Bridge, actualizar el monto real recibido
-      const receiptFinalAmount = receipt?.final_amount
-        ? parseFloat(receipt.final_amount as string)
-        : null;
+        // Asentar ledger entries vinculadas a la payment_order
+        // Si tenemos receipt.final_amount de Bridge, actualizar el monto real recibido
+        const receiptFinalAmount = receipt?.final_amount
+          ? parseFloat(receipt.final_amount as string)
+          : null;
 
-      const { data: settledEntries } = await this.supabase
-        .from('ledger_entries')
-        .update({
-          status: 'settled',
-          ...(receiptFinalAmount != null ? { amount: receiptFinalAmount } : {}),
-        })
-        .eq('reference_type', 'payment_order')
-        .eq('reference_id', paymentOrder.id)
-        .eq('status', 'pending')
-        .select('id');
+        const { data: settledEntries } = await this.supabase
+          .from('ledger_entries')
+          .update({
+            status: 'settled',
+            ...(receiptFinalAmount != null
+              ? { amount: receiptFinalAmount }
+              : {}),
+          })
+          .eq('reference_type', 'payment_order')
+          .eq('reference_id', paymentOrder.id)
+          .eq('status', 'pending')
+          .select('id');
 
-      const settledCount = settledEntries?.length ?? 0;
+        const settledCount = settledEntries?.length ?? 0;
 
-      // Liberar saldo reservado (off-ramp completado exitosamente)
-      // Solo se reserva dto.amount (el fee lo gestiona Bridge vía developer_fee)
-      const offRampFlows = [
-        'bridge_wallet_to_crypto',
-        'bridge_wallet_to_fiat_us',
-      ];
-      if (offRampFlows.includes(paymentOrder.flow_type)) {
-        const totalReserved = parseFloat(paymentOrder.amount ?? '0');
-        if (totalReserved > 0) {
-          await this.supabase.rpc('release_reserved_balance', {
-            p_user_id: paymentOrder.user_id,
-            p_currency: (paymentOrder.source_currency ?? paymentOrder.currency ?? 'USDC').toUpperCase(),
-            p_amount: totalReserved,
+        // Liberar saldo reservado (off-ramp completado exitosamente)
+        // Solo se reserva dto.amount (el fee lo gestiona Bridge vía developer_fee)
+        const offRampFlows = [
+          'bridge_wallet_to_crypto',
+          'bridge_wallet_to_fiat_us',
+        ];
+        if (offRampFlows.includes(paymentOrder.flow_type)) {
+          const totalReserved = parseFloat(paymentOrder.amount ?? '0');
+          if (totalReserved > 0) {
+            await this.supabase.rpc('release_reserved_balance', {
+              p_user_id: paymentOrder.user_id,
+              p_currency: (
+                paymentOrder.source_currency ??
+                paymentOrder.currency ??
+                'USDC'
+              ).toUpperCase(),
+              p_amount: totalReserved,
+            });
+            this.logger.log(
+              `💰 Reserva liberada para order ${paymentOrder.id}: ${totalReserved} ${paymentOrder.currency}`,
+            );
+          }
+        }
+
+        // Safety net: si no había ledger_entry pending para on-ramps,
+        // crear uno settled directamente para que el trigger actualice balances
+        const onRampFlows = [
+          'crypto_to_bridge_wallet',
+          'fiat_us_to_bridge_wallet',
+          'fiat_bo_to_bridge_wallet',
+        ];
+        if (
+          settledCount === 0 &&
+          paymentOrder.wallet_id &&
+          onRampFlows.includes(paymentOrder.flow_type)
+        ) {
+          // Usar receipt.final_amount (monto real) como fuente primaria.
+          // Fallback: fiat_bo guarda `amount` en BOB — usar amount_destination (USDC) para no sobre-acreditar.
+          // Otros on-ramp guardan `amount` ya en la moneda destino.
+          const fallbackNet =
+            paymentOrder.flow_type === 'fiat_bo_to_bridge_wallet'
+              ? parseFloat(paymentOrder.amount_destination ?? '0')
+              : parseFloat(paymentOrder.amount) -
+                parseFloat(paymentOrder.fee_amount ?? '0');
+          const creditAmount = receiptFinalAmount ?? fallbackNet;
+
+          const creditCurrency = (
+            paymentOrder.destination_currency ?? paymentOrder.currency
+          ).toUpperCase();
+          await this.supabase.from('ledger_entries').insert({
+            wallet_id: paymentOrder.wallet_id,
+            type: 'credit',
+            amount: creditAmount,
+            currency: creditCurrency,
+            status: 'settled',
+            reference_type: 'payment_order',
+            reference_id: paymentOrder.id,
+            description: `On-ramp completado (webhook): ${creditAmount} ${creditCurrency}`,
           });
-          this.logger.log(
-            `💰 Reserva liberada para order ${paymentOrder.id}: ${totalReserved} ${paymentOrder.currency}`,
+          this.logger.warn(
+            `⚠️ Safety net: ledger_entry credit settled creado para order ${paymentOrder.id} — monto real: ${creditAmount}`,
           );
         }
-      }
 
-      // Safety net: si no había ledger_entry pending para on-ramps,
-      // crear uno settled directamente para que el trigger actualice balances
-      const onRampFlows = [
-        'crypto_to_bridge_wallet',
-        'fiat_us_to_bridge_wallet',
-        'fiat_bo_to_bridge_wallet',
-      ];
-      if (
-        settledCount === 0 &&
-        paymentOrder.wallet_id &&
-        onRampFlows.includes(paymentOrder.flow_type)
-      ) {
-        // Usar receipt.final_amount (monto real) como fuente primaria.
-        // Fallback: fiat_bo guarda `amount` en BOB — usar amount_destination (USDC) para no sobre-acreditar.
-        // Otros on-ramp guardan `amount` ya en la moneda destino.
-        const fallbackNet = paymentOrder.flow_type === 'fiat_bo_to_bridge_wallet'
-          ? parseFloat(paymentOrder.amount_destination ?? '0')
-          : parseFloat(paymentOrder.amount) - parseFloat(paymentOrder.fee_amount ?? '0');
-        const creditAmount = receiptFinalAmount ?? fallbackNet;
+        // Notificación específica para on-ramp fiat_bo (el canal genérico de bridge_transfers
+        // no siempre incluye el monto real en destCurrency — esta notificación lo hace explícito)
+        if (paymentOrder.flow_type === 'fiat_bo_to_bridge_wallet') {
+          const creditAmount =
+            receiptFinalAmount ?? parseFloat(paymentOrder.amount ?? '0');
+          const destCurrency = (
+            paymentOrder.destination_currency ?? 'USDC'
+          ).toUpperCase();
+          await this.supabase.from('notifications').insert({
+            user_id: paymentOrder.user_id,
+            type: 'financial',
+            title: 'Fondeo Completado',
+            message: `Tu fondeo de ${creditAmount} ${destCurrency} ha sido acreditado en tu wallet Bridge.`,
+            reference_type: 'payment_order',
+            reference_id: paymentOrder.id,
+          });
+        }
 
-        const creditCurrency = (paymentOrder.destination_currency ?? paymentOrder.currency).toUpperCase();
-        await this.supabase.from('ledger_entries').insert({
-          wallet_id: paymentOrder.wallet_id,
-          type: 'credit',
-          amount: creditAmount,
-          currency: creditCurrency,
-          status: 'settled',
-          reference_type: 'payment_order',
-          reference_id: paymentOrder.id,
-          description: `On-ramp completado (webhook): ${creditAmount} ${creditCurrency}`,
-        });
-        this.logger.warn(
-          `⚠️ Safety net: ledger_entry credit settled creado para order ${paymentOrder.id} — monto real: ${creditAmount}`,
+        this.logger.log(
+          `✅ Payment order ${paymentOrder.id} completada vía webhook (transfer ${bridgeTransferId})`,
         );
-      }
-
-      // Notificación específica para on-ramp fiat_bo (el canal genérico de bridge_transfers
-      // no siempre incluye el monto real en destCurrency — esta notificación lo hace explícito)
-      if (paymentOrder.flow_type === 'fiat_bo_to_bridge_wallet') {
-        const creditAmount = receiptFinalAmount ?? parseFloat(paymentOrder.amount ?? '0');
-        const destCurrency = (paymentOrder.destination_currency ?? 'USDC').toUpperCase();
-        await this.supabase.from('notifications').insert({
-          user_id: paymentOrder.user_id,
-          type: 'financial',
-          title: 'Fondeo Completado',
-          message: `Tu fondeo de ${creditAmount} ${destCurrency} ha sido acreditado en tu wallet Bridge.`,
-          reference_type: 'payment_order',
-          reference_id: paymentOrder.id,
-        });
-      }
-
-      this.logger.log(
-        `✅ Payment order ${paymentOrder.id} completada vía webhook (transfer ${bridgeTransferId})`,
-      );
       }
     }
 
@@ -1162,7 +1223,10 @@ export class WebhooksService {
   private async handleTransferFailed(
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const data = (payload?.event_object || payload?.data) as Record<string, unknown>;
+    const data = (payload?.event_object || payload?.data) as Record<
+      string,
+      unknown
+    >;
     const bridgeTransferId = data?.id as string;
     if (!bridgeTransferId) throw new Error('transfer.failed sin transfer ID');
 
@@ -1224,7 +1288,10 @@ export class WebhooksService {
     // Su liberación se hace en el bloque failedOrder usando failedOrder.currency (correcto).
     // Si se liberara aquí con transfer.destination_currency se usaría la moneda incorrecta (USD
     // para fiat_us) o se liberaría doble (USDC para crypto). Por eso se omite en esos casos.
-    const offRampWalletFlows = ['bridge_wallet_to_crypto', 'bridge_wallet_to_fiat_us'];
+    const offRampWalletFlows = [
+      'bridge_wallet_to_crypto',
+      'bridge_wallet_to_fiat_us',
+    ];
     const isOffRampWalletFlow =
       failedOrder != null && offRampWalletFlows.includes(failedOrder.flow_type);
 
@@ -1249,7 +1316,10 @@ export class WebhooksService {
       // Liberar balance reservado con la moneda de origen correcta (source_currency).
       // Solo aplica a flujos off-ramp wallet donde se hizo reserve_balance al inicio.
       const orderTotal = parseFloat(failedOrder.amount ?? '0');
-      if (orderTotal > 0 && offRampWalletFlows.includes(failedOrder.flow_type)) {
+      if (
+        orderTotal > 0 &&
+        offRampWalletFlows.includes(failedOrder.flow_type)
+      ) {
         await this.supabase.rpc('release_reserved_balance', {
           p_user_id: failedOrder.user_id,
           p_currency: (failedOrder.currency ?? 'USDC').toUpperCase(),
@@ -1428,6 +1498,349 @@ export class WebhooksService {
   }
 
   // ═══════════════════════════════════════════════
+  //  HANDLER: liquidation_address.drain.created
+  //  Match el drain con un expediente bolivia_to_world en processing
+  //  usando monto + external_account_id del destino
+  // ═══════════════════════════════════════════════
+
+  private async handleDrainCreated(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const eventObject = (payload?.event_object ?? payload?.data) as Record<
+      string,
+      unknown
+    >;
+    const drainId = eventObject?.id as string;
+    const amount = parseFloat((eventObject?.amount as string) ?? '0');
+    const destination = eventObject?.destination as
+      | Record<string, unknown>
+      | undefined;
+
+    if (!drainId || !amount) {
+      this.logger.warn('⚠️ handleDrainCreated: payload sin drain ID o amount');
+      return;
+    }
+
+    // Extraer el external_account_id o to_address del destino del drain
+    const destExternalAccountId = destination?.external_account_id as
+      | string
+      | undefined;
+    const destToAddress = destination?.to_address as string | undefined;
+
+    this.logger.log(
+      `🔔 Drain created: ${drainId} — amount: ${amount}, ` +
+        `external_account_id: ${destExternalAccountId ?? 'N/A'}, ` +
+        `to_address: ${destToAddress ?? 'N/A'}`,
+    );
+
+    // ── Matching por external_account_id (flujo bolivia_to_world) ──
+    if (destExternalAccountId) {
+      // Resolver el UUID interno de bridge_external_accounts a partir del bridge ID
+      const { data: extAcct } = await this.supabase
+        .from('bridge_external_accounts')
+        .select('id')
+        .eq('bridge_external_account_id', destExternalAccountId)
+        .maybeSingle();
+
+      if (extAcct) {
+        // Buscar orden en processing que coincida por external_account_id y monto
+        const { data: matchedOrder } = await this.supabase
+          .from('payment_orders')
+          .select('id, user_id, amount_destination')
+          .eq('status', 'processing')
+          .in('flow_type', ['bolivia_to_world'])
+          .eq('external_account_id', extAcct.id)
+          .is('bridge_drain_id', null)
+          .order('created_at', { ascending: true })
+          .limit(10);
+
+        // Buscar match exacto por monto (con tolerancia de ±0.02 por redondeo)
+        const tolerance = 0.02;
+        const matched = (matchedOrder ?? []).find((o) => {
+          const orderAmount = parseFloat(o.amount_destination ?? '0');
+          return Math.abs(orderAmount - amount) <= tolerance;
+        });
+
+        if (matched) {
+          await this.supabase
+            .from('payment_orders')
+            .update({ bridge_drain_id: drainId })
+            .eq('id', matched.id);
+
+          // Audit log
+          await this.supabase.from('audit_logs').insert({
+            performed_by: 'system',
+            action: 'DRAIN_MATCHED_TO_ORDER',
+            table_name: 'payment_orders',
+            record_id: matched.id,
+            new_values: {
+              bridge_drain_id: drainId,
+              drain_amount: amount,
+              matched_by: 'external_account_id + amount',
+            },
+            source: 'webhook',
+          });
+
+          this.logger.log(
+            `✅ Drain ${drainId} vinculado a orden ${matched.id} (match por external_account + monto: ${amount})`,
+          );
+          return;
+        }
+      }
+    }
+
+    // ── Matching por to_address (flujo bolivia_to_wallet, futuro) ──
+    if (destToAddress) {
+      const { data: matchedByAddr } = await this.supabase
+        .from('payment_orders')
+        .select('id, user_id, amount_destination')
+        .eq('status', 'processing')
+        .in('flow_type', ['bolivia_to_wallet'])
+        .eq('destination_address', destToAddress)
+        .is('bridge_drain_id', null)
+        .order('created_at', { ascending: true })
+        .limit(10);
+
+      const tolerance = 0.02;
+      const matched = (matchedByAddr ?? []).find((o) => {
+        const orderAmount = parseFloat(o.amount_destination ?? '0');
+        return Math.abs(orderAmount - amount) <= tolerance;
+      });
+
+      if (matched) {
+        await this.supabase
+          .from('payment_orders')
+          .update({ bridge_drain_id: drainId })
+          .eq('id', matched.id);
+
+        await this.supabase.from('audit_logs').insert({
+          performed_by: 'system',
+          action: 'DRAIN_MATCHED_TO_ORDER',
+          table_name: 'payment_orders',
+          record_id: matched.id,
+          new_values: {
+            bridge_drain_id: drainId,
+            drain_amount: amount,
+            matched_by: 'to_address + amount',
+          },
+          source: 'webhook',
+        });
+
+        this.logger.log(
+          `✅ Drain ${drainId} vinculado a orden ${matched.id} (match por to_address + monto: ${amount})`,
+        );
+        return;
+      }
+    }
+
+    // No se encontró match — log de advertencia para revisión manual
+    this.logger.warn(
+      `⚠️ Drain ${drainId} (amount: ${amount}) no pudo vincularse a ningún expediente en processing. ` +
+        `Requiere revisión manual.`,
+    );
+  }
+
+  // ═══════════════════════════════════════════════
+  //  HANDLER: liquidation_address.drain.updated.status_transitioned
+  //  Completa el expediente cuando Bridge confirma que el pago fiat
+  //  llegó al destino (state: payment_processed)
+  // ═══════════════════════════════════════════════
+
+  private async handleDrainUpdated(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const eventObject = (payload?.event_object ?? payload?.data) as Record<
+      string,
+      unknown
+    >;
+    const drainId = eventObject?.id as string;
+    const state = (eventObject?.state ??
+      payload?.event_object_status) as string;
+    const receipt = eventObject?.receipt as Record<string, unknown> | undefined;
+
+    if (!drainId) {
+      this.logger.warn('⚠️ handleDrainUpdated: payload sin drain ID');
+      return;
+    }
+
+    this.logger.log(`🔔 Drain updated: ${drainId} → state: ${state}`);
+
+    // Solo procesamos la transición a payment_processed (pago fiat confirmado)
+    if (state === 'payment_processed') {
+      // Buscar la orden vinculada por bridge_drain_id
+      const { data: order } = await this.supabase
+        .from('payment_orders')
+        .select('id, user_id, amount, amount_destination, currency, flow_type')
+        .eq('bridge_drain_id', drainId)
+        .eq('status', 'processing')
+        .maybeSingle();
+
+      if (!order) {
+        // Podría ser un drain que no se vinculó en drain.created — intentar match ahora
+        this.logger.warn(
+          `⚠️ Drain ${drainId} con state=payment_processed pero sin orden vinculada. ` +
+            `Intentando match tardío...`,
+        );
+
+        // Intentar vincular como en handleDrainCreated
+        const destination = eventObject?.destination as
+          | Record<string, unknown>
+          | undefined;
+        const destExternalAccountId = destination?.external_account_id as
+          | string
+          | undefined;
+        const amount = parseFloat((eventObject?.amount as string) ?? '0');
+
+        if (destExternalAccountId && amount > 0) {
+          const { data: extAcct } = await this.supabase
+            .from('bridge_external_accounts')
+            .select('id')
+            .eq('bridge_external_account_id', destExternalAccountId)
+            .maybeSingle();
+
+          if (extAcct) {
+            const { data: lateMatch } = await this.supabase
+              .from('payment_orders')
+              .select(
+                'id, user_id, amount, amount_destination, currency, flow_type',
+              )
+              .eq('status', 'processing')
+              .in('flow_type', ['bolivia_to_world'])
+              .eq('external_account_id', extAcct.id)
+              .is('bridge_drain_id', null)
+              .order('created_at', { ascending: true })
+              .limit(10);
+
+            const tolerance = 0.02;
+            const matched = (lateMatch ?? []).find((o) => {
+              const orderAmount = parseFloat(o.amount_destination ?? '0');
+              return Math.abs(orderAmount - amount) <= tolerance;
+            });
+
+            if (matched) {
+              // Vincular y completar en un solo paso
+              await this.completeDrainOrder(matched, drainId, receipt);
+              return;
+            }
+          }
+        }
+
+        // Match tardío por to_address (flujo bolivia_to_wallet)
+        const destToAddress = destination?.to_address as string | undefined;
+        if (destToAddress && amount > 0) {
+          const { data: lateMatchByAddr } = await this.supabase
+            .from('payment_orders')
+            .select(
+              'id, user_id, amount, amount_destination, currency, flow_type',
+            )
+            .eq('status', 'processing')
+            .in('flow_type', ['bolivia_to_wallet'])
+            .eq('destination_address', destToAddress)
+            .is('bridge_drain_id', null)
+            .order('created_at', { ascending: true })
+            .limit(10);
+
+          const addrTolerance = 0.02;
+          const matchedByAddr = (lateMatchByAddr ?? []).find((o) => {
+            const orderAmount = parseFloat(o.amount_destination ?? '0');
+            return Math.abs(orderAmount - amount) <= addrTolerance;
+          });
+
+          if (matchedByAddr) {
+            await this.completeDrainOrder(matchedByAddr, drainId, receipt);
+            return;
+          }
+        }
+
+        this.logger.warn(
+          `❌ Drain ${drainId} (payment_processed) no pudo vincularse. Requiere intervención manual.`,
+        );
+        return;
+      }
+
+      // Orden encontrada por bridge_drain_id — completar
+      await this.completeDrainOrder(order, drainId, receipt);
+    } else if (state === 'payment_submitted') {
+      // Estado intermedio — solo log informativo
+      this.logger.log(
+        `📤 Drain ${drainId}: pago ACH/wire enviado, pendiente de confirmación final.`,
+      );
+    } else {
+      this.logger.log(
+        `🔄 Drain ${drainId}: transición a estado ${state} — sin acción.`,
+      );
+    }
+  }
+
+  /**
+   * Completa un expediente bolivia_to_world vinculado a un drain de liquidation address.
+   * Actualiza estado a completed, crea audit log y notifica al usuario.
+   */
+  private async completeDrainOrder(
+    order: {
+      id: string;
+      user_id: string;
+      amount: string;
+      amount_destination: string;
+      currency: string;
+      flow_type: string;
+    },
+    drainId: string,
+    receipt?: Record<string, unknown>,
+  ): Promise<void> {
+    // 1. Actualizar orden a completed
+    await this.supabase
+      .from('payment_orders')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        bridge_drain_id: drainId,
+        ...(receipt?.final_amount
+          ? { amount_destination: parseFloat(receipt.final_amount as string) }
+          : {}),
+      })
+      .eq('id', order.id);
+
+    // 2. Audit log
+    await this.supabase.from('audit_logs').insert({
+      performed_by: 'system',
+      action: 'COMPLETE_PAYMENT_ORDER_VIA_DRAIN',
+      table_name: 'payment_orders',
+      record_id: order.id,
+      previous_values: { status: 'processing' },
+      new_values: {
+        status: 'completed',
+        bridge_drain_id: drainId,
+        receipt: receipt ?? null,
+      },
+      source: 'webhook',
+    });
+
+    // 3. Notificación al usuario
+    const finalAmount =
+      receipt?.final_amount ?? order.amount_destination ?? order.amount;
+    await this.supabase.from('notifications').insert({
+      user_id: order.user_id,
+      type: 'financial',
+      title: 'Transferencia Completada',
+      message: `Tu orden de pago por $${finalAmount} ha sido completada exitosamente. Los fondos fueron enviados al destino.`,
+      reference_type: 'payment_order',
+      reference_id: order.id,
+    });
+
+    // 4. Activity log
+    await this.supabase.from('activity_logs').insert({
+      user_id: order.user_id,
+      action: 'PAYMENT_ORDER_COMPLETED_VIA_DRAIN',
+      description: `Orden ${order.id} (${order.flow_type}) completada vía webhook drain ${drainId}`,
+    });
+
+    this.logger.log(
+      `✅ Orden ${order.id} completada vía drain ${drainId} (payment_processed)`,
+    );
+  }
+
+  // ═══════════════════════════════════════════════
   //  HELPERS
   // ═══════════════════════════════════════════════
 
@@ -1458,7 +1871,10 @@ export class WebhooksService {
         } else if (typeof issue === 'object' && issue !== null) {
           // Pueden ser objetos con type/message
           const issueObj = issue as Record<string, unknown>;
-          const msg = (issueObj.message ?? issueObj.type ?? issueObj.code ?? JSON.stringify(issue)) as string;
+          const msg = (issueObj.message ??
+            issueObj.type ??
+            issueObj.code ??
+            JSON.stringify(issue)) as string;
           issues.push(msg);
         }
       }
@@ -1472,7 +1888,10 @@ export class WebhooksService {
     }
 
     // Formato 3: status_reason (string simple)
-    if (typeof eventObject.status_reason === 'string' && eventObject.status_reason) {
+    if (
+      typeof eventObject.status_reason === 'string' &&
+      eventObject.status_reason
+    ) {
       issues.push(eventObject.status_reason);
     }
 
@@ -1480,7 +1899,11 @@ export class WebhooksService {
     if (Array.isArray(eventObject.active_regulation_checks)) {
       for (const check of eventObject.active_regulation_checks) {
         const checkObj = check as Record<string, unknown>;
-        if (checkObj.status && checkObj.status !== 'approved' && checkObj.status !== 'passed') {
+        if (
+          checkObj.status &&
+          checkObj.status !== 'approved' &&
+          checkObj.status !== 'passed'
+        ) {
           issues.push(`${checkObj.type ?? 'check'}: ${checkObj.status}`);
         }
       }

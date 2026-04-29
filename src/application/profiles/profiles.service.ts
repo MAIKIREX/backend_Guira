@@ -282,9 +282,7 @@ export class ProfilesService {
     const previousRole = current.role;
 
     if (previousRole === newRole) {
-      throw new BadRequestException(
-        `El usuario ya tiene el rol "${newRole}"`,
-      );
+      throw new BadRequestException(`El usuario ya tiene el rol "${newRole}"`);
     }
 
     // 4. Actualizar rol

@@ -38,7 +38,12 @@ async function bootstrap() {
     origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+    ],
   });
 
   // Security Headers — crossOriginResourcePolicy false para no bloquear peticiones cross-origin a la API
@@ -87,7 +92,9 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   await app.listen(port, '0.0.0.0');
-  console.log(`🚀 Guira API running on port ${port} with prefix /${prefix} (0.0.0.0)`);
+  console.log(
+    `🚀 Guira API running on port ${port} with prefix /${prefix} (0.0.0.0)`,
+  );
   console.log(`📚 Swagger docs: http://localhost:${port}/${prefix}/docs`);
 }
 bootstrap();

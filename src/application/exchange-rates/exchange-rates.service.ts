@@ -159,7 +159,7 @@ export class ExchangeRatesService {
     // - Para USD_BOB (multiplicamos): BAJAR la tasa → el multiplicador es menor → usuario recibe MENOS BOB
     const isBobPair = data.pair.toUpperCase().startsWith('BOB_');
     const spreadMultiplier = isBobPair
-      ? 1 + spreadPercent / 100  // subir tasa para penalizar al dividir
+      ? 1 + spreadPercent / 100 // subir tasa para penalizar al dividir
       : 1 - spreadPercent / 100; // bajar tasa para penalizar al multiplicar
     const effectiveRate = Math.round(baseRate * spreadMultiplier * 100) / 100;
 
@@ -180,7 +180,7 @@ export class ExchangeRatesService {
   ) {
     const pair = `${fromCurrency}_${toCurrency}`.toUpperCase();
     const rateData = await this.getRate(pair);
-    
+
     // Ahora todas las tasas almacenan "BOB por 1 USD"
     // BOB→USD/USDC: dividir (cuántos USD obtienes por X BOB)
     // USD/USDC→BOB: multiplicar (cuántos BOB obtienes por X USD)
@@ -207,16 +207,16 @@ export class ExchangeRatesService {
       .order('pair');
 
     if (error) throw new BadRequestException(error.message);
-    
+
     return (data ?? []).map((row) => {
       const baseRate = parseFloat(row.rate);
       const spreadPercent = parseFloat(row.spread_percent ?? '0');
       const isBobPair = row.pair.toUpperCase().startsWith('BOB_');
-      
+
       const spreadMultiplier = isBobPair
         ? 1 + spreadPercent / 100
         : 1 - spreadPercent / 100;
-        
+
       const effectiveRate = Math.round(baseRate * spreadMultiplier * 100) / 100;
 
       return {

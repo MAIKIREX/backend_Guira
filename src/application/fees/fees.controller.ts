@@ -122,4 +122,3 @@ export class AdminFeesController {
     return this.feesService.deleteOverride(id, actor.id);
   }
 }
-

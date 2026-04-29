@@ -322,9 +322,9 @@ export class BridgeCustomerService {
     BOL: 'nit',
     BRA: 'cpf',
     CHL: 'rut',
-    COL: 'other',   // Cédula de Ciudadanía no está en el enum de Bridge
-    CRI: 'other',   // Cédula física no está en el enum de Bridge
-    DOM: 'other',   // Cédula de identidad dominicana no está en el enum
+    COL: 'other', // Cédula de Ciudadanía no está en el enum de Bridge
+    CRI: 'other', // Cédula física no está en el enum de Bridge
+    DOM: 'other', // Cédula de identidad dominicana no está en el enum
     ECU: 'ruc',
     SLV: 'nit',
     GTM: 'nit',
@@ -333,7 +333,7 @@ export class BridgeCustomerService {
     MEX: 'curp',
     PAN: 'ruc',
     PRY: 'ruc',
-    PER: 'other',   // DNI peruano (individual) no está en el enum
+    PER: 'other', // DNI peruano (individual) no está en el enum
     SUR: 'other',
     URY: 'rut',
   };
@@ -718,7 +718,10 @@ export class BridgeCustomerService {
       payload.conducts_money_services = business.conducts_money_services;
 
       // Bridge requiere conducts_money_services_description cuando conducts_money_services=true
-      if (business.conducts_money_services && business.conducts_money_services_description) {
+      if (
+        business.conducts_money_services &&
+        business.conducts_money_services_description
+      ) {
         payload.conducts_money_services_description =
           business.conducts_money_services_description;
       }
@@ -806,7 +809,8 @@ export class BridgeCustomerService {
     // Identifying information — Tax ID con tipo específico por país
     if (business.tax_id) {
       const taxIdType =
-        BridgeCustomerService.COUNTRY_TAX_ID_BUSINESS[businessCountryAlpha3] ?? 'other';
+        BridgeCustomerService.COUNTRY_TAX_ID_BUSINESS[businessCountryAlpha3] ??
+        'other';
       const taxIdEntry: Record<string, unknown> = {
         type: taxIdType,
         issuing_country: businessCountryAlpha3,
@@ -846,18 +850,36 @@ export class BridgeCustomerService {
 
   private static readonly BOLIVIA_SUBDIVISION_MAP: Record<string, string> = {
     // Single-letter codes (pass-through)
-    b: 'B', c: 'C', h: 'H', l: 'L', n: 'N', o: 'O', p: 'P', s: 'S', t: 'T',
+    b: 'B',
+    c: 'C',
+    h: 'H',
+    l: 'L',
+    n: 'N',
+    o: 'O',
+    p: 'P',
+    s: 'S',
+    t: 'T',
     // ISO 3166-2 with prefix (BO-X)
-    'bo-b': 'B', 'bo-c': 'C', 'bo-h': 'H', 'bo-l': 'L',
-    'bo-n': 'N', 'bo-o': 'O', 'bo-p': 'P', 'bo-s': 'S', 'bo-t': 'T',
+    'bo-b': 'B',
+    'bo-c': 'C',
+    'bo-h': 'H',
+    'bo-l': 'L',
+    'bo-n': 'N',
+    'bo-o': 'O',
+    'bo-p': 'P',
+    'bo-s': 'S',
+    'bo-t': 'T',
     // Spanish department names
-    'el beni': 'B', beni: 'B',
+    'el beni': 'B',
+    beni: 'B',
     cochabamba: 'C',
-    chuquisaca: 'H', sucre: 'H',
+    chuquisaca: 'H',
+    sucre: 'H',
     'la paz': 'L',
     pando: 'N',
     oruro: 'O',
-    'potosí': 'P', potosi: 'P',
+    potosí: 'P',
+    potosi: 'P',
     'santa cruz': 'S',
     tarija: 'T',
   };
@@ -865,7 +887,8 @@ export class BridgeCustomerService {
   private normalizeSubdivision(state: string, country: string): string {
     const alpha3 = this.toAlpha3(country);
     if (alpha3 !== 'BOL') return state;
-    const code = BridgeCustomerService.BOLIVIA_SUBDIVISION_MAP[state.trim().toLowerCase()];
+    const code =
+      BridgeCustomerService.BOLIVIA_SUBDIVISION_MAP[state.trim().toLowerCase()];
     return code ?? state;
   }
 
@@ -889,7 +912,11 @@ export class BridgeCustomerService {
     };
 
     if (fields.address2) address.street_line_2 = fields.address2;
-    if (fields.state) address.subdivision = this.normalizeSubdivision(fields.state, fields.country); // H14: subdivision
+    if (fields.state)
+      address.subdivision = this.normalizeSubdivision(
+        fields.state,
+        fields.country,
+      ); // H14: subdivision
     if (fields.postal_code) address.postal_code = fields.postal_code;
 
     // Remove empty strings
@@ -990,7 +1017,8 @@ export class BridgeCustomerService {
     // P0-D: Tax ID — tipo específico por país según spec Bridge
     if (entity.tax_id) {
       const taxIdType =
-        BridgeCustomerService.COUNTRY_TAX_ID_INDIVIDUAL[countryAlpha3] ?? 'other';
+        BridgeCustomerService.COUNTRY_TAX_ID_INDIVIDUAL[countryAlpha3] ??
+        'other';
       const taxIdEntry: Record<string, unknown> = {
         type: taxIdType,
         issuing_country: countryAlpha3,
@@ -1308,7 +1336,9 @@ export class BridgeCustomerService {
         this.logger.log(`Balance USD pre-inicializado para usuario ${userId}`);
       }
     } catch (err) {
-      this.logger.warn(`Error pre-inicializando balance USD para ${userId}: ${err}`);
+      this.logger.warn(
+        `Error pre-inicializando balance USD para ${userId}: ${err}`,
+      );
     }
   }
 

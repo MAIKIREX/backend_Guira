@@ -233,7 +233,8 @@ export class CreateBusinessDto {
   compliance_explanation?: string;
 
   @ApiPropertyOptional({
-    description: 'Descripción de los servicios de dinero ofrecidos. Requerido por Bridge cuando conducts_money_services=true.',
+    description:
+      'Descripción de los servicios de dinero ofrecidos. Requerido por Bridge cuando conducts_money_services=true.',
   })
   @IsOptional()
   @IsString()

@@ -60,7 +60,9 @@ export class WalletsService {
 
     return wallets.map((w) => {
       // Obtener las currencies soportadas para esta wallet según su network
-      const supportedCurrencies = networkCurrenciesMap.get(w.network ?? '') ?? [w.currency?.toUpperCase()];
+      const supportedCurrencies = networkCurrenciesMap.get(w.network ?? '') ?? [
+        w.currency?.toUpperCase(),
+      ];
 
       // Filtrar balances que corresponden a las currencies soportadas en esta network
       const tokenBalances = supportedCurrencies.map((cur) => {
@@ -76,8 +78,14 @@ export class WalletsService {
 
       // Totales agregados (suma de todos los tokens)
       const totalBalance = tokenBalances.reduce((sum, t) => sum + t.balance, 0);
-      const totalAvailable = tokenBalances.reduce((sum, t) => sum + t.available_balance, 0);
-      const totalReserved = tokenBalances.reduce((sum, t) => sum + t.reserved_balance, 0);
+      const totalAvailable = tokenBalances.reduce(
+        (sum, t) => sum + t.available_balance,
+        0,
+      );
+      const totalReserved = tokenBalances.reduce(
+        (sum, t) => sum + t.reserved_balance,
+        0,
+      );
 
       return {
         id: w.id,

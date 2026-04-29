@@ -403,7 +403,10 @@ export class ComplianceActionsService {
       source: 'admin_panel',
     });
 
-    return { message: 'Expediente enviado a Bridge para verificación. La aprobación final depende de la respuesta de Bridge.' };
+    return {
+      message:
+        'Expediente enviado a Bridge para verificación. La aprobación final depende de la respuesta de Bridge.',
+    };
   }
 
   // ── BRIDGE WEBHOOK CALLBACKS ──────────────────────────────────────
@@ -412,8 +415,13 @@ export class ComplianceActionsService {
    * Llamado por el webhook handler cuando Bridge aprueba la cuenta (status = 'active').
    * ESTE es el único punto que marca la cuenta como 'approved' y habilita servicios.
    */
-  async handleBridgeApproval(userId: string, bridgeCustomerId: string): Promise<void> {
-    this.logger.log(`Bridge aprobó cuenta para user ${userId} (customer ${bridgeCustomerId})`);
+  async handleBridgeApproval(
+    userId: string,
+    bridgeCustomerId: string,
+  ): Promise<void> {
+    this.logger.log(
+      `Bridge aprobó cuenta para user ${userId} (customer ${bridgeCustomerId})`,
+    );
 
     // 1. Buscar review abierto para este usuario
     const review = await this.findOpenReviewForUser(userId);
@@ -455,7 +463,9 @@ export class ComplianceActionsService {
     bridgeCustomerId: string,
     issues: string[],
   ): Promise<void> {
-    this.logger.warn(`Bridge rechazó cuenta para user ${userId} — issues: ${issues.join(', ')}`);
+    this.logger.warn(
+      `Bridge rechazó cuenta para user ${userId} — issues: ${issues.join(', ')}`,
+    );
 
     // 1. Actualizar kyc/kyb application
     const { data: kycApp } = await this.supabase
@@ -493,7 +503,10 @@ export class ComplianceActionsService {
         actor_id: userId,
         decision: 'BRIDGE_REJECTED',
         reason: `Bridge rechazó verificación — Issues: ${issues.join(', ')}`,
-        metadata: { bridge_issues: issues, bridge_customer_id: bridgeCustomerId },
+        metadata: {
+          bridge_issues: issues,
+          bridge_customer_id: bridgeCustomerId,
+        },
       });
       // Review permanece abierto para que el staff pueda actuar
     }
@@ -527,7 +540,8 @@ export class ComplianceActionsService {
       user_id: userId,
       type: 'alert',
       title: 'Observaciones en tu verificación',
-      message: 'Se encontraron observaciones durante la verificación de tu identidad. Nuestro equipo de soporte se pondrá en contacto contigo para los próximos pasos.',
+      message:
+        'Se encontraron observaciones durante la verificación de tu identidad. Nuestro equipo de soporte se pondrá en contacto contigo para los próximos pasos.',
     });
 
     // 6. Audit log
@@ -538,7 +552,10 @@ export class ComplianceActionsService {
       table_name: 'profiles',
       record_id: userId,
       reason: `Bridge webhook rechazó — Issues: ${issues.join(', ')}`,
-      new_values: { bridge_issues: issues, bridge_customer_id: bridgeCustomerId },
+      new_values: {
+        bridge_issues: issues,
+        bridge_customer_id: bridgeCustomerId,
+      },
       source: 'webhook',
     });
   }
@@ -546,7 +563,9 @@ export class ComplianceActionsService {
   /**
    * Busca el compliance_review abierto más reciente para un usuario.
    */
-  private async findOpenReviewForUser(userId: string): Promise<{ id: string } | null> {
+  private async findOpenReviewForUser(
+    userId: string,
+  ): Promise<{ id: string } | null> {
     // Buscar por kyc_application
     const { data: kycApp } = await this.supabase
       .from('kyc_applications')

@@ -70,10 +70,15 @@ export class CreateWalletRampOrderDto {
   @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_crypto')
   @IsString()
   @IsNotEmpty()
-  @IsIn([...ALLOWED_NETWORKS], { message: `Red de destino no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
+  @IsIn([...ALLOWED_NETWORKS], {
+    message: `Red de destino no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}`,
+  })
   destination_network?: string;
 
-  @ApiPropertyOptional({ description: 'Token de destino para on-ramp y off-ramp crypto (ej: usdc, usdt, usdb, pyusd, eurc)' })
+  @ApiPropertyOptional({
+    description:
+      'Token de destino para on-ramp y off-ramp crypto (ej: usdc, usdt, usdb, pyusd, eurc)',
+  })
   @ValidateIf((o) =>
     [
       'bridge_wallet_to_crypto',
@@ -82,29 +87,36 @@ export class CreateWalletRampOrderDto {
     ].includes(o.flow_type),
   )
   @IsString()
-  @IsNotEmpty({ message: 'Debe especificar la moneda de destino (destination_currency)' })
-  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Moneda de destino no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
+  @IsNotEmpty({
+    message: 'Debe especificar la moneda de destino (destination_currency)',
+  })
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], {
+    message: `Moneda de destino no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}`,
+  })
   destination_currency?: string;
 
   // ── destino fiat BO (bridge_wallet_to_fiat_bo) ──
   // NOTA: Estos campos ahora se leen desde client_bank_accounts en el backend.
   // Se mantienen opcionales por retrocompatibilidad pero son IGNORADOS en el servicio.
   @ApiPropertyOptional({
-    description: 'Deprecado para fiat_bo. El backend lee de client_bank_accounts.',
+    description:
+      'Deprecado para fiat_bo. El backend lee de client_bank_accounts.',
   })
   @IsOptional()
   @IsString()
   destination_bank_name?: string;
 
   @ApiPropertyOptional({
-    description: 'Deprecado para fiat_bo. El backend lee de client_bank_accounts.',
+    description:
+      'Deprecado para fiat_bo. El backend lee de client_bank_accounts.',
   })
   @IsOptional()
   @IsString()
   destination_account_number?: string;
 
   @ApiPropertyOptional({
-    description: 'Deprecado para fiat_bo. El backend lee de client_bank_accounts.',
+    description:
+      'Deprecado para fiat_bo. El backend lee de client_bank_accounts.',
   })
   @IsOptional()
   @IsString()
@@ -119,13 +131,14 @@ export class CreateWalletRampOrderDto {
 
   // ── crypto_to_bridge_wallet: origen crypto ──
   @ApiPropertyOptional()
-  @ValidateIf((o) => ['crypto_to_bridge_wallet', 'wallet_to_fiat'].includes(o.flow_type))
+  @ValidateIf((o) =>
+    ['crypto_to_bridge_wallet', 'wallet_to_fiat'].includes(o.flow_type),
+  )
   @IsString()
   @IsNotEmpty()
-  @IsIn(
-    [...ALLOWED_NETWORKS, ...WALLET_TO_FIAT_ALLOWED_NETWORKS],
-    { message: `Red de origen no soportada. Redes permitidas: ${[...ALLOWED_NETWORKS, ...WALLET_TO_FIAT_ALLOWED_NETWORKS].join(', ')}` },
-  )
+  @IsIn([...ALLOWED_NETWORKS, ...WALLET_TO_FIAT_ALLOWED_NETWORKS], {
+    message: `Red de origen no soportada. Redes permitidas: ${[...ALLOWED_NETWORKS, ...WALLET_TO_FIAT_ALLOWED_NETWORKS].join(', ')}`,
+  })
   source_network?: string;
 
   @ApiPropertyOptional()
@@ -135,7 +148,10 @@ export class CreateWalletRampOrderDto {
   source_address?: string;
 
   // ── Moneda origen explícita (todos los flujos ramp con wallet) ──
-  @ApiPropertyOptional({ description: 'Token del que se retiran/depositan fondos de la wallet (ej: usdc, usdt)' })
+  @ApiPropertyOptional({
+    description:
+      'Token del que se retiran/depositan fondos de la wallet (ej: usdc, usdt)',
+  })
   @ValidateIf((o) =>
     [
       'bridge_wallet_to_crypto',
@@ -146,20 +162,34 @@ export class CreateWalletRampOrderDto {
     ].includes(o.flow_type),
   )
   @IsString()
-  @IsNotEmpty({ message: 'Debe especificar la moneda de origen (source_currency)' })
-  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Moneda de origen no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
+  @IsNotEmpty({
+    message: 'Debe especificar la moneda de origen (source_currency)',
+  })
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], {
+    message: `Moneda de origen no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}`,
+  })
   source_currency?: string;
 
   // ── wallet_to_fiat / bridge_wallet_to_fiat_us: proveedor fiat destino ──
-  @ApiPropertyOptional({ description: 'UUID del proveedor (supplier) con bridge_external_account_id registrado.' })
-  @ValidateIf((o) => ['wallet_to_fiat', 'bridge_wallet_to_fiat_us'].includes(o.flow_type))
+  @ApiPropertyOptional({
+    description:
+      'UUID del proveedor (supplier) con bridge_external_account_id registrado.',
+  })
+  @ValidateIf((o) =>
+    ['wallet_to_fiat', 'bridge_wallet_to_fiat_us'].includes(o.flow_type),
+  )
   @IsUUID()
   supplier_id?: string;
 
   // ── Campos comunes ──
   @ApiPropertyOptional()
-  @ValidateIf((o) => ['bridge_wallet_to_fiat_us', 'wallet_to_fiat'].includes(o.flow_type))
-  @IsNotEmpty({ message: 'El motivo del retiro es obligatorio para retiros a cuenta bancaria' })
+  @ValidateIf((o) =>
+    ['bridge_wallet_to_fiat_us', 'wallet_to_fiat'].includes(o.flow_type),
+  )
+  @IsNotEmpty({
+    message:
+      'El motivo del retiro es obligatorio para retiros a cuenta bancaria',
+  })
   @IsString()
   @MaxLength(500)
   business_purpose?: string;

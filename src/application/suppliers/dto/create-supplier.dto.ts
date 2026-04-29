@@ -12,7 +12,10 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BeneficiaryAddressDto } from '../../bridge/dto/create-virtual-account.dto';
-import { ALLOWED_NETWORKS, ALLOWED_CRYPTO_CURRENCIES } from '../../../common/constants/guira-crypto-config.constants';
+import {
+  ALLOWED_NETWORKS,
+  ALLOWED_CRYPTO_CURRENCIES,
+} from '../../../common/constants/guira-crypto-config.constants';
 
 export class CreateSupplierDto {
   @ApiProperty({ example: 'Acme Logistics S.A.' })
@@ -33,9 +36,29 @@ export class CreateSupplierDto {
 
   @ApiProperty({
     example: 'spei',
-    enum: ['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'faster_payments', 'co_bank_transfer', 'crypto'],
+    enum: [
+      'ach',
+      'wire',
+      'sepa',
+      'spei',
+      'pix',
+      'bre_b',
+      'faster_payments',
+      'co_bank_transfer',
+      'crypto',
+    ],
   })
-  @IsIn(['ach', 'wire', 'sepa', 'spei', 'pix', 'bre_b', 'faster_payments', 'co_bank_transfer', 'crypto'])
+  @IsIn([
+    'ach',
+    'wire',
+    'sepa',
+    'spei',
+    'pix',
+    'bre_b',
+    'faster_payments',
+    'co_bank_transfer',
+    'crypto',
+  ])
   payment_rail: string;
 
   @ApiPropertyOptional({ example: 'Proveedor principal de logística' })
@@ -149,7 +172,10 @@ export class CreateSupplierDto {
   bre_b_key?: string;
 
   // ── FPS — Faster Payments (Reino Unido) ──
-  @ApiPropertyOptional({ example: '123456', description: 'Sort code UK, exactamente 6 dígitos sin guiones' })
+  @ApiPropertyOptional({
+    example: '123456',
+    description: 'Sort code UK, exactamente 6 dígitos sin guiones',
+  })
   @IsOptional()
   @IsString()
   @MinLength(6)
@@ -157,14 +183,43 @@ export class CreateSupplierDto {
   sort_code?: string;
 
   // ── CO Bank Transfer (Colombia) ──
-  @ApiPropertyOptional({ example: '1007', description: 'Código del banco colombiano' })
+  @ApiPropertyOptional({
+    example: '1007',
+    description: 'Código del banco colombiano',
+  })
   @IsOptional()
   @IsString()
   bank_code?: string;
 
-  @ApiPropertyOptional({ enum: ['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'] })
+  @ApiPropertyOptional({
+    enum: [
+      'cc',
+      'ce',
+      'nit',
+      'rut',
+      'pa',
+      'ppt',
+      'ti',
+      'rc',
+      'te',
+      'die',
+      'nd',
+    ],
+  })
   @IsOptional()
-  @IsEnum(['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'])
+  @IsEnum([
+    'cc',
+    'ce',
+    'nit',
+    'rut',
+    'pa',
+    'ppt',
+    'ti',
+    'rc',
+    'te',
+    'die',
+    'nd',
+  ])
   document_type?: string;
 
   @ApiPropertyOptional({ example: '+573001234567' })
@@ -181,17 +236,22 @@ export class CreateSupplierDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  @IsIn([...ALLOWED_NETWORKS], { message: `Red no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
+  @IsIn([...ALLOWED_NETWORKS], {
+    message: `Red no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}`,
+  })
   wallet_network?: string;
 
   @ApiPropertyOptional({
     example: 'usdc',
     enum: [...ALLOWED_CRYPTO_CURRENCIES],
-    description: 'Moneda/token que el proveedor crypto espera recibir (ej. usdc, usdt).',
+    description:
+      'Moneda/token que el proveedor crypto espera recibir (ej. usdc, usdt).',
   })
   @IsOptional()
   @IsString()
-  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Token no soportado. Permitidos: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], {
+    message: `Token no soportado. Permitidos: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}`,
+  })
   wallet_currency?: string;
 }
 
@@ -332,9 +392,35 @@ export class UpdateSupplierDto {
   @IsString()
   bank_code?: string;
 
-  @ApiPropertyOptional({ enum: ['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'] })
+  @ApiPropertyOptional({
+    enum: [
+      'cc',
+      'ce',
+      'nit',
+      'rut',
+      'pa',
+      'ppt',
+      'ti',
+      'rc',
+      'te',
+      'die',
+      'nd',
+    ],
+  })
   @IsOptional()
-  @IsEnum(['cc', 'ce', 'nit', 'rut', 'pa', 'ppt', 'ti', 'rc', 'te', 'die', 'nd'])
+  @IsEnum([
+    'cc',
+    'ce',
+    'nit',
+    'rut',
+    'pa',
+    'ppt',
+    'ti',
+    'rc',
+    'te',
+    'die',
+    'nd',
+  ])
   document_type?: string;
 
   @ApiPropertyOptional()
@@ -351,7 +437,9 @@ export class UpdateSupplierDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  @IsIn([...ALLOWED_NETWORKS], { message: `Red no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
+  @IsIn([...ALLOWED_NETWORKS], {
+    message: `Red no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}`,
+  })
   wallet_network?: string;
 
   @ApiPropertyOptional({
@@ -361,6 +449,8 @@ export class UpdateSupplierDto {
   })
   @IsOptional()
   @IsString()
-  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Token no soportado. Permitidos: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], {
+    message: `Token no soportado. Permitidos: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}`,
+  })
   wallet_currency?: string;
 }

@@ -8,7 +8,8 @@ export class UpdateRoleDto {
     enum: ['client', 'staff', 'admin', 'super_admin'],
   })
   @IsIn(['client', 'staff', 'admin', 'super_admin'], {
-    message: 'Rol inválido. Valores permitidos: client, staff, admin, super_admin',
+    message:
+      'Rol inválido. Valores permitidos: client, staff, admin, super_admin',
   })
   role: string;
 

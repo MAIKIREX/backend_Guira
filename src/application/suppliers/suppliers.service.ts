@@ -92,7 +92,8 @@ export class SuppliersService {
           destination_currency: destinationCurrency,
         });
 
-        bridge_liquidation_address_id = la.bridge_liquidation_address_id as string;
+        bridge_liquidation_address_id =
+          la.bridge_liquidation_address_id as string;
       } catch (err) {
         this.logger.warn(
           `Proveedor ${dto.name}: external account creada (${ea.id}) pero falló la liquidation address: ${err.message}`,
@@ -109,7 +110,8 @@ export class SuppliersService {
           destination_currency: dto.wallet_currency ?? 'usdt',
         });
 
-        bridge_liquidation_address_id = la.bridge_liquidation_address_id as string;
+        bridge_liquidation_address_id =
+          la.bridge_liquidation_address_id as string;
       } catch (err) {
         this.logger.warn(
           `Proveedor crypto ${dto.name}: falló la creación de liquidation address: ${err.message}`,
@@ -238,12 +240,20 @@ export class SuppliersService {
     const hasBridgeEA = !!existing.bridge_external_account_id;
     if (hasBridgeEA) {
       const immutableFields = [
-        'iban', 'swift_bic', 'iban_country', 'clabe',
-        'pix_key', 'br_code', 'bre_b_key', 'account_number',
+        'iban',
+        'swift_bic',
+        'iban_country',
+        'clabe',
+        'pix_key',
+        'br_code',
+        'bre_b_key',
+        'account_number',
       ] as const;
 
       const blockedFields = immutableFields.filter(
-        (f) => dto[f] !== undefined && dto[f] !== (existing.bank_details?.[f] as string),
+        (f) =>
+          dto[f] !== undefined &&
+          dto[f] !== (existing.bank_details?.[f] as string),
       );
 
       if (blockedFields.length > 0) {
@@ -279,16 +289,22 @@ export class SuppliersService {
 
     // Actualizar bank_details si hay campos bancarios/crypto en el DTO
     const bankFieldsToMerge: Record<string, unknown> = {};
-    if (dto.bank_name !== undefined) bankFieldsToMerge.bank_name = dto.bank_name;
-    if (dto.routing_number !== undefined) bankFieldsToMerge.routing_number = dto.routing_number;
-    if (dto.checking_or_savings !== undefined) bankFieldsToMerge.checking_or_savings = dto.checking_or_savings;
-    if (dto.wallet_address !== undefined) bankFieldsToMerge.wallet_address = dto.wallet_address;
-    if (dto.wallet_network !== undefined) bankFieldsToMerge.wallet_network = dto.wallet_network.toLowerCase();
-    if (dto.wallet_currency !== undefined) bankFieldsToMerge.wallet_currency = dto.wallet_currency.toLowerCase();
+    if (dto.bank_name !== undefined)
+      bankFieldsToMerge.bank_name = dto.bank_name;
+    if (dto.routing_number !== undefined)
+      bankFieldsToMerge.routing_number = dto.routing_number;
+    if (dto.checking_or_savings !== undefined)
+      bankFieldsToMerge.checking_or_savings = dto.checking_or_savings;
+    if (dto.wallet_address !== undefined)
+      bankFieldsToMerge.wallet_address = dto.wallet_address;
+    if (dto.wallet_network !== undefined)
+      bankFieldsToMerge.wallet_network = dto.wallet_network.toLowerCase();
+    if (dto.wallet_currency !== undefined)
+      bankFieldsToMerge.wallet_currency = dto.wallet_currency.toLowerCase();
 
     if (Object.keys(bankFieldsToMerge).length > 0) {
       updateData.bank_details = {
-        ...(existing.bank_details as Record<string, unknown> ?? {}),
+        ...((existing.bank_details as Record<string, unknown>) ?? {}),
         ...bankFieldsToMerge,
       };
     }
@@ -299,15 +315,24 @@ export class SuppliersService {
       try {
         await this.bridgeService.updateExternalAccount(
           userId,
-          existing.bridge_external_account_id!,
+          existing.bridge_external_account_id,
           {
             address: dto.address,
             // Solo para US: routing_number y checking_or_savings
-            ...(existing.payment_rail === 'ach' || existing.payment_rail === 'wire'
+            ...(existing.payment_rail === 'ach' ||
+            existing.payment_rail === 'wire'
               ? {
                   account: {
-                    ...(dto.routing_number ? { routing_number: dto.routing_number } : {}),
-                    ...(dto.checking_or_savings ? { checking_or_savings: dto.checking_or_savings as 'checking' | 'savings' } : {}),
+                    ...(dto.routing_number
+                      ? { routing_number: dto.routing_number }
+                      : {}),
+                    ...(dto.checking_or_savings
+                      ? {
+                          checking_or_savings: dto.checking_or_savings as
+                            | 'checking'
+                            | 'savings',
+                        }
+                      : {}),
                   },
                 }
               : {}),

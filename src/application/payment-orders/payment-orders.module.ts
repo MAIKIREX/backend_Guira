@@ -12,7 +12,14 @@ import { ClientBankAccountsModule } from '../client-bank-accounts/client-bank-ac
 import { SuppliersModule } from '../suppliers/suppliers.module';
 
 @Module({
-  imports: [FeesModule, PsavModule, ExchangeRatesModule, BridgeModule, ClientBankAccountsModule, SuppliersModule],
+  imports: [
+    FeesModule,
+    PsavModule,
+    ExchangeRatesModule,
+    BridgeModule,
+    ClientBankAccountsModule,
+    SuppliersModule,
+  ],
   controllers: [PaymentOrdersController, AdminPaymentOrdersController],
   providers: [PaymentOrdersService],
   exports: [PaymentOrdersService],

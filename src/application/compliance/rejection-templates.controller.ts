@@ -10,7 +10,12 @@ import {
   UseGuards,
   Req,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { RejectionTemplatesService } from './rejection-templates.service';
 import {
   CreateRejectionTemplateDto,
@@ -49,7 +54,9 @@ export class RejectionTemplatesController {
    */
   @Get('all')
   @Roles('admin', 'super_admin')
-  @ApiOperation({ summary: 'List all templates (including inactive) for admin management' })
+  @ApiOperation({
+    summary: 'List all templates (including inactive) for admin management',
+  })
   @ApiQuery({ name: 'category', required: false })
   async listAll(@Query('category') category?: string) {
     return this.service.listAll(category);

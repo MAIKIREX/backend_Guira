@@ -28,9 +28,7 @@ import {
   CompleteOrderDto,
   FailOrderDto,
 } from './dto/admin-order-action.dto';
-import {
-  ALLOWED_NETWORKS,
-} from '../../common/constants/guira-crypto-config.constants';
+import { ALLOWED_NETWORKS } from '../../common/constants/guira-crypto-config.constants';
 import {
   isValidBridgeRampRoute,
   isValidFiatBoDestination,
@@ -204,11 +202,19 @@ export class PaymentOrdersService {
     }
 
     // Obtener el número completo del JSON bank_details en la tabla 'suppliers'
+    // y validar que el proveedor tenga una liquidation address configurada
     const { data: supplier } = await this.supabase
       .from('suppliers')
-      .select('bank_details')
+      .select('bank_details, bridge_liquidation_address_id')
       .eq('bridge_external_account_id', dto.external_account_id)
       .single();
+
+    if (!supplier?.bridge_liquidation_address_id) {
+      throw new BadRequestException(
+        'El proveedor seleccionado no tiene una liquidation address configurada en Bridge. ' +
+          'Contacte al administrador para configurarla antes de crear la orden.',
+      );
+    }
 
     const fullAccountNumber =
       supplier?.bank_details?.account_number ??
@@ -353,7 +359,9 @@ export class PaymentOrdersService {
           },
           destination: {
             payment_rail: dto.destination_network?.toLowerCase(),
-            currency: dto.destination_currency?.toLowerCase() ?? dto.source_currency?.toLowerCase(),
+            currency:
+              dto.destination_currency?.toLowerCase() ??
+              dto.source_currency?.toLowerCase(),
             to_address: dto.destination_address,
           },
           amount: dto.amount.toString(),
@@ -424,6 +432,20 @@ export class PaymentOrdersService {
     userId: string,
     dto: CreateInterbankOrderDto,
   ) {
+    // Validar que el proveedor tenga liquidation address configurada
+    const { data: supplier } = await this.supabase
+      .from('suppliers')
+      .select('bank_details, bridge_liquidation_address_id')
+      .eq('id', dto.supplier_id)
+      .single();
+
+    if (!supplier?.bridge_liquidation_address_id) {
+      throw new BadRequestException(
+        'El proveedor seleccionado no tiene una liquidation address configurada en Bridge. ' +
+          'Contacte al administrador para configurarla antes de crear la orden.',
+      );
+    }
+
     const psavAccount = await this.psavService.getDepositAccount(
       'bank_bo',
       'BOB',
@@ -692,7 +714,9 @@ export class PaymentOrdersService {
   ) {
     const wallet = await this.getUserWallet(userId, dto.wallet_id);
 
-    const resolvedFiatBoDest = (dto.destination_currency ?? wallet.currency).toLowerCase();
+    const resolvedFiatBoDest = (
+      dto.destination_currency ?? wallet.currency
+    ).toLowerCase();
     if (!isValidFiatBoDestination(resolvedFiatBoDest)) {
       throw new BadRequestException(
         `El token ${resolvedFiatBoDest.toUpperCase()} no está soportado para fondeo con BOB. Tokens permitidos: USDC, USDT, USDB, PYUSD, EURC.`,
@@ -712,8 +736,12 @@ export class PaymentOrdersService {
       );
     }
 
-    const psavAccount = await this.psavService.getDepositAccount('bank_bo', 'BOB');
-    const depositInstructions = this.psavService.formatDepositInstructions(psavAccount);
+    const psavAccount = await this.psavService.getDepositAccount(
+      'bank_bo',
+      'BOB',
+    );
+    const depositInstructions =
+      this.psavService.formatDepositInstructions(psavAccount);
 
     const { fee_amount, net_amount } = await this.feesService.calculateFee(
       userId,
@@ -730,7 +758,9 @@ export class PaymentOrdersService {
     // ── Convertir montos BOB → USDC (estimado interno, no se envía a Bridge) ──
     // Con flexible_amount Bridge acepta cualquier monto; usamos el estimado solo para
     // el registro interno (bridge_transfers, ledger_entry pendiente, amount_destination).
-    const bridgeAmountEstimated = (dto.amount / rateData.effective_rate).toFixed(2);
+    const bridgeAmountEstimated = (
+      dto.amount / rateData.effective_rate
+    ).toFixed(2);
     const netAmountUsdc = parseFloat(
       (net_amount / rateData.effective_rate).toFixed(2),
     );
@@ -767,14 +797,18 @@ export class PaymentOrdersService {
       );
     } catch (err: any) {
       this.logger.error('Error llamando a Bridge Transfer API (fiat_bo):', err);
-      const bridgeError = err?.response?.data?.message || err?.message || 'Error desconocido';
+      const bridgeError =
+        err?.response?.data?.message || err?.message || 'Error desconocido';
       throw new BadRequestException(
-        'No se pudieron generar las instrucciones de depósito en Bridge. Razón: ' + bridgeError,
+        'No se pudieron generar las instrucciones de depósito en Bridge. Razón: ' +
+          bridgeError,
       );
     }
 
     // ── Extraer dirección de liquidación para el PSAV ──
-    const bridgeInstr = bridgeTransfer.source_deposit_instructions as Record<string, string> | undefined;
+    const bridgeInstr = bridgeTransfer.source_deposit_instructions as
+      | Record<string, string>
+      | undefined;
     const bridgeDepositInstructions = {
       type: 'liquidation_address',
       to_address: bridgeInstr?.to_address ?? '',
@@ -862,7 +896,12 @@ export class PaymentOrdersService {
     const wallet = await this.getUserWallet(userId, dto.wallet_id);
 
     const [{ fee_amount, net_amount }, feePercent] = await Promise.all([
-      this.feesService.calculateFee(userId, 'ramp_on_crypto', 'bridge', dto.amount ?? 0),
+      this.feesService.calculateFee(
+        userId,
+        'ramp_on_crypto',
+        'bridge',
+        dto.amount ?? 0,
+      ),
       this.feesService.getFeePercent(userId, 'ramp_on_crypto', 'bridge'),
     ]);
 
@@ -878,23 +917,38 @@ export class PaymentOrdersService {
       );
     }
     // ── Resolver moneda destino explícita (ya no se hereda de wallet.currency) ──
-    const resolvedDestCurrency = (dto.destination_currency ?? wallet.currency).toLowerCase();
-    const resolvedSourceCurrency = (dto.source_currency ?? 'usdc').toLowerCase();
+    const resolvedDestCurrency = (
+      dto.destination_currency ?? wallet.currency
+    ).toLowerCase();
+    const resolvedSourceCurrency = (
+      dto.source_currency ?? 'usdc'
+    ).toLowerCase();
     const resolvedSourceNetwork = dto.source_network ?? wallet.network;
 
     if (!resolvedSourceNetwork) {
-      throw new BadRequestException('Debe especificar la red de origen (source_network).');
+      throw new BadRequestException(
+        'Debe especificar la red de origen (source_network).',
+      );
     }
 
     // ── Validar compatibilidad de ruta contra catálogo Bridge ──
-    if (!isValidBridgeRampRoute(resolvedSourceNetwork, resolvedSourceCurrency, resolvedDestCurrency)) {
+    if (
+      !isValidBridgeRampRoute(
+        resolvedSourceNetwork,
+        resolvedSourceCurrency,
+        resolvedDestCurrency,
+      )
+    ) {
       throw new BadRequestException(
         `La combinación ${resolvedSourceNetwork}/${resolvedSourceCurrency} → ${resolvedDestCurrency} no es soportada por Bridge.`,
       );
     }
 
     // ── Validar monto mínimo según catálogo Bridge (solo si se envía monto) ──
-    const minAmount = getMinAmount(resolvedSourceNetwork, resolvedSourceCurrency);
+    const minAmount = getMinAmount(
+      resolvedSourceNetwork,
+      resolvedSourceCurrency,
+    );
     if ((dto.amount ?? 0) > 0 && dto.amount < minAmount) {
       throw new BadRequestException(
         `El monto mínimo para ${resolvedSourceCurrency.toUpperCase()} en ${resolvedSourceNetwork} es ${minAmount}.`,
@@ -931,32 +985,41 @@ export class PaymentOrdersService {
       );
     } catch (err: any) {
       this.logger.error('Error llamando a Bridge Transfer API:', err);
-      const bridgeError = err?.response?.data?.message || err?.message || 'Error desconocido';
-      throw new BadRequestException('No se pudieron generar las instrucciones de depósito en Bridge. Razón: ' + bridgeError);
+      const bridgeError =
+        err?.response?.data?.message || err?.message || 'Error desconocido';
+      throw new BadRequestException(
+        'No se pudieron generar las instrucciones de depósito en Bridge. Razón: ' +
+          bridgeError,
+      );
     }
 
     // 2. Extraer instrucciones de depósito
-    const bridgeInstr = bridgeTransfer.source_deposit_instructions as Record<string, string> | undefined;
+    const bridgeInstr = bridgeTransfer.source_deposit_instructions as
+      | Record<string, string>
+      | undefined;
     const depositInstructions = {
       type: 'liquidation_address',
       address: bridgeInstr?.to_address ?? bridgeInstr?.address ?? '',
-      chain: bridgeInstr?.payment_rail ?? bridgeInstr?.chain ?? dto.source_network,
+      chain:
+        bridgeInstr?.payment_rail ?? bridgeInstr?.chain ?? dto.source_network,
       label: `Transferencia Bridge (${dto.source_network})`,
     };
 
     // 3. Crear registro de puente
-    const { data: bridgeTransferRow } = await this.supabase.from('bridge_transfers').insert({
-      user_id: userId,
-      bridge_transfer_id: bridgeTransfer.id as string,
-      amount: dto.amount ?? 0,
-      net_amount: net_amount,
-      bridge_state: (bridgeTransfer.state as string) ?? 'payment_submitted',
-      status: 'pending',
-      source_payment_rail: dto.source_network,
-      destination_payment_rail: wallet.network,
-      destination_currency: resolvedDestCurrency.toUpperCase(),
-      bridge_raw_response: bridgeTransfer,
-    })
+    const { data: bridgeTransferRow } = await this.supabase
+      .from('bridge_transfers')
+      .insert({
+        user_id: userId,
+        bridge_transfer_id: bridgeTransfer.id as string,
+        amount: dto.amount ?? 0,
+        net_amount: net_amount,
+        bridge_state: (bridgeTransfer.state as string) ?? 'payment_submitted',
+        status: 'pending',
+        source_payment_rail: dto.source_network,
+        destination_payment_rail: wallet.network,
+        destination_currency: resolvedDestCurrency.toUpperCase(),
+        bridge_raw_response: bridgeTransfer,
+      })
       .select('id')
       .single();
 
@@ -981,7 +1044,9 @@ export class PaymentOrdersService {
         destination_currency: resolvedDestCurrency.toUpperCase(),
         bridge_transfer_id: bridgeTransfer.id as string,
         bridge_source_deposit_instructions: depositInstructions,
-        notes: dto.notes ?? `On-ramp crypto flexible: ${(dto.source_currency ?? 'usdc').toUpperCase()} (${dto.source_network}) → Bridge Wallet`,
+        notes:
+          dto.notes ??
+          `On-ramp crypto flexible: ${(dto.source_currency ?? 'usdc').toUpperCase()} (${dto.source_network}) → Bridge Wallet`,
         status: 'waiting_deposit',
       })
       .select()
@@ -1113,17 +1178,24 @@ export class PaymentOrdersService {
       dto.amount,
     );
 
-    const sourceCurrency = (dto.source_currency ?? wallet.currency).toUpperCase();
+    const sourceCurrency = (
+      dto.source_currency ?? wallet.currency
+    ).toUpperCase();
 
     // Validar token y ruta PSAV antes de tocar el saldo — sin coste de rollback si falla
-    if (!FIAT_BO_OFF_RAMP_SOURCE_CURRENCIES.includes(sourceCurrency.toLowerCase())) {
+    if (
+      !FIAT_BO_OFF_RAMP_SOURCE_CURRENCIES.includes(sourceCurrency.toLowerCase())
+    ) {
       throw new BadRequestException(
         `El token ${sourceCurrency} no está habilitado para retiro a Bolivia en este momento.`,
       );
     }
 
     const activePsavAccounts = await this.psavService.getActiveCryptoAccounts();
-    const psavMatch = resolveFiatBoPsavMatch(sourceCurrency, activePsavAccounts);
+    const psavMatch = resolveFiatBoPsavMatch(
+      sourceCurrency,
+      activePsavAccounts,
+    );
 
     if (!psavMatch) {
       throw new BadRequestException(
@@ -1131,7 +1203,11 @@ export class PaymentOrdersService {
       );
     }
 
-    const { psavAccount, destCurrency: psavDestCurrency, minAmount: routeMinAmount } = psavMatch;
+    const {
+      psavAccount,
+      destCurrency: psavDestCurrency,
+      minAmount: routeMinAmount,
+    } = psavMatch;
 
     if (!psavAccount.crypto_address) {
       throw new BadRequestException(
@@ -1218,13 +1294,16 @@ export class PaymentOrdersService {
         .single();
 
       // Validar y normalizar la red del PSAV
-      if (!psavAccount.crypto_network || psavAccount.crypto_network.trim() === '') {
+      if (
+        !psavAccount.crypto_network ||
+        psavAccount.crypto_network.trim() === ''
+      ) {
         throw new Error(
           `La cuenta PSAV para ${sourceCurrency} no tiene red crypto configurada. Contacta al administrador.`,
         );
       }
       const psavRail = psavAccount.crypto_network.toLowerCase().trim();
-      if (!ALLOWED_NETWORKS.includes(psavRail as any)) {
+      if (!ALLOWED_NETWORKS.includes(psavRail)) {
         throw new Error(
           `Red PSAV inválida: "${psavAccount.crypto_network}" (normalizada: "${psavRail}"). Valores permitidos: ${ALLOWED_NETWORKS.join(', ')}`,
         );
@@ -1268,20 +1347,24 @@ export class PaymentOrdersService {
         .eq('id', order.id);
 
       // Crear registro bridge_transfers para que el webhook pueda vincularlo
-      const { data: btRow } = await this.supabase.from('bridge_transfers').insert({
-        user_id: userId,
-        bridge_transfer_id: transferId,
-        source_payment_rail: 'bridge_wallet',
-        source_currency: sourceCurrency.toLowerCase(),
-        destination_payment_rail: psavRail,
-        destination_currency: psavDestCurrency.toLowerCase(),
-        amount: dto.amount,
-        developer_fee_amount: fee_amount,
-        net_amount,
-        status: 'pending',
-        bridge_state: (bridgeResult?.state as string) ?? 'awaiting_funds',
-        bridge_raw_response: bridgeResult,
-      }).select('id').single();
+      const { data: btRow } = await this.supabase
+        .from('bridge_transfers')
+        .insert({
+          user_id: userId,
+          bridge_transfer_id: transferId,
+          source_payment_rail: 'bridge_wallet',
+          source_currency: sourceCurrency.toLowerCase(),
+          destination_payment_rail: psavRail,
+          destination_currency: psavDestCurrency.toLowerCase(),
+          amount: dto.amount,
+          developer_fee_amount: fee_amount,
+          net_amount,
+          status: 'pending',
+          bridge_state: (bridgeResult?.state as string) ?? 'awaiting_funds',
+          bridge_raw_response: bridgeResult,
+        })
+        .select('id')
+        .single();
 
       // Crear ledger entry (debit, pending — se asienta con webhook transfer.complete)
       await this.supabase.from('ledger_entries').insert({
@@ -1342,7 +1425,9 @@ export class PaymentOrdersService {
     );
 
     // Verificar saldo del token específico
-    const sourceCurrency = (dto.source_currency ?? wallet.currency).toUpperCase();
+    const sourceCurrency = (
+      dto.source_currency ?? wallet.currency
+    ).toUpperCase();
     const { data: balance } = await this.supabase
       .from('balances')
       .select('available_amount')
@@ -1406,7 +1491,9 @@ export class PaymentOrdersService {
         .single();
 
       // Validar y normalizar la red destino
-      const destinationRail = (dto.destination_network ?? '').toLowerCase().trim();
+      const destinationRail = (dto.destination_network ?? '')
+        .toLowerCase()
+        .trim();
       if (!ALLOWED_NETWORKS.includes(destinationRail as any)) {
         throw new Error(
           `Red destino inválida: "${dto.destination_network}" (normalizada: "${destinationRail}"). Valores permitidos: ${ALLOWED_NETWORKS.join(', ')}`,
@@ -1414,15 +1501,27 @@ export class PaymentOrdersService {
       }
 
       // Validar ruta off-ramp contra catálogo Bridge
-      const destCurrency = (dto.destination_currency ?? sourceCurrency).toLowerCase();
-      if (!isValidOffRampRoute(sourceCurrency.toLowerCase(), destinationRail, destCurrency)) {
+      const destCurrency = (
+        dto.destination_currency ?? sourceCurrency
+      ).toLowerCase();
+      if (
+        !isValidOffRampRoute(
+          sourceCurrency.toLowerCase(),
+          destinationRail,
+          destCurrency,
+        )
+      ) {
         throw new BadRequestException(
           `Ruta off-ramp no soportada: ${sourceCurrency} → ${destinationRail} → ${destCurrency.toUpperCase()}. Verifica las combinaciones válidas.`,
         );
       }
 
       // Validar monto mínimo según la ruta
-      const routeMin = getOffRampMinAmount(sourceCurrency.toLowerCase(), destinationRail, destCurrency);
+      const routeMin = getOffRampMinAmount(
+        sourceCurrency.toLowerCase(),
+        destinationRail,
+        destCurrency,
+      );
       if (routeMin > 0 && dto.amount < routeMin) {
         throw new BadRequestException(
           `Monto mínimo para esta ruta es ${routeMin} ${sourceCurrency}. Ingresaste ${dto.amount}.`,
@@ -1468,20 +1567,26 @@ export class PaymentOrdersService {
 
       // Crear registro bridge_transfers para que el webhook pueda vincularlo
       // (consistente con bridge_wallet_to_fiat_bo y bridge_wallet_to_fiat_us)
-      const { data: btRow } = await this.supabase.from('bridge_transfers').insert({
-        user_id: userId,
-        bridge_transfer_id: transferId,
-        source_payment_rail: 'bridge_wallet',
-        source_currency: sourceCurrency.toLowerCase(),
-        destination_payment_rail: destinationRail,
-        destination_currency: (dto.destination_currency ?? sourceCurrency).toLowerCase(),
-        amount: dto.amount,
-        developer_fee_amount: fee_amount,
-        net_amount,
-        status: 'pending',
-        bridge_state: (bridgeResult?.state as string) ?? 'awaiting_funds',
-        bridge_raw_response: bridgeResult,
-      }).select('id').single();
+      const { data: btRow } = await this.supabase
+        .from('bridge_transfers')
+        .insert({
+          user_id: userId,
+          bridge_transfer_id: transferId,
+          source_payment_rail: 'bridge_wallet',
+          source_currency: sourceCurrency.toLowerCase(),
+          destination_payment_rail: destinationRail,
+          destination_currency: (
+            dto.destination_currency ?? sourceCurrency
+          ).toLowerCase(),
+          amount: dto.amount,
+          developer_fee_amount: fee_amount,
+          net_amount,
+          status: 'pending',
+          bridge_state: (bridgeResult?.state as string) ?? 'awaiting_funds',
+          bridge_raw_response: bridgeResult,
+        })
+        .select('id')
+        .single();
 
       // Crear ledger entry (pending, se liquida con webhook)
       await this.supabase.from('ledger_entries').insert({
@@ -1536,7 +1641,9 @@ export class PaymentOrdersService {
 
     // 1. Validar proveedor: debe pertenecer al usuario y tener bridge_external_account_id
     if (!dto.supplier_id) {
-      throw new BadRequestException('Debes especificar un proveedor (supplier_id) para el flujo bridge_wallet_to_fiat_us');
+      throw new BadRequestException(
+        'Debes especificar un proveedor (supplier_id) para el flujo bridge_wallet_to_fiat_us',
+      );
     }
     const { data: supplier } = await this.supabase
       .from('suppliers')
@@ -1546,19 +1653,25 @@ export class PaymentOrdersService {
       .single();
 
     if (!supplier || !supplier.bridge_external_account_id) {
-      throw new NotFoundException('Proveedor no encontrado o no tiene cuenta bancaria registrada en Bridge.');
+      throw new NotFoundException(
+        'Proveedor no encontrado o no tiene cuenta bancaria registrada en Bridge.',
+      );
     }
 
     // 2. Cargar external_account del proveedor (sin filtrar por user_id — pertenece al proveedor)
     const { data: extAccount } = await this.supabase
       .from('bridge_external_accounts')
-      .select('id, account_type, currency, bridge_external_account_id, payment_rail')
+      .select(
+        'id, account_type, currency, bridge_external_account_id, payment_rail',
+      )
       .eq('id', supplier.bridge_external_account_id)
       .eq('is_active', true)
       .single();
 
     if (!extAccount || !extAccount.bridge_external_account_id) {
-      throw new NotFoundException('La cuenta bancaria del proveedor no está activa o no está registrada en Bridge.');
+      throw new NotFoundException(
+        'La cuenta bancaria del proveedor no está activa o no está registrada en Bridge.',
+      );
     }
 
     // Validar bridge_customer_id antes de operar con saldo
@@ -1582,7 +1695,9 @@ export class PaymentOrdersService {
     );
 
     // Verificar saldo del token específico
-    const sourceCurrency = (dto.source_currency ?? wallet.currency).toUpperCase();
+    const sourceCurrency = (
+      dto.source_currency ?? wallet.currency
+    ).toUpperCase();
     const { data: balance } = await this.supabase
       .from('balances')
       .select('available_amount')
@@ -1673,20 +1788,24 @@ export class PaymentOrdersService {
 
       // Crear registro bridge_transfers para que el webhook pueda vincularlo
       // (consistente con bridge_wallet_to_fiat_bo y bridge_wallet_to_crypto)
-      const { data: btRow } = await this.supabase.from('bridge_transfers').insert({
-        user_id: userId,
-        bridge_transfer_id: transferId,
-        source_payment_rail: 'bridge_wallet',
-        source_currency: sourceCurrency.toLowerCase(),
-        destination_payment_rail: extAccount.payment_rail ?? 'ach',
-        destination_currency: (extAccount.currency ?? 'usd').toLowerCase(),
-        amount: dto.amount,
-        developer_fee_amount: fee_amount,
-        net_amount,
-        status: 'pending',
-        bridge_state: (bridgeResult?.state as string) ?? 'awaiting_funds',
-        bridge_raw_response: bridgeResult,
-      }).select('id').single();
+      const { data: btRow } = await this.supabase
+        .from('bridge_transfers')
+        .insert({
+          user_id: userId,
+          bridge_transfer_id: transferId,
+          source_payment_rail: 'bridge_wallet',
+          source_currency: sourceCurrency.toLowerCase(),
+          destination_payment_rail: extAccount.payment_rail ?? 'ach',
+          destination_currency: (extAccount.currency ?? 'usd').toLowerCase(),
+          amount: dto.amount,
+          developer_fee_amount: fee_amount,
+          net_amount,
+          status: 'pending',
+          bridge_state: (bridgeResult?.state as string) ?? 'awaiting_funds',
+          bridge_raw_response: bridgeResult,
+        })
+        .select('id')
+        .single();
 
       await this.supabase.from('ledger_entries').insert({
         wallet_id: wallet.id,
@@ -1735,16 +1854,24 @@ export class PaymentOrdersService {
     dto: CreateWalletRampOrderDto,
   ) {
     if (!dto.supplier_id) {
-      throw new BadRequestException('Debes especificar un proveedor (supplier_id) para el flujo wallet_to_fiat');
+      throw new BadRequestException(
+        'Debes especificar un proveedor (supplier_id) para el flujo wallet_to_fiat',
+      );
     }
     if (!dto.source_address) {
-      throw new BadRequestException('Debes especificar la dirección de origen (source_address)');
+      throw new BadRequestException(
+        'Debes especificar la dirección de origen (source_address)',
+      );
     }
     if (!dto.source_network) {
-      throw new BadRequestException('Debes especificar la red de origen (source_network)');
+      throw new BadRequestException(
+        'Debes especificar la red de origen (source_network)',
+      );
     }
     if (!dto.business_purpose) {
-      throw new BadRequestException('El motivo del retiro (business_purpose) es obligatorio para este flujo');
+      throw new BadRequestException(
+        'El motivo del retiro (business_purpose) es obligatorio para este flujo',
+      );
     }
 
     // 1. Validar proveedor: debe pertenecer al usuario y tener bridge_external_account_id
@@ -1794,7 +1921,9 @@ export class PaymentOrdersService {
       .single();
 
     if (!profile?.bridge_customer_id) {
-      throw new BadRequestException('El usuario no tiene un customer de Bridge asociado.');
+      throw new BadRequestException(
+        'El usuario no tiene un customer de Bridge asociado.',
+      );
     }
 
     // FIX #2: Resolver wallet de referencia del usuario para el asiento contable.
@@ -1809,7 +1938,9 @@ export class PaymentOrdersService {
       .maybeSingle();
 
     if (!refWallet) {
-      throw new BadRequestException('El usuario no tiene una wallet activa en Guira.');
+      throw new BadRequestException(
+        'El usuario no tiene una wallet activa en Guira.',
+      );
     }
 
     // 5. Crear payment_order (status: pending)
@@ -1909,7 +2040,7 @@ export class PaymentOrdersService {
       // 'debit' pendiente; se asentará a 'settled' cuando Bridge confirme el transfer.
       try {
         await this.supabase.from('ledger_entries').insert({
-          wallet_id: refWallet.id,       // wallet de referencia del usuario (no se debita)
+          wallet_id: refWallet.id, // wallet de referencia del usuario (no se debita)
           type: 'debit',
           amount: dto.amount,
           currency: sourceCurrency,
@@ -1938,7 +2069,9 @@ export class PaymentOrdersService {
         })
         .eq('id', order.id);
 
-      throw new BadRequestException(`Error al ejecutar wallet-to-fiat: ${message}`);
+      throw new BadRequestException(
+        `Error al ejecutar wallet-to-fiat: ${message}`,
+      );
     }
 
     this.logger.log(
@@ -2037,7 +2170,9 @@ export class PaymentOrdersService {
     }
 
     if (Object.keys(safeUpdate).length === 0) {
-      throw new BadRequestException('No se proporcionaron campos válidos para actualizar');
+      throw new BadRequestException(
+        'No se proporcionaron campos válidos para actualizar',
+      );
     }
 
     const { data, error } = await this.supabase
@@ -2174,7 +2309,10 @@ export class PaymentOrdersService {
       .eq('type', 'debit');
 
     if (settledLedgers && settledLedgers.length > 0 && order.wallet_id) {
-      const totalToRefund = settledLedgers.reduce((sum, l) => sum + parseFloat(l.amount), 0);
+      const totalToRefund = settledLedgers.reduce(
+        (sum, l) => sum + parseFloat(l.amount),
+        0,
+      );
 
       if (totalToRefund > 0) {
         await this.supabase.from('ledger_entries').insert({
@@ -2301,8 +2439,12 @@ export class PaymentOrdersService {
       }
     }
 
-    const isBobOut = ['bolivia_to_world', 'bolivia_to_wallet', 'fiat_bo_to_bridge_wallet'].includes(order.flow_type ?? '');
-    
+    const isBobOut = [
+      'bolivia_to_world',
+      'bolivia_to_wallet',
+      'fiat_bo_to_bridge_wallet',
+    ].includes(order.flow_type ?? '');
+
     const amountDestination = exchangeRate
       ? parseFloat(
           (isBobOut
@@ -2356,105 +2498,148 @@ export class PaymentOrdersService {
       reference_id: orderId,
     });
 
-    // ── Bolivia-to-World: crear Bridge Transfer para que PSAV reciba instrucciones Solana ──
-    // El transfer source es USDC/Solana con monto flexible (PSAV convierte BOB→USDC y envía).
-    // Bridge notifica via webhook (payment_processed) cuando el pago fiat llegó al destino.
+    // ── Bolivia-to-World: flujo asistido por staff via liquidation address ──
+    // NO se crea Bridge Transfer automáticamente. El staff depositará USDC manualmente
+    // en la liquidation address del proveedor y el webhook drain confirmará el expediente.
     if (order.flow_type === 'bolivia_to_world') {
-      // 1. Cargar datos de la cuenta externa registrada en Bridge
-      const { data: extAccount } = await this.supabase
-        .from('bridge_external_accounts')
-        .select('bridge_external_account_id, payment_rail, currency')
-        .eq('id', order.external_account_id)
-        .single();
-
-      if (!extAccount?.bridge_external_account_id) {
+      // 1. Cargar supplier y su bridge_liquidation_address_id
+      if (!order.supplier_id) {
         throw new BadRequestException(
-          'La cuenta externa del cliente no tiene bridge_external_account_id. ' +
-          'Registra la cuenta en Bridge antes de aprobar.',
+          'La orden bolivia_to_world no tiene supplier_id asignado. No se puede resolver la liquidation address.',
         );
       }
 
-      // 2. Cargar bridge_customer_id del cliente
-      const { data: profile } = await this.supabase
-        .from('profiles')
-        .select('bridge_customer_id')
-        .eq('id', order.user_id)
+      const { data: supplier } = await this.supabase
+        .from('suppliers')
+        .select('id, name, bridge_liquidation_address_id')
+        .eq('id', order.supplier_id)
         .single();
 
-      if (!profile?.bridge_customer_id) {
+      if (!supplier?.bridge_liquidation_address_id) {
         throw new BadRequestException(
-          'El cliente no tiene bridge_customer_id. Debe completar el KYC de Bridge primero.',
+          `El proveedor "${supplier?.name ?? order.supplier_id}" no tiene liquidation address configurada en Bridge.`,
         );
       }
 
-      // 3. Obtener fee percent (override del cliente → global fees_config)
-      const feePercent = await this.feesService.getFeePercent(
-        order.user_id,
-        'interbank_bo_out',
-        'psav',
-      );
+      // 2. Consultar bridge_liquidation_addresses para obtener datos de depósito
+      const { data: liqAddr } = await this.supabase
+        .from('bridge_liquidation_addresses')
+        .select(
+          'id, bridge_liquidation_address_id, chain, currency, address, destination_payment_rail, destination_currency, destination_external_account_id, destination_address',
+        )
+        .eq(
+          'bridge_liquidation_address_id',
+          supplier.bridge_liquidation_address_id,
+        )
+        .single();
 
-      // 4. Llamar Bridge API — idempotency key = orderId evita duplicados en reintentos
-      const bridgePayload = {
-        on_behalf_of: profile.bridge_customer_id,
-        source: { currency: 'usdc', payment_rail: 'solana' },
-        destination: {
-          payment_rail: extAccount.payment_rail,
-          currency: (extAccount.currency as string).toLowerCase(),
-          external_account_id: extAccount.bridge_external_account_id,
-        },
-        developer_fee_percent: feePercent,
-        // amount se omite intencionalmente: flexible_amount requiere ausencia del campo
-        features: { allow_any_from_address: true, flexible_amount: true },
+      if (!liqAddr) {
+        throw new BadRequestException(
+          `Liquidation address "${supplier.bridge_liquidation_address_id}" no encontrada en la base de datos.`,
+        );
+      }
+
+      // 3. Persistir datos de liquidation como instrucciones de depósito para el staff
+      const liquidationInstructions = {
+        type: 'liquidation_address',
+        bridge_liquidation_address_id: liqAddr.bridge_liquidation_address_id,
+        to_address: liqAddr.address,
+        chain: liqAddr.chain,
+        currency: liqAddr.currency,
+        payment_rail: liqAddr.chain,
+        destination_payment_rail: liqAddr.destination_payment_rail,
+        destination_currency: liqAddr.destination_currency,
+        destination_external_account_id:
+          liqAddr.destination_external_account_id,
+        destination_address: liqAddr.destination_address,
+        supplier_name: supplier.name,
+        amount_to_deposit: amountDestination,
       };
 
-      const bridgeResult = await this.bridgeApi.post<Record<string, unknown>>(
-        '/v0/transfers',
-        bridgePayload,
-        orderId,
-      );
-
-      const transferId = bridgeResult.id as string;
-      const sourceDepositInstructions = (bridgeResult.source_deposit_instructions ?? {}) as Record<string, unknown>;
-      const feePercentNumeric = parseFloat(feePercent);
-
-      // 5. Persistir bridge_transfer_id e instrucciones de depósito Solana en la orden
       await this.supabase
         .from('payment_orders')
         .update({
-          bridge_transfer_id: transferId,
-          bridge_source_deposit_instructions: sourceDepositInstructions,
+          bridge_source_deposit_instructions: liquidationInstructions,
         })
         .eq('id', orderId);
 
-      // 6. Registrar en bridge_transfers para que el webhook actualice estado al recibir el pago
-      await this.supabase.from('bridge_transfers').insert({
-        user_id: order.user_id,
-        bridge_transfer_id: transferId,
-        idempotency_key: orderId,
-        transfer_kind: 'interbank_offramp',
-        source_payment_rail: 'solana',
-        source_currency: 'usdc',
-        destination_payment_rail: extAccount.payment_rail,
-        destination_currency: (extAccount.currency as string).toLowerCase(),
-        destination_type: 'external_account',
-        destination_id: extAccount.bridge_external_account_id,
-        amount: parseFloat(order.net_amount ?? order.amount),
-        net_amount: parseFloat(order.net_amount ?? order.amount),
-        developer_fee_percent: feePercentNumeric,
-        bridge_state: (bridgeResult.state as string) ?? 'awaiting_funds',
-        source_deposit_instructions: sourceDepositInstructions,
-        bridge_raw_response: bridgeResult,
-        status: 'pending',
-      });
-
       // Propagar cambios al objeto que se retorna
-      updated.bridge_transfer_id = transferId;
-      updated.bridge_source_deposit_instructions = sourceDepositInstructions;
+      updated.bridge_source_deposit_instructions = liquidationInstructions;
 
       this.logger.log(
-        `🌉 Bridge Transfer ${transferId} creado para orden bolivia_to_world ${orderId}. ` +
-        `PSAV debe enviar USDC a Solana: ${sourceDepositInstructions?.to_address ?? 'ver source_deposit_instructions'}`,
+        `📋 Orden bolivia_to_world ${orderId} en processing — staff debe depositar ` +
+          `${amountDestination ?? 'N/A'} ${liqAddr.currency} en liquidation address ${liqAddr.address} ` +
+          `(chain: ${liqAddr.chain}, proveedor: ${supplier.name})`,
+      );
+    }
+
+    // ── Bolivia-to-Wallet: flujo asistido por staff via liquidation address (crypto) ──
+    // Mismo patrón que bolivia_to_world pero el matching del drain será por to_address
+    if (order.flow_type === 'bolivia_to_wallet') {
+      if (!order.supplier_id) {
+        throw new BadRequestException(
+          'La orden bolivia_to_wallet no tiene supplier_id asignado. No se puede resolver la liquidation address.',
+        );
+      }
+
+      const { data: walletSupplier } = await this.supabase
+        .from('suppliers')
+        .select('id, name, bridge_liquidation_address_id')
+        .eq('id', order.supplier_id)
+        .single();
+
+      if (!walletSupplier?.bridge_liquidation_address_id) {
+        throw new BadRequestException(
+          `El proveedor "${walletSupplier?.name ?? order.supplier_id}" no tiene liquidation address configurada en Bridge.`,
+        );
+      }
+
+      const { data: walletLiqAddr } = await this.supabase
+        .from('bridge_liquidation_addresses')
+        .select(
+          'id, bridge_liquidation_address_id, chain, currency, address, destination_payment_rail, destination_currency, destination_address',
+        )
+        .eq(
+          'bridge_liquidation_address_id',
+          walletSupplier.bridge_liquidation_address_id,
+        )
+        .single();
+
+      if (!walletLiqAddr) {
+        throw new BadRequestException(
+          `Liquidation address "${walletSupplier.bridge_liquidation_address_id}" no encontrada en la base de datos.`,
+        );
+      }
+
+      const walletLiquidationInstructions = {
+        type: 'liquidation_address',
+        bridge_liquidation_address_id:
+          walletLiqAddr.bridge_liquidation_address_id,
+        to_address: walletLiqAddr.address,
+        chain: walletLiqAddr.chain,
+        currency: walletLiqAddr.currency,
+        payment_rail: walletLiqAddr.chain,
+        destination_payment_rail: walletLiqAddr.destination_payment_rail,
+        destination_currency: walletLiqAddr.destination_currency,
+        destination_address: walletLiqAddr.destination_address,
+        supplier_name: walletSupplier.name,
+        amount_to_deposit: amountDestination,
+      };
+
+      await this.supabase
+        .from('payment_orders')
+        .update({
+          bridge_source_deposit_instructions: walletLiquidationInstructions,
+        })
+        .eq('id', orderId);
+
+      updated.bridge_source_deposit_instructions =
+        walletLiquidationInstructions;
+
+      this.logger.log(
+        `📋 Orden bolivia_to_wallet ${orderId} en processing — staff debe depositar ` +
+          `${amountDestination ?? 'N/A'} ${walletLiqAddr.currency} en liquidation address ${walletLiqAddr.address} ` +
+          `(chain: ${walletLiqAddr.chain}, proveedor: ${walletSupplier.name})`,
       );
     }
 
@@ -2469,7 +2654,13 @@ export class PaymentOrdersService {
       .single();
 
     if (!order) throw new NotFoundException('Orden no encontrada');
-    if (['fiat_bo_to_bridge_wallet', 'bolivia_to_world'].includes(order.flow_type ?? '')) {
+    if (
+      [
+        'fiat_bo_to_bridge_wallet',
+        'bolivia_to_world',
+        'bolivia_to_wallet',
+      ].includes(order.flow_type ?? '')
+    ) {
       throw new BadRequestException(
         'Este flujo se completa automáticamente por webhook de Bridge. markSent no está disponible.',
       );
@@ -2550,7 +2741,6 @@ export class PaymentOrdersService {
     // Off-ramp PSAV a fiat BO — El ledger debit y la liberación de reserva
     // ahora se manejan automáticamente en el webhook transfer.complete (Tramo 1).
     // El completeOrder solo finaliza el estado de la orden tras el payout BOB (Tramo 2).
-
 
     await this.supabase.from('audit_logs').insert({
       performed_by: actorId,
@@ -2644,7 +2834,10 @@ export class PaymentOrdersService {
       .eq('type', 'debit');
 
     if (settledLedgers && settledLedgers.length > 0 && order.wallet_id) {
-      const totalToRefund = settledLedgers.reduce((sum, l) => sum + parseFloat(l.amount), 0);
+      const totalToRefund = settledLedgers.reduce(
+        (sum, l) => sum + parseFloat(l.amount),
+        0,
+      );
 
       if (totalToRefund > 0) {
         await this.supabase.from('ledger_entries').insert({

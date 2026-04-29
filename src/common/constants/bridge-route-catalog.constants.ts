@@ -102,10 +102,7 @@ export function getDestinationCurrencies(
 }
 
 /** Dado una red + moneda origen, retorna el mínimo de transacción */
-export function getMinAmount(
-  network: string,
-  sourceCurrency: string,
-): number {
+export function getMinAmount(network: string, sourceCurrency: string): number {
   return (
     BRIDGE_RAMP_ON_ROUTES[network]?.[sourceCurrency.toLowerCase()]?.min ?? 1
   );
@@ -125,9 +122,9 @@ export function isValidBridgeRampRoute(
 
 /** Valida si un token es válido como destino para fiat_bo_to_bridge_wallet */
 export function isValidFiatBoDestination(currency: string): boolean {
-  return (
-    FIAT_BO_ALLOWED_DESTINATION_CURRENCIES as readonly string[]
-  ).includes(currency.toLowerCase());
+  return (FIAT_BO_ALLOWED_DESTINATION_CURRENCIES as readonly string[]).includes(
+    currency.toLowerCase(),
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -239,9 +236,9 @@ export const FIAT_BO_OFF_RAMP_ROUTES: Record<
   string,
   Record<string, Record<string, number>>
 > = {
-  usdc:  { solana: { usdc: 1 } },
-  usdt:  { solana: { usdc: 2 } },
-  usdb:  { solana: { usdt: 20 } },
+  usdc: { solana: { usdc: 1 } },
+  usdt: { solana: { usdc: 2 } },
+  usdb: { solana: { usdt: 20 } },
   pyusd: { solana: { usdc: 1, usdt: 20 } },
 };
 
@@ -299,7 +296,12 @@ export function resolveFiatBoPsavMatch<
   const routes = FIAT_BO_OFF_RAMP_ROUTES[srcLower];
   if (!routes) return null;
 
-  type Candidate = { psav: T; destCurrency: string; minAmount: number; isSameCurrency: boolean };
+  type Candidate = {
+    psav: T;
+    destCurrency: string;
+    minAmount: number;
+    isSameCurrency: boolean;
+  };
   const candidates: Candidate[] = [];
 
   for (const psav of psavAccounts) {

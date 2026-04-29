@@ -27,4 +27,3 @@ import { OnboardingModule } from '../onboarding/onboarding.module';
   exports: [ComplianceService, ComplianceActionsService],
 })
 export class ComplianceModule {}
-

@@ -50,9 +50,17 @@ export class CreateInterbankOrderDto {
       'bolivia_to_wallet',
     ].includes(o.flow_type),
   )
-  @Transform(({ value }) => (typeof value === 'string' ? value.toLowerCase() : value))
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toLowerCase() : value,
+  )
   @IsString()
-  @IsIn([...ALLOWED_CRYPTO_CURRENCIES, ...['usd', 'eur', 'mxn', 'brl', 'gbp', 'cop']], { message: 'Moneda de destino no soportada' })
+  @IsIn(
+    [
+      ...ALLOWED_CRYPTO_CURRENCIES,
+      ...['usd', 'eur', 'mxn', 'brl', 'gbp', 'cop'],
+    ],
+    { message: 'Moneda de destino no soportada' },
+  )
   @IsOptional()
   destination_currency?: string;
 
@@ -67,14 +75,18 @@ export class CreateInterbankOrderDto {
   @ValidateIf((o) => o.flow_type === 'wallet_to_wallet')
   @IsString()
   @IsNotEmpty()
-  @IsIn([...ALLOWED_NETWORKS], { message: `Red de origen no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
+  @IsIn([...ALLOWED_NETWORKS], {
+    message: `Red de origen no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}`,
+  })
   source_network?: string;
 
   @ApiPropertyOptional()
   @ValidateIf((o) => o.flow_type === 'wallet_to_wallet')
   @IsString()
   @IsNotEmpty()
-  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], { message: `Moneda de origen no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}` })
+  @IsIn([...ALLOWED_CRYPTO_CURRENCIES], {
+    message: `Moneda de origen no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}`,
+  })
   source_currency?: string;
 
   // ── destino crypto (wallet_to_wallet, bolivia_to_wallet) ──
@@ -92,7 +104,9 @@ export class CreateInterbankOrderDto {
   )
   @IsString()
   @IsNotEmpty()
-  @IsIn([...ALLOWED_NETWORKS], { message: `Red de destino no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}` })
+  @IsIn([...ALLOWED_NETWORKS], {
+    message: `Red de destino no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}`,
+  })
   destination_network?: string;
 
   // ── world_to_bolivia: destino es cuenta boliviana ──
@@ -129,6 +143,13 @@ export class CreateInterbankOrderDto {
   // ── Campos comunes ──
   @ApiPropertyOptional({
     description: 'ID del proveedor seleccionado por el usuario',
+  })
+  @ValidateIf((o) =>
+    ['bolivia_to_world', 'bolivia_to_wallet'].includes(o.flow_type),
+  )
+  @IsNotEmpty({
+    message:
+      'supplier_id es obligatorio para bolivia_to_world y bolivia_to_wallet',
   })
   @IsOptional()
   @IsUUID()

@@ -40,7 +40,10 @@ export class ClientBankAccountsController {
       'Registra la cuenta bancaria personal del cliente para retiros. Solo disponible para usuarios con KYC/KYB aprobado.',
   })
   @ApiResponse({ status: 201, description: 'Cuenta bancaria registrada' })
-  @ApiResponse({ status: 400, description: 'Ya tiene cuenta registrada o datos inválidos' })
+  @ApiResponse({
+    status: 400,
+    description: 'Ya tiene cuenta registrada o datos inválidos',
+  })
   @ApiResponse({ status: 403, description: 'Usuario no aprobado' })
   create(
     @CurrentUser() user: AuthenticatedUser,
@@ -75,7 +78,10 @@ export class ClientBankAccountsController {
   })
   @ApiResponse({ status: 200, description: 'Solicitud de cambio registrada' })
   @ApiResponse({ status: 404, description: 'Cuenta no encontrada' })
-  @ApiResponse({ status: 400, description: 'Rate limit excedido o cambio pendiente' })
+  @ApiResponse({
+    status: 400,
+    description: 'Rate limit excedido o cambio pendiente',
+  })
   requestUpdate(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe()) id: string,

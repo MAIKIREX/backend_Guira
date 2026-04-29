@@ -2,12 +2,27 @@ import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 const LIQUIDATION_CURRENCIES = [
-  'usdb', 'usdc', 'usdt', 'dai', 'pyusd', 'eurc',
+  'usdb',
+  'usdc',
+  'usdt',
+  'dai',
+  'pyusd',
+  'eurc',
 ] as const;
 
 const LIQUIDATION_CHAINS = [
-  'arbitrum', 'avalanche_c_chain', 'base', 'celo', 'ethereum',
-  'optimism', 'polygon', 'solana', 'stellar', 'tempo', 'tron', 'evm',
+  'arbitrum',
+  'avalanche_c_chain',
+  'base',
+  'celo',
+  'ethereum',
+  'optimism',
+  'polygon',
+  'solana',
+  'stellar',
+  'tempo',
+  'tron',
+  'evm',
 ] as const;
 
 export class CreateLiquidationAddressDto {
@@ -23,7 +38,10 @@ export class CreateLiquidationAddressDto {
   })
   chain: string;
 
-  @ApiProperty({ example: 'usd', description: 'Moneda fiat de liquidación destino' })
+  @ApiProperty({
+    example: 'usd',
+    description: 'Moneda fiat de liquidación destino',
+  })
   @IsString()
   destination_currency: string;
 
@@ -31,13 +49,16 @@ export class CreateLiquidationAddressDto {
   @IsString()
   destination_payment_rail: string;
 
-  @ApiPropertyOptional({ description: 'ID de external account de Bridge (destino fiat)' })
+  @ApiPropertyOptional({
+    description: 'ID de external account de Bridge (destino fiat)',
+  })
   @IsOptional()
   @IsString()
   external_account_id?: string;
 
   @ApiPropertyOptional({
-    description: 'Wallet address crypto de destino (para liquidaciones crypto → crypto)',
+    description:
+      'Wallet address crypto de destino (para liquidaciones crypto → crypto)',
     example: '0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18',
   })
   @IsOptional()

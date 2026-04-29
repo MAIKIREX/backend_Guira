@@ -26,7 +26,9 @@
 //   - bre_b   → Bre-B (Colombia, Beta)
 //   - gb      → Faster Payments (Reino Unido)
 
-export const PAYMENT_RAIL_TO_BRIDGE_ACCOUNT_TYPE: Readonly<Record<string, string>> = {
+export const PAYMENT_RAIL_TO_BRIDGE_ACCOUNT_TYPE: Readonly<
+  Record<string, string>
+> = {
   ach: 'us',
   wire: 'us',
   sepa: 'iban',
@@ -70,7 +72,8 @@ export const SUPPORTED_DESTINATION_CURRENCIES = [
   'eurc',
 ] as const;
 
-export type DestinationCurrency = (typeof SUPPORTED_DESTINATION_CURRENCIES)[number];
+export type DestinationCurrency =
+  (typeof SUPPORTED_DESTINATION_CURRENCIES)[number];
 
 // ── Límites de creación de VAs por usuario ──────────────────────────
 //

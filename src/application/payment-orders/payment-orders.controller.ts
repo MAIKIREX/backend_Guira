@@ -101,7 +101,9 @@ export class PaymentOrdersController {
   }
 
   @Get('route-catalog')
-  @ApiOperation({ summary: 'Catálogo de rutas Bridge soportadas (on-ramp y off-ramp)' })
+  @ApiOperation({
+    summary: 'Catálogo de rutas Bridge soportadas (on-ramp y off-ramp)',
+  })
   getRouteCatalog() {
     return {
       ramp_on: BRIDGE_RAMP_ON_ROUTES,
@@ -113,17 +115,22 @@ export class PaymentOrdersController {
   }
 
   @Get('psav-configs')
-  @ApiOperation({ summary: 'Cuentas PSAV crypto activas para resolución de rutas de retiro (sin campos sensibles)' })
+  @ApiOperation({
+    summary:
+      'Cuentas PSAV crypto activas para resolución de rutas de retiro (sin campos sensibles)',
+  })
   async getActivePsavCryptoConfigs() {
     const accounts = await this.psavService.getActiveCryptoAccounts();
-    return accounts.map(({ id, name, type, currency, crypto_network, is_active }) => ({
-      id,
-      name,
-      type,
-      currency,
-      crypto_network,
-      is_active,
-    }));
+    return accounts.map(
+      ({ id, name, type, currency, crypto_network, is_active }) => ({
+        id,
+        name,
+        type,
+        currency,
+        crypto_network,
+        is_active,
+      }),
+    );
   }
 
   @Get('exchange-rates')
@@ -160,7 +167,10 @@ export class PaymentOrdersController {
     let supplier = null;
     if (order.supplier_id) {
       try {
-        supplier = await this.suppliersService.findOne(order.supplier_id, user.id);
+        supplier = await this.suppliersService.findOne(
+          order.supplier_id,
+          user.id,
+        );
       } catch (e) {
         // Ignorar si no se encuentra
       }
@@ -181,7 +191,8 @@ export class PaymentOrdersController {
 
   @Patch(':id')
   @ApiOperation({
-    summary: 'Actualizar campos editables de una orden (supporting_document_url, notes)',
+    summary:
+      'Actualizar campos editables de una orden (supporting_document_url, notes)',
   })
   updateOrder(
     @Param('id', new ParseUUIDPipe()) id: string,

@@ -45,9 +45,7 @@ function isValidForNetwork(address: string, network: string): boolean {
 // ─── Validador genérico (sin red) ────────────────────────────────────────────
 
 @ValidatorConstraint({ async: false })
-export class IsBlockchainAddressConstraint
-  implements ValidatorConstraintInterface
-{
+export class IsBlockchainAddressConstraint implements ValidatorConstraintInterface {
   validate(value: unknown): boolean {
     if (typeof value !== 'string') return false;
     return isValidForAnyNetwork(value);
@@ -73,13 +71,13 @@ export function IsBlockchainAddress(validationOptions?: ValidationOptions) {
 // ─── Validador con conciencia de red ─────────────────────────────────────────
 
 @ValidatorConstraint({ async: false })
-export class IsBlockchainAddressForNetworkConstraint
-  implements ValidatorConstraintInterface
-{
+export class IsBlockchainAddressForNetworkConstraint implements ValidatorConstraintInterface {
   validate(value: unknown, args: ValidationArguments): boolean {
     if (typeof value !== 'string') return false;
     const [networkField] = args.constraints as [string];
-    const network: unknown = (args.object as Record<string, unknown>)[networkField];
+    const network: unknown = (args.object as Record<string, unknown>)[
+      networkField
+    ];
     if (typeof network !== 'string' || !network) {
       return isValidForAnyNetwork(value);
     }

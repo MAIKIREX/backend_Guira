@@ -65,7 +65,9 @@ export class BridgeService {
     // ── Determinar destino ──────────────────────────────
     let destinationAddress: string | undefined;
     let isExternalSweep = false;
-    const destinationType = dto.destination_address ? 'wallet_external' : 'wallet_bridge';
+    const destinationType = dto.destination_address
+      ? 'wallet_external'
+      : 'wallet_bridge';
 
     if (dto.destination_address) {
       destinationAddress = dto.destination_address;
@@ -203,7 +205,8 @@ export class BridgeService {
         // Fee confirmado por Bridge (fuente de verdad)
         // Si Bridge no lo devuelve, usamos el cálculo local como fallback
         developer_fee_percent:
-          bridgeVA.developer_fee_percent !== undefined && bridgeVA.developer_fee_percent !== null
+          bridgeVA.developer_fee_percent !== undefined &&
+          bridgeVA.developer_fee_percent !== null
             ? parseFloat(bridgeVA.developer_fee_percent as string)
             : devFeePercent,
         status: 'active',
@@ -291,7 +294,10 @@ export class BridgeService {
     }
 
     // Observación #1: address es REQUIRED por Bridge para cuentas US (ACH/Wire)
-    if ((dto.payment_rail === 'ach' || dto.payment_rail === 'wire') && !dto.address) {
+    if (
+      (dto.payment_rail === 'ach' || dto.payment_rail === 'wire') &&
+      !dto.address
+    ) {
       throw new BadRequestException(
         'address es obligatoria para transferencias ACH/Wire. Bridge la requiere para validar beneficiary_address_valid.',
       );
@@ -304,7 +310,10 @@ export class BridgeService {
           'account_owner_type es obligatorio para CO Bank Transfer (individual o business).',
         );
       }
-      if (dto.account_owner_type === 'individual' && (!dto.first_name || !dto.last_name)) {
+      if (
+        dto.account_owner_type === 'individual' &&
+        (!dto.first_name || !dto.last_name)
+      ) {
         throw new BadRequestException(
           'first_name y last_name son obligatorios cuando account_owner_type es "individual" para CO Bank Transfer.',
         );
@@ -333,7 +342,10 @@ export class BridgeService {
           'business_name es obligatorio cuando account_owner_type es "business".',
         );
       }
-      if (dto.account_owner_type === 'individual' && (!dto.first_name || !dto.last_name)) {
+      if (
+        dto.account_owner_type === 'individual' &&
+        (!dto.first_name || !dto.last_name)
+      ) {
         throw new BadRequestException(
           'first_name y last_name son obligatorios cuando account_owner_type es "individual".',
         );
@@ -585,23 +597,34 @@ export class BridgeService {
           if (dto.first_name) bridgePayload.first_name = dto.first_name;
           if (dto.last_name) bridgePayload.last_name = dto.last_name;
         } else if (dto.account_owner_type === 'business') {
-          if (dto.business_name) bridgePayload.business_name = dto.business_name;
+          if (dto.business_name)
+            bridgePayload.business_name = dto.business_name;
         }
       }
 
       if (dto.address) {
         bridgePayload.address = {
           street_line_1: dto.address.street_line_1,
-          ...(dto.address.street_line_2 ? { street_line_2: dto.address.street_line_2 } : {}),
+          ...(dto.address.street_line_2
+            ? { street_line_2: dto.address.street_line_2 }
+            : {}),
           city: dto.address.city,
           ...(dto.address.state ? { state: dto.address.state } : {}),
-          ...(dto.address.postal_code ? { postal_code: dto.address.postal_code } : {}),
+          ...(dto.address.postal_code
+            ? { postal_code: dto.address.postal_code }
+            : {}),
           country: toAlpha3(dto.address.country),
         };
       }
     } else if (dto.payment_rail === 'co_bank_transfer') {
       // CO Bank Transfer (Colombia): cuenta bancaria tradicional con datos completos
-      if (!dto.account_number || !dto.bank_code || !dto.document_type || !dto.document_number || !dto.phone_number) {
+      if (
+        !dto.account_number ||
+        !dto.bank_code ||
+        !dto.document_type ||
+        !dto.document_number ||
+        !dto.phone_number
+      ) {
         throw new BadRequestException(
           'CO Bank Transfer requiere: account_number, bank_code, document_type, document_number y phone_number.',
         );
@@ -621,7 +644,8 @@ export class BridgeService {
           if (dto.first_name) bridgePayload.first_name = dto.first_name;
           if (dto.last_name) bridgePayload.last_name = dto.last_name;
         } else if (dto.account_owner_type === 'business') {
-          if (dto.business_name) bridgePayload.business_name = dto.business_name;
+          if (dto.business_name)
+            bridgePayload.business_name = dto.business_name;
         }
       }
     }
@@ -732,7 +756,9 @@ export class BridgeService {
       .single();
 
     if (eaError || !eaRecord) {
-      throw new NotFoundException('External Account no encontrada en la DB local');
+      throw new NotFoundException(
+        'External Account no encontrada en la DB local',
+      );
     }
 
     // Helper: alpha-2 → alpha-3 para address.country
@@ -740,9 +766,24 @@ export class BridgeService {
       if (!code) return undefined;
       if (code.length === 3) return code.toUpperCase();
       const map: Record<string, string> = {
-        US: 'USA', MX: 'MEX', BR: 'BRA', CO: 'COL', AR: 'ARG', CL: 'CHL',
-        PE: 'PER', EC: 'ECU', BO: 'BOL', PY: 'PRY', UY: 'URY', VE: 'VEN',
-        DE: 'DEU', FR: 'FRA', ES: 'ESP', IT: 'ITA', NL: 'NLD', GB: 'GBR',
+        US: 'USA',
+        MX: 'MEX',
+        BR: 'BRA',
+        CO: 'COL',
+        AR: 'ARG',
+        CL: 'CHL',
+        PE: 'PER',
+        EC: 'ECU',
+        BO: 'BOL',
+        PY: 'PRY',
+        UY: 'URY',
+        VE: 'VEN',
+        DE: 'DEU',
+        FR: 'FRA',
+        ES: 'ESP',
+        IT: 'ITA',
+        NL: 'NLD',
+        GB: 'GBR',
       };
       return map[code.toUpperCase()] ?? code.toUpperCase();
     };
@@ -772,7 +813,8 @@ export class BridgeService {
         accountFields.routing_number = updatePayload.account.routing_number;
       }
       if (updatePayload.account.checking_or_savings) {
-        accountFields.checking_or_savings = updatePayload.account.checking_or_savings;
+        accountFields.checking_or_savings =
+          updatePayload.account.checking_or_savings;
       }
       if (Object.keys(accountFields).length > 0) {
         bridgePayload.account = accountFields;
@@ -1135,9 +1177,7 @@ export class BridgeService {
   async listAllTransfers(filters?: { status?: string }) {
     let query = this.supabase
       .from('bridge_transfers')
-      .select(
-        '*, profiles!bridge_transfers_user_id_fkey(email, full_name)',
-      )
+      .select('*, profiles!bridge_transfers_user_id_fkey(email, full_name)')
       .order('created_at', { ascending: false })
       .limit(200);
 
@@ -1209,13 +1249,14 @@ export class BridgeService {
     // Resolver fee: si el caller ya lo provee lo usamos; si no, lo consultamos
     // desde fees_config respetando overrides del usuario.
     // - destino crypto (wallet)        → operation_type: interbank_bo_wallet / rail: psav
-    // - destino fiat (external account) → operation_type: interbank_w2w        / rail: bridge
-    let developerFeePercent: string | undefined = dto.custom_developer_fee_percent;
+    // - destino fiat (external account) → operation_type: interbank_bo_out   / rail: bridge
+    let developerFeePercent: string | undefined =
+      dto.custom_developer_fee_percent;
     if (!developerFeePercent) {
       const isCryptoDestination = !!dto.destination_address;
       developerFeePercent = await this.feesService.getFeePercent(
         userId,
-        isCryptoDestination ? 'interbank_bo_wallet' : 'interbank_w2w',
+        isCryptoDestination ? 'interbank_bo_wallet' : 'interbank_bo_out',
         isCryptoDestination ? 'psav' : 'bridge',
       );
     }
@@ -1250,7 +1291,8 @@ export class BridgeService {
         currency: bridgeLA.currency as string,
         address: (bridgeLA.address as string) ?? null,
         destination_payment_rail:
-          (bridgeLA.destination_payment_rail as string) ?? dto.destination_payment_rail,
+          (bridgeLA.destination_payment_rail as string) ??
+          dto.destination_payment_rail,
         destination_currency:
           (bridgeLA.destination_currency as string) ?? dto.destination_currency,
         destination_external_account_id: dto.external_account_id ?? null,
@@ -1401,10 +1443,7 @@ export class BridgeService {
     );
 
     return {
-      maxTotal: parseInt(
-        settings['VA_MAX_TOTAL_ACTIVE_PER_USER'] ?? '24',
-        10,
-      ),
+      maxTotal: parseInt(settings['VA_MAX_TOTAL_ACTIVE_PER_USER'] ?? '24', 10),
       maxExternalPerCurrency: parseInt(
         settings['VA_MAX_EXTERNAL_PER_CURRENCY'] ?? '3',
         10,
@@ -1434,7 +1473,9 @@ export class BridgeService {
   private getBridgeAccountType(paymentRail: string): string {
     const accountType = PAYMENT_RAIL_TO_BRIDGE_ACCOUNT_TYPE[paymentRail];
     if (!accountType) {
-      const supported = Object.keys(PAYMENT_RAIL_TO_BRIDGE_ACCOUNT_TYPE).join(', ');
+      const supported = Object.keys(PAYMENT_RAIL_TO_BRIDGE_ACCOUNT_TYPE).join(
+        ', ',
+      );
       throw new BadRequestException(
         `Payment rail '${paymentRail}' no tiene un account_type de Bridge mapeado. Rails soportados: ${supported}`,
       );
@@ -1543,8 +1584,16 @@ export class BridgeService {
       table_name: 'va_fee_defaults',
       record_id: existing.id,
       affected_fields: ['fee_percent'],
-      previous_values: { source_currency: currency, destination_type: destType, fee_percent: oldFee },
-      new_values: { source_currency: currency, destination_type: destType, fee_percent: feePercent },
+      previous_values: {
+        source_currency: currency,
+        destination_type: destType,
+        fee_percent: oldFee,
+      },
+      new_values: {
+        source_currency: currency,
+        destination_type: destType,
+        fee_percent: feePercent,
+      },
       reason: `Fee default actualizado: ${currency}/${destType} (${oldFee}% → ${feePercent}%)`,
       source: 'admin_panel',
     });
@@ -1634,8 +1683,16 @@ export class BridgeService {
       table_name: 'va_fee_overrides',
       record_id: userId,
       affected_fields: ['fee_percent'],
-      previous_values: { source_currency: currency, destination_type: destType, fee_percent: oldFee },
-      new_values: { source_currency: currency, destination_type: destType, fee_percent: body.fee_percent },
+      previous_values: {
+        source_currency: currency,
+        destination_type: destType,
+        fee_percent: oldFee,
+      },
+      new_values: {
+        source_currency: currency,
+        destination_type: destType,
+        fee_percent: body.fee_percent,
+      },
       reason: body.reason,
       source: 'admin_panel',
     });
@@ -1687,7 +1744,11 @@ export class BridgeService {
       table_name: 'va_fee_overrides',
       record_id: userId,
       affected_fields: ['fee_percent'],
-      previous_values: { source_currency: currency, destination_type: destType, fee_percent: existing.fee_percent },
+      previous_values: {
+        source_currency: currency,
+        destination_type: destType,
+        fee_percent: existing.fee_percent,
+      },
       new_values: null,
       reason: `Override eliminado para ${currency.toUpperCase()} / ${destType}`,
       source: 'admin_panel',
@@ -1696,7 +1757,11 @@ export class BridgeService {
     this.logger.log(
       `VA fee override cleared: user=${userId} ${currency}/${destType} by ${actorId}`,
     );
-    return { deleted: true, source_currency: currency, destination_type: destType };
+    return {
+      deleted: true,
+      source_currency: currency,
+      destination_type: destType,
+    };
   }
 
   /**
@@ -1719,10 +1784,16 @@ export class BridgeService {
       .select('source_currency, destination_type, fee_percent');
 
     const overrideMap = new Map(
-      (overrides ?? []).map((o) => [`${o.source_currency}:${o.destination_type}`, o.fee_percent]),
+      (overrides ?? []).map((o) => [
+        `${o.source_currency}:${o.destination_type}`,
+        o.fee_percent,
+      ]),
     );
     const defaultMap = new Map(
-      (defaults ?? []).map((d) => [`${d.source_currency}:${d.destination_type}`, d.fee_percent]),
+      (defaults ?? []).map((d) => [
+        `${d.source_currency}:${d.destination_type}`,
+        d.fee_percent,
+      ]),
     );
 
     const matrix: Array<{
@@ -1737,9 +1808,19 @@ export class BridgeService {
         const key = `${currency}:${destType}`;
         const overrideFee = overrideMap.get(key);
         if (overrideFee != null) {
-          matrix.push({ source_currency: currency, destination_type: destType, resolved_fee: overrideFee, source: 'override' });
+          matrix.push({
+            source_currency: currency,
+            destination_type: destType,
+            resolved_fee: overrideFee,
+            source: 'override',
+          });
         } else {
-          matrix.push({ source_currency: currency, destination_type: destType, resolved_fee: defaultMap.get(key) ?? null, source: 'default' });
+          matrix.push({
+            source_currency: currency,
+            destination_type: destType,
+            resolved_fee: defaultMap.get(key) ?? null,
+            source: 'default',
+          });
         }
       }
     }
@@ -1795,24 +1876,33 @@ export class BridgeService {
     const affectedFields: string[] = [];
 
     if (dto.developer_fee_percent !== undefined) {
-      bridgePayload.developer_fee_percent = dto.developer_fee_percent.toString();
+      bridgePayload.developer_fee_percent =
+        dto.developer_fee_percent.toString();
       dbUpdate.developer_fee_percent = dto.developer_fee_percent;
       previousValues.developer_fee_percent = va.developer_fee_percent;
       affectedFields.push('developer_fee_percent');
     }
-    if (dto.destination_address !== undefined || dto.destination_currency !== undefined || dto.destination_payment_rail !== undefined) {
+    if (
+      dto.destination_address !== undefined ||
+      dto.destination_currency !== undefined ||
+      dto.destination_payment_rail !== undefined
+    ) {
       bridgePayload.destination = {
         ...((bridgePayload.destination ?? {}) as object),
         address: dto.destination_address ?? va.destination_address,
-        currency: (dto.destination_currency ?? va.destination_currency).toLowerCase(),
-        payment_rail: (dto.destination_payment_rail ?? va.destination_payment_rail).toLowerCase(),
+        currency: (
+          dto.destination_currency ?? va.destination_currency
+        ).toLowerCase(),
+        payment_rail: (
+          dto.destination_payment_rail ?? va.destination_payment_rail
+        ).toLowerCase(),
       };
-      
+
       if (dto.destination_address !== undefined) {
         dbUpdate.destination_address = dto.destination_address;
         previousValues.destination_address = va.destination_address;
         affectedFields.push('destination_address');
-  
+
         // Si se cambia la dirección, actualizar is_external_sweep
         if (dto.destination_address && !va.is_external_sweep) {
           dbUpdate.is_external_sweep = true;
@@ -1821,7 +1911,6 @@ export class BridgeService {
         }
       }
 
-
       if (dto.destination_currency !== undefined) {
         dbUpdate.destination_currency = dto.destination_currency.toLowerCase();
         previousValues.destination_currency = va.destination_currency;
@@ -1829,14 +1918,17 @@ export class BridgeService {
       }
 
       if (dto.destination_payment_rail !== undefined) {
-        dbUpdate.destination_payment_rail = dto.destination_payment_rail.toLowerCase();
+        dbUpdate.destination_payment_rail =
+          dto.destination_payment_rail.toLowerCase();
         previousValues.destination_payment_rail = va.destination_payment_rail;
         affectedFields.push('destination_payment_rail');
       }
     }
 
     if (Object.keys(bridgePayload).length === 0) {
-      throw new BadRequestException('Debe especificar al menos un campo a actualizar (developer_fee_percent, destination_address, destination_currency o destination_payment_rail)');
+      throw new BadRequestException(
+        'Debe especificar al menos un campo a actualizar (developer_fee_percent, destination_address, destination_currency o destination_payment_rail)',
+      );
     }
 
     // 3. PUT a Bridge
@@ -1858,21 +1950,31 @@ export class BridgeService {
       updated = updatedRow;
     } catch (dbError) {
       // Compensación: intentar revertir en Bridge
-      this.logger.error(`DB update falló tras PUT exitoso a Bridge. Intentando revertir… ${dbError}`);
+      this.logger.error(
+        `DB update falló tras PUT exitoso a Bridge. Intentando revertir… ${dbError}`,
+      );
       const revertPayload: Record<string, unknown> = {};
       if (dto.developer_fee_percent !== undefined) {
-        revertPayload.developer_fee_percent = va.developer_fee_percent?.toString() ?? '0';
+        revertPayload.developer_fee_percent =
+          va.developer_fee_percent?.toString() ?? '0';
       }
-      if (dto.destination_address !== undefined || dto.destination_currency !== undefined || dto.destination_payment_rail !== undefined) {
+      if (
+        dto.destination_address !== undefined ||
+        dto.destination_currency !== undefined ||
+        dto.destination_payment_rail !== undefined
+      ) {
         revertPayload.destination = {};
         if (dto.destination_address !== undefined) {
-          (revertPayload.destination as Record<string, string>).address = va.destination_address ?? '';
+          (revertPayload.destination as Record<string, string>).address =
+            va.destination_address ?? '';
         }
         if (dto.destination_currency !== undefined) {
-          (revertPayload.destination as Record<string, string>).currency = va.destination_currency;
+          (revertPayload.destination as Record<string, string>).currency =
+            va.destination_currency;
         }
         if (dto.destination_payment_rail !== undefined) {
-          (revertPayload.destination as Record<string, string>).payment_rail = va.destination_payment_rail;
+          (revertPayload.destination as Record<string, string>).payment_rail =
+            va.destination_payment_rail;
         }
       }
       try {
@@ -1882,9 +1984,13 @@ export class BridgeService {
         );
         this.logger.warn('Reversión en Bridge exitosa');
       } catch (revertErr) {
-        this.logger.error(`CRÍTICO: Reversión en Bridge también falló: ${revertErr}`);
+        this.logger.error(
+          `CRÍTICO: Reversión en Bridge también falló: ${revertErr}`,
+        );
       }
-      throw new BadRequestException('Error al actualizar VA en DB local. Se intentó revertir en Bridge.');
+      throw new BadRequestException(
+        'Error al actualizar VA en DB local. Se intentó revertir en Bridge.',
+      );
     }
 
     // 5. Audit log
