@@ -95,8 +95,12 @@ export class SuppliersService {
         bridge_liquidation_address_id =
           la.bridge_liquidation_address_id as string;
       } catch (err) {
-        this.logger.warn(
+        this.logger.error(
           `Proveedor ${dto.name}: external account creada (${ea.id}) pero falló la liquidation address: ${err.message}`,
+        );
+        throw new BadRequestException(
+          `External account creada en Bridge pero la liquidation address falló: ${err.message}. ` +
+            'Contacte soporte o reintente la creación del proveedor.',
         );
       }
     } else {
@@ -113,8 +117,12 @@ export class SuppliersService {
         bridge_liquidation_address_id =
           la.bridge_liquidation_address_id as string;
       } catch (err) {
-        this.logger.warn(
+        this.logger.error(
           `Proveedor crypto ${dto.name}: falló la creación de liquidation address: ${err.message}`,
+        );
+        throw new BadRequestException(
+          `No se pudo crear la liquidation address para el proveedor crypto: ${err.message}. ` +
+            'Verifique los datos del wallet e intente nuevamente.',
         );
       }
     }
@@ -309,40 +317,79 @@ export class SuppliersService {
       };
     }
 
-    // ── Sincronizar con Bridge si aplica (S-6) ──
-    // Bridge PUT solo acepta: address (requerido) + account (US: routing_number, checking_or_savings)
-    if (hasBridgeEA && dto.address) {
+    // ── Sincronizar External Account con Bridge si aplica ──
+    // Bridge PUT requiere address; si solo cambian campos US (routing_number,
+    // checking_or_savings), cargamos la address existente de bank_details.
+    const hasUsFieldChanges =
+      (existing.payment_rail === 'ach' || existing.payment_rail === 'wire') &&
+      (dto.routing_number !== undefined || dto.checking_or_savings !== undefined);
+
+    if (hasBridgeEA && (dto.address || hasUsFieldChanges)) {
       try {
-        await this.bridgeService.updateExternalAccount(
-          userId,
-          existing.bridge_external_account_id,
-          {
-            address: dto.address,
-            // Solo para US: routing_number y checking_or_savings
-            ...(existing.payment_rail === 'ach' ||
-            existing.payment_rail === 'wire'
-              ? {
-                  account: {
-                    ...(dto.routing_number
-                      ? { routing_number: dto.routing_number }
-                      : {}),
-                    ...(dto.checking_or_savings
-                      ? {
-                          checking_or_savings: dto.checking_or_savings as
-                            | 'checking'
-                            | 'savings',
-                        }
-                      : {}),
-                  },
-                }
-              : {}),
-          },
-        );
+        // Resolver address: usar la del DTO si viene, sino cargar la existente
+        const addressForBridge = dto.address ?? existing.bank_details?.address;
+
+        if (addressForBridge && addressForBridge.street_line_1 && addressForBridge.city && addressForBridge.country) {
+          await this.bridgeService.updateExternalAccount(
+            userId,
+            existing.bridge_external_account_id,
+            {
+              address: addressForBridge,
+              // Solo para US: routing_number y checking_or_savings
+              ...(existing.payment_rail === 'ach' ||
+              existing.payment_rail === 'wire'
+                ? {
+                    account: {
+                      ...(dto.routing_number
+                        ? { routing_number: dto.routing_number }
+                        : {}),
+                      ...(dto.checking_or_savings
+                        ? {
+                            checking_or_savings: dto.checking_or_savings as
+                              | 'checking'
+                              | 'savings',
+                          }
+                        : {}),
+                    },
+                  }
+                : {}),
+            },
+          );
+        } else {
+          this.logger.warn(
+            `Bridge update para EA ${existing.bridge_external_account_id} omitido: no hay address válida disponible (ni en DTO ni en bank_details)`,
+          );
+        }
       } catch (err) {
         // Log pero no bloquear — la DB local se actualiza igualmente
         this.logger.warn(
           `Bridge update para EA ${existing.bridge_external_account_id} falló: ${err.message}`,
         );
+      }
+    }
+
+    // ── Sincronizar Liquidation Address con Bridge si aplica ──
+    // Bridge PUT /liquidation_addresses permite actualizar: external_account_id,
+    // custom_developer_fee_percent, y referencias de pago.
+    if (existing.bridge_liquidation_address_id) {
+      const laUpdatePayload: Record<string, string | null | undefined> = {};
+
+      // Si cambia wallet_address para proveedores crypto, no se puede actualizar
+      // destination_address en la LA — requeriría crear una nueva LA.
+      // Pero sí podemos actualizar referencias de pago si se añaden en el futuro.
+
+      if (Object.keys(laUpdatePayload).length > 0) {
+        try {
+          await this.bridgeService.updateLiquidationAddress(
+            userId,
+            existing.bridge_liquidation_address_id,
+            laUpdatePayload,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `Bridge update para LA ${existing.bridge_liquidation_address_id} falló: ${err.message}`,
+          );
+        }
       }
     }
 

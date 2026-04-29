@@ -367,69 +367,9 @@ export class BridgeService {
       bridgePayload.bank_name = dto.bank_name;
     }
 
-    // Helper inline: convierte código de país alpha-2 → alpha-3 (ISO 3166-1)
+    // Helper: convierte código de país alpha-2 → alpha-3 (ISO 3166-1)
     // Bridge requiere alpha-3 en todos los campos "country" de direcciones.
-    const toAlpha3 = (code: string | undefined): string | undefined => {
-      if (!code) return undefined;
-      if (code.length === 3) return code.toUpperCase(); // ya está en alpha-3
-      const map: Record<string, string> = {
-        US: 'USA',
-        MX: 'MEX',
-        BR: 'BRA',
-        CO: 'COL',
-        AR: 'ARG',
-        CL: 'CHL',
-        PE: 'PER',
-        EC: 'ECU',
-        BO: 'BOL',
-        PY: 'PRY',
-        UY: 'URY',
-        VE: 'VEN',
-        DE: 'DEU',
-        FR: 'FRA',
-        ES: 'ESP',
-        IT: 'ITA',
-        NL: 'NLD',
-        GB: 'GBR',
-        PT: 'PRT',
-        BE: 'BEL',
-        AT: 'AUT',
-        CH: 'CHE',
-        SE: 'SWE',
-        NO: 'NOR',
-        DK: 'DNK',
-        FI: 'FIN',
-        PL: 'POL',
-        IE: 'IRL',
-        CZ: 'CZE',
-        HU: 'HUN',
-        RO: 'ROU',
-        SK: 'SVK',
-        HR: 'HRV',
-        BG: 'BGR',
-        LT: 'LTU',
-        LV: 'LVA',
-        EE: 'EST',
-        SI: 'SVN',
-        LU: 'LUX',
-        MT: 'MLT',
-        CY: 'CYP',
-        GR: 'GRC',
-        CN: 'CHN',
-        JP: 'JPN',
-        KR: 'KOR',
-        IN: 'IND',
-        SG: 'SGP',
-        AU: 'AUS',
-        NZ: 'NZL',
-        CA: 'CAN',
-        ZA: 'ZAF',
-        NG: 'NGA',
-        KE: 'KEN',
-        GH: 'GHA',
-      };
-      return map[code.toUpperCase()] ?? code.toUpperCase();
-    };
+    const toAlpha3 = (code: string | undefined) => this.toAlpha3(code);
 
     // ── Campos específicos según payment rail ──
     if (dto.payment_rail === 'ach' || dto.payment_rail === 'wire') {
@@ -452,7 +392,7 @@ export class BridgeService {
           ...(dto.address.postal_code
             ? { postal_code: dto.address.postal_code }
             : {}),
-          country: toAlpha3(dto.address.country), // ← FIX: alpha-2 → alpha-3
+          country: this.toAlpha3(dto.address.country), // alpha-2 → alpha-3
         };
       }
     } else if (dto.payment_rail === 'sepa') {
@@ -761,32 +701,7 @@ export class BridgeService {
       );
     }
 
-    // Helper: alpha-2 → alpha-3 para address.country
-    const toAlpha3 = (code: string | undefined): string | undefined => {
-      if (!code) return undefined;
-      if (code.length === 3) return code.toUpperCase();
-      const map: Record<string, string> = {
-        US: 'USA',
-        MX: 'MEX',
-        BR: 'BRA',
-        CO: 'COL',
-        AR: 'ARG',
-        CL: 'CHL',
-        PE: 'PER',
-        EC: 'ECU',
-        BO: 'BOL',
-        PY: 'PRY',
-        UY: 'URY',
-        VE: 'VEN',
-        DE: 'DEU',
-        FR: 'FRA',
-        ES: 'ESP',
-        IT: 'ITA',
-        NL: 'NLD',
-        GB: 'GBR',
-      };
-      return map[code.toUpperCase()] ?? code.toUpperCase();
-    };
+    // Usa el helper compartido toAlpha3 para address.country
 
     // Construir payload para Bridge PUT
     const bridgePayload: Record<string, unknown> = {
@@ -802,7 +717,7 @@ export class BridgeService {
         ...(updatePayload.address.postal_code
           ? { postal_code: updatePayload.address.postal_code }
           : {}),
-        country: toAlpha3(updatePayload.address.country),
+        country: this.toAlpha3(updatePayload.address.country),
       },
     };
 
@@ -1322,9 +1237,186 @@ export class BridgeService {
     );
   }
 
+  /**
+   * Actualiza una Liquidation Address en Bridge.
+   *
+   * Según la documentación de Bridge (PUT /liquidation_addresses/{id}):
+   * - `external_account_id` y `custom_developer_fee_percent` se pueden actualizar independientemente
+   * - `destination_ach_reference`, `destination_wire_message`, `destination_sepa_reference`,
+   *   `destination_spei_reference`, `destination_reference` para mensajes de pago
+   * - `return_address` para dirección de retorno crypto
+   */
+  async updateLiquidationAddress(
+    userId: string,
+    bridgeLaDbId: string,
+    updatePayload: {
+      external_account_id?: string;
+      custom_developer_fee_percent?: string | null;
+      destination_ach_reference?: string;
+      destination_wire_message?: string;
+      destination_sepa_reference?: string;
+      destination_spei_reference?: string;
+      destination_reference?: string;
+      return_address?: string;
+    },
+  ) {
+    const profile = await this.getVerifiedProfile(userId);
+
+    // Obtener el bridge_liquidation_address_id real (UUID de Bridge)
+    const { data: laRecord, error: laError } = await this.supabase
+      .from('bridge_liquidation_addresses')
+      .select('bridge_liquidation_address_id')
+      .eq('id', bridgeLaDbId)
+      .eq('user_id', userId)
+      .single();
+
+    if (laError || !laRecord) {
+      throw new NotFoundException(
+        'Liquidation Address no encontrada en la DB local',
+      );
+    }
+
+    // Construir payload — solo incluir campos definidos
+    const bridgePayload: Record<string, unknown> = {};
+    if (updatePayload.external_account_id !== undefined) {
+      bridgePayload.external_account_id = updatePayload.external_account_id;
+    }
+    if (updatePayload.custom_developer_fee_percent !== undefined) {
+      bridgePayload.custom_developer_fee_percent =
+        updatePayload.custom_developer_fee_percent;
+    }
+    if (updatePayload.destination_ach_reference !== undefined) {
+      bridgePayload.destination_ach_reference =
+        updatePayload.destination_ach_reference;
+    }
+    if (updatePayload.destination_wire_message !== undefined) {
+      bridgePayload.destination_wire_message =
+        updatePayload.destination_wire_message;
+    }
+    if (updatePayload.destination_sepa_reference !== undefined) {
+      bridgePayload.destination_sepa_reference =
+        updatePayload.destination_sepa_reference;
+    }
+    if (updatePayload.destination_spei_reference !== undefined) {
+      bridgePayload.destination_spei_reference =
+        updatePayload.destination_spei_reference;
+    }
+    if (updatePayload.destination_reference !== undefined) {
+      bridgePayload.destination_reference =
+        updatePayload.destination_reference;
+    }
+    if (updatePayload.return_address !== undefined) {
+      bridgePayload.return_address = updatePayload.return_address;
+    }
+
+    if (Object.keys(bridgePayload).length === 0) {
+      this.logger.warn(
+        `updateLiquidationAddress llamado sin campos a actualizar para LA ${bridgeLaDbId}`,
+      );
+      return null;
+    }
+
+    const bridgeResponse = await this.bridgeApi.put<Record<string, unknown>>(
+      `/v0/customers/${profile.bridge_customer_id}/liquidation_addresses/${laRecord.bridge_liquidation_address_id}`,
+      bridgePayload,
+    );
+
+    // Actualizar campos relevantes en DB local
+    const dbUpdate: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (updatePayload.external_account_id !== undefined) {
+      dbUpdate.destination_external_account_id =
+        updatePayload.external_account_id;
+    }
+    if (updatePayload.custom_developer_fee_percent !== undefined) {
+      dbUpdate.developer_fee_percent =
+        updatePayload.custom_developer_fee_percent;
+    }
+
+    if (Object.keys(dbUpdate).length > 1) {
+      await this.supabase
+        .from('bridge_liquidation_addresses')
+        .update(dbUpdate)
+        .eq('id', bridgeLaDbId);
+    }
+
+    this.logger.log(
+      `Liquidation Address ${laRecord.bridge_liquidation_address_id} actualizada en Bridge`,
+    );
+
+    return bridgeResponse;
+  }
+
   // ═══════════════════════════════════════════════════
   //  HELPERS
   // ═══════════════════════════════════════════════════
+
+  /**
+   * Convierte código de país ISO 3166-1 alpha-2 → alpha-3.
+   * Bridge requiere alpha-3 en todos los campos "country" de direcciones.
+   */
+  private toAlpha3(code: string | undefined): string | undefined {
+    if (!code) return undefined;
+    if (code.length === 3) return code.toUpperCase(); // ya está en alpha-3
+    const map: Record<string, string> = {
+      US: 'USA',
+      MX: 'MEX',
+      BR: 'BRA',
+      CO: 'COL',
+      AR: 'ARG',
+      CL: 'CHL',
+      PE: 'PER',
+      EC: 'ECU',
+      BO: 'BOL',
+      PY: 'PRY',
+      UY: 'URY',
+      VE: 'VEN',
+      DE: 'DEU',
+      FR: 'FRA',
+      ES: 'ESP',
+      IT: 'ITA',
+      NL: 'NLD',
+      GB: 'GBR',
+      PT: 'PRT',
+      BE: 'BEL',
+      AT: 'AUT',
+      CH: 'CHE',
+      SE: 'SWE',
+      NO: 'NOR',
+      DK: 'DNK',
+      FI: 'FIN',
+      PL: 'POL',
+      IE: 'IRL',
+      CZ: 'CZE',
+      HU: 'HUN',
+      RO: 'ROU',
+      SK: 'SVK',
+      HR: 'HRV',
+      BG: 'BGR',
+      LT: 'LTU',
+      LV: 'LVA',
+      EE: 'EST',
+      SI: 'SVN',
+      LU: 'LUX',
+      MT: 'MLT',
+      CY: 'CYP',
+      GR: 'GRC',
+      CN: 'CHN',
+      JP: 'JPN',
+      KR: 'KOR',
+      IN: 'IND',
+      SG: 'SGP',
+      AU: 'AUS',
+      NZ: 'NZL',
+      CA: 'CAN',
+      ZA: 'ZAF',
+      NG: 'NGA',
+      KE: 'KEN',
+      GH: 'GHA',
+    };
+    return map[code.toUpperCase()] ?? code.toUpperCase();
+  }
 
   private async getVerifiedProfile(userId: string) {
     const { data: profile, error } = await this.supabase

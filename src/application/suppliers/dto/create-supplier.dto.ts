@@ -92,10 +92,10 @@ export class CreateSupplierDto {
   @MaxLength(9)
   routing_number?: string;
 
-  @ApiPropertyOptional({ enum: ['checking', 'savings', 'electronic_deposit'] })
+  @ApiPropertyOptional({ enum: ['checking', 'savings'] })
   @IsOptional()
-  @IsEnum(['checking', 'savings', 'electronic_deposit'])
-  checking_or_savings?: 'checking' | 'savings' | 'electronic_deposit';
+  @IsEnum(['checking', 'savings'])
+  checking_or_savings?: 'checking' | 'savings';
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -303,10 +303,10 @@ export class UpdateSupplierDto {
   @IsString()
   routing_number?: string;
 
-  @ApiPropertyOptional({ enum: ['checking', 'savings', 'electronic_deposit'] })
+  @ApiPropertyOptional({ enum: ['checking', 'savings'] })
   @IsOptional()
-  @IsEnum(['checking', 'savings', 'electronic_deposit'])
-  checking_or_savings?: 'checking' | 'savings' | 'electronic_deposit';
+  @IsEnum(['checking', 'savings'])
+  checking_or_savings?: 'checking' | 'savings';
 
   @ApiPropertyOptional()
   @IsOptional()
