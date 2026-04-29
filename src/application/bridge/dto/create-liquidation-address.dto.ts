@@ -43,4 +43,14 @@ export class CreateLiquidationAddressDto {
   @IsOptional()
   @IsString()
   destination_address?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Fee porcentual del desarrollador a aplicar. Se calcula automáticamente ' +
+      'desde fees_config si no se proporciona. Valor en base 100 (ej. "0.3" = 0.3%).',
+    example: '0.3',
+  })
+  @IsOptional()
+  @IsString()
+  custom_developer_fee_percent?: string;
 }

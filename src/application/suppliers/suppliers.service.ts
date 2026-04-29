@@ -85,8 +85,8 @@ export class SuppliersService {
           FIAT_RAIL_TO_CURRENCY[dto.payment_rail] ?? dto.currency.toLowerCase();
 
         const la = await this.bridgeService.createLiquidationAddress(userId, {
-          currency: dto.source_currency ?? 'usdc',
-          chain: dto.source_chain ?? 'base',
+          currency: 'usdt',
+          chain: 'solana',
           external_account_id: ea.bridge_external_account_id as string,
           destination_payment_rail: dto.payment_rail,
           destination_currency: destinationCurrency,
@@ -102,11 +102,11 @@ export class SuppliersService {
       // Proveedor crypto: crear liquidation address apuntando a la wallet del proveedor
       try {
         const la = await this.bridgeService.createLiquidationAddress(userId, {
-          currency: dto.wallet_currency ?? 'usdc',
-          chain: dto.wallet_network ?? 'base',
+          currency: 'usdt',
+          chain: 'solana',
           destination_address: dto.wallet_address,
-          destination_payment_rail: dto.wallet_network ?? 'base',
-          destination_currency: dto.wallet_currency ?? 'usdc',
+          destination_payment_rail: dto.wallet_network ?? 'solana',
+          destination_currency: dto.wallet_currency ?? 'usdt',
         });
 
         bridge_liquidation_address_id = la.bridge_liquidation_address_id as string;

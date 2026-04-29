@@ -1206,6 +1206,20 @@ export class BridgeService {
   ) {
     const profile = await this.getVerifiedProfile(userId);
 
+    // Resolver fee: si el caller ya lo provee lo usamos; si no, lo consultamos
+    // desde fees_config respetando overrides del usuario.
+    // - destino crypto (wallet)        → operation_type: interbank_bo_wallet / rail: psav
+    // - destino fiat (external account) → operation_type: interbank_w2w        / rail: bridge
+    let developerFeePercent: string | undefined = dto.custom_developer_fee_percent;
+    if (!developerFeePercent) {
+      const isCryptoDestination = !!dto.destination_address;
+      developerFeePercent = await this.feesService.getFeePercent(
+        userId,
+        isCryptoDestination ? 'interbank_bo_wallet' : 'interbank_w2w',
+        isCryptoDestination ? 'psav' : 'bridge',
+      );
+    }
+
     const bridgeLA = await this.bridgeApi.post<Record<string, unknown>>(
       `/v0/customers/${profile.bridge_customer_id}/liquidation_addresses`,
       {
@@ -1219,6 +1233,9 @@ export class BridgeService {
         ...(dto.destination_address
           ? { destination_address: dto.destination_address }
           : {}),
+        ...(developerFeePercent && developerFeePercent !== '0'
+          ? { custom_developer_fee_percent: developerFeePercent }
+          : {}),
       },
       `la-${userId}-${dto.currency}-${dto.chain}-${Date.now()}`,
     );
@@ -1231,11 +1248,14 @@ export class BridgeService {
         bridge_customer_id: profile.bridge_customer_id,
         chain: bridgeLA.chain as string,
         currency: bridgeLA.currency as string,
-        address: bridgeLA.address as string ?? null,
-        destination_payment_rail: bridgeLA.destination_payment_rail as string ?? dto.destination_payment_rail,
-        destination_currency: bridgeLA.destination_currency as string ?? dto.destination_currency,
+        address: (bridgeLA.address as string) ?? null,
+        destination_payment_rail:
+          (bridgeLA.destination_payment_rail as string) ?? dto.destination_payment_rail,
+        destination_currency:
+          (bridgeLA.destination_currency as string) ?? dto.destination_currency,
         destination_external_account_id: dto.external_account_id ?? null,
         destination_address: dto.destination_address ?? null,
+        developer_fee_percent: developerFeePercent ?? null,
         is_active: true,
       })
       .select()
