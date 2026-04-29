@@ -2454,6 +2454,16 @@ export class PaymentOrdersService {
         )
       : null;
 
+    // Monto bruto que el PSAV debe depositar en la liquidation address (sin descontar fee).
+    // Bridge cobrará el fee como custom_developer_fee_percent configurado en la liquidation address,
+    // así el cobro se realiza una sola vez y no hay doble descuento.
+    const amountToDeposit =
+      exchangeRate && isBobOut
+        ? parseFloat(
+            (parseFloat(order.amount) / exchangeRate).toFixed(2),
+          )
+        : amountDestination;
+
     const { data: updated, error } = await this.supabase
       .from('payment_orders')
       .update({
@@ -2553,7 +2563,7 @@ export class PaymentOrdersService {
           liqAddr.destination_external_account_id,
         destination_address: liqAddr.destination_address,
         supplier_name: supplier.name,
-        amount_to_deposit: amountDestination,
+        amount_to_deposit: amountToDeposit,
       };
 
       await this.supabase

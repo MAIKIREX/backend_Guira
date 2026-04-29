@@ -1546,7 +1546,9 @@ export class WebhooksService {
         // Buscar orden en processing que coincida por external_account_id y monto
         const { data: matchedOrder } = await this.supabase
           .from('payment_orders')
-          .select('id, user_id, amount_destination')
+          .select(
+            'id, user_id, amount, exchange_rate_applied, amount_destination',
+          )
           .eq('status', 'processing')
           .in('flow_type', ['bolivia_to_world'])
           .eq('external_account_id', extAcct.id)
@@ -1554,11 +1556,13 @@ export class WebhooksService {
           .order('created_at', { ascending: true })
           .limit(10);
 
-        // Buscar match exacto por monto (con tolerancia de ±0.02 por redondeo)
+        // Comparar contra el monto bruto (amount / rate) que es lo que el PSAV deposita.
+        // Bridge cobra el fee como developer_fee, así que el webhook trae el monto pre-fee.
         const tolerance = 0.02;
         const matched = (matchedOrder ?? []).find((o) => {
-          const orderAmount = parseFloat(o.amount_destination ?? '0');
-          return Math.abs(orderAmount - amount) <= tolerance;
+          const rate = parseFloat(o.exchange_rate_applied ?? '1');
+          const grossAmount = parseFloat(o.amount ?? '0') / rate;
+          return Math.abs(grossAmount - amount) <= tolerance;
         });
 
         if (matched) {
@@ -1593,7 +1597,9 @@ export class WebhooksService {
     if (destToAddress) {
       const { data: matchedByAddr } = await this.supabase
         .from('payment_orders')
-        .select('id, user_id, amount_destination')
+        .select(
+          'id, user_id, amount, exchange_rate_applied, amount_destination',
+        )
         .eq('status', 'processing')
         .in('flow_type', ['bolivia_to_wallet'])
         .eq('destination_address', destToAddress)
@@ -1603,8 +1609,9 @@ export class WebhooksService {
 
       const tolerance = 0.02;
       const matched = (matchedByAddr ?? []).find((o) => {
-        const orderAmount = parseFloat(o.amount_destination ?? '0');
-        return Math.abs(orderAmount - amount) <= tolerance;
+        const rate = parseFloat(o.exchange_rate_applied ?? '1');
+        const grossAmount = parseFloat(o.amount ?? '0') / rate;
+        return Math.abs(grossAmount - amount) <= tolerance;
       });
 
       if (matched) {
@@ -1702,7 +1709,7 @@ export class WebhooksService {
             const { data: lateMatch } = await this.supabase
               .from('payment_orders')
               .select(
-                'id, user_id, amount, amount_destination, currency, flow_type',
+                'id, user_id, amount, amount_destination, exchange_rate_applied, currency, flow_type',
               )
               .eq('status', 'processing')
               .in('flow_type', ['bolivia_to_world'])
@@ -1711,10 +1718,12 @@ export class WebhooksService {
               .order('created_at', { ascending: true })
               .limit(10);
 
+            // Comparar contra monto bruto (amount / rate) para evitar doble cobro de fee
             const tolerance = 0.02;
             const matched = (lateMatch ?? []).find((o) => {
-              const orderAmount = parseFloat(o.amount_destination ?? '0');
-              return Math.abs(orderAmount - amount) <= tolerance;
+              const rate = parseFloat(o.exchange_rate_applied ?? '1');
+              const grossAmount = parseFloat(o.amount ?? '0') / rate;
+              return Math.abs(grossAmount - amount) <= tolerance;
             });
 
             if (matched) {
@@ -1731,7 +1740,7 @@ export class WebhooksService {
           const { data: lateMatchByAddr } = await this.supabase
             .from('payment_orders')
             .select(
-              'id, user_id, amount, amount_destination, currency, flow_type',
+              'id, user_id, amount, amount_destination, exchange_rate_applied, currency, flow_type',
             )
             .eq('status', 'processing')
             .in('flow_type', ['bolivia_to_wallet'])
@@ -1740,10 +1749,12 @@ export class WebhooksService {
             .order('created_at', { ascending: true })
             .limit(10);
 
+          // Comparar contra monto bruto para evitar doble cobro de fee
           const addrTolerance = 0.02;
           const matchedByAddr = (lateMatchByAddr ?? []).find((o) => {
-            const orderAmount = parseFloat(o.amount_destination ?? '0');
-            return Math.abs(orderAmount - amount) <= addrTolerance;
+            const rate = parseFloat(o.exchange_rate_applied ?? '1');
+            const grossAmount = parseFloat(o.amount ?? '0') / rate;
+            return Math.abs(grossAmount - amount) <= addrTolerance;
           });
 
           if (matchedByAddr) {
