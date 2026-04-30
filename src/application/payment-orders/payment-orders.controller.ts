@@ -27,6 +27,7 @@ import { PdfService } from '../../core/pdf/pdf.service';
 import { SuppliersService } from '../suppliers/suppliers.service';
 import { ExportService } from '../../core/export/export.service';
 import { ProfilesService } from '../profiles/profiles.service';
+import { WalletsService } from '../wallets/wallets.service';
 import { CreateInterbankOrderDto } from './dto/create-interbank-order.dto';
 import { CreateWalletRampOrderDto } from './dto/create-wallet-ramp-order.dto';
 import { ConfirmDepositDto } from './dto/confirm-deposit.dto';
@@ -61,6 +62,7 @@ export class PaymentOrdersController {
     private readonly suppliersService: SuppliersService,
     private readonly exportService: ExportService,
     private readonly profilesService: ProfilesService,
+    private readonly walletsService: WalletsService,
   ) {}
 
   // ── Crear órdenes ──
@@ -274,7 +276,25 @@ export class PaymentOrdersController {
       }
     }
 
-    const buffer = await this.pdfService.generatePaymentPdf(order, supplier);
+    const profile = await this.profilesService.findOne(order.user_id);
+    const phone = await this.profilesService.getClientPhone(order.user_id);
+    const client = {
+      id: profile.id,
+      full_name: profile.full_name ?? null,
+      email: profile.email,
+      phone,
+    };
+
+    let clientWallet = null;
+    if (order.wallet_id) {
+      try {
+        clientWallet = await this.walletsService.findOne(order.wallet_id, order.user_id);
+      } catch (e) {
+        // Ignorar si no se encuentra
+      }
+    }
+
+    const buffer = await this.pdfService.generatePaymentPdf(order, supplier, client, clientWallet);
 
     res.set({
       'Content-Type': 'application/pdf',

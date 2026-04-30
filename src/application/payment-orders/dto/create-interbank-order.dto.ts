@@ -75,6 +75,9 @@ export class CreateInterbankOrderDto {
   @ValidateIf((o) => o.flow_type === 'wallet_to_wallet')
   @IsString()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toLowerCase() : value,
+  )
   @IsIn([...ALLOWED_NETWORKS], {
     message: `Red de origen no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}`,
   })
@@ -84,6 +87,9 @@ export class CreateInterbankOrderDto {
   @ValidateIf((o) => o.flow_type === 'wallet_to_wallet')
   @IsString()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toLowerCase() : value,
+  )
   @IsIn([...ALLOWED_CRYPTO_CURRENCIES], {
     message: `Moneda de origen no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}`,
   })

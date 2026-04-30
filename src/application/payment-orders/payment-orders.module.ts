@@ -12,6 +12,7 @@ import { ClientBankAccountsModule } from '../client-bank-accounts/client-bank-ac
 import { SuppliersModule } from '../suppliers/suppliers.module';
 import { ExportModule } from '../../core/export/export.module';
 import { ProfilesModule } from '../profiles/profiles.module';
+import { WalletsModule } from '../wallets/wallets.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ProfilesModule } from '../profiles/profiles.module';
     SuppliersModule,
     ExportModule,
     ProfilesModule,
+    WalletsModule,
   ],
   controllers: [PaymentOrdersController, AdminPaymentOrdersController],
   providers: [PaymentOrdersService],
