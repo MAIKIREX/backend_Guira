@@ -417,4 +417,19 @@ export class SuppliersService {
 
     return { message: 'Proveedor desactivado' };
   }
+
+  /**
+   * Devuelve los proveedores que coinciden con los IDs dados.
+   * Uso interno del servicio de exportación (no paginado, solo id+name).
+   */
+  async findByIds(ids: string[], userId: string): Promise<{ id: string; name: string }[]> {
+    if (ids.length === 0) return [];
+    const { data } = await this.supabase
+      .from('suppliers')
+      .select('id, name')
+      .eq('user_id', userId)
+      .in('id', ids);
+    return (data ?? []) as { id: string; name: string }[];
+  }
 }
+

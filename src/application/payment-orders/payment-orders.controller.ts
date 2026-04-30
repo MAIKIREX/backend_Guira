@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Res,
   StreamableFile,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -24,6 +25,8 @@ import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { PsavService } from '../psav/psav.service';
 import { PdfService } from '../../core/pdf/pdf.service';
 import { SuppliersService } from '../suppliers/suppliers.service';
+import { ExportService } from '../../core/export/export.service';
+import { ProfilesService } from '../profiles/profiles.service';
 import { CreateInterbankOrderDto } from './dto/create-interbank-order.dto';
 import { CreateWalletRampOrderDto } from './dto/create-wallet-ramp-order.dto';
 import { ConfirmDepositDto } from './dto/confirm-deposit.dto';
@@ -55,6 +58,8 @@ export class PaymentOrdersController {
     private readonly psavService: PsavService,
     private readonly pdfService: PdfService,
     private readonly suppliersService: SuppliersService,
+    private readonly exportService: ExportService,
+    private readonly profilesService: ProfilesService,
   ) {}
 
   // ── Crear órdenes ──
@@ -145,6 +150,61 @@ export class PaymentOrdersController {
   })
   getExchangeRate(@Param('pair') pair: string) {
     return this.exchangeRatesService.getRate(pair);
+  }
+
+  @Get('export')
+  @ApiOperation({ summary: 'Exportar historial de expedientes a Excel o PDF (respeta filtro de estado)' })
+  @ApiQuery({ name: 'format', required: true, enum: ['excel', 'pdf'], description: 'Formato del archivo de exportación' })
+  @ApiQuery({ name: 'status', required: false, description: 'Filtrar por estado (si se omite, exporta todos)' })
+  async exportOrders(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('format') format: string,
+    @Query('status') status?: string,
+    @Res({ passthrough: true }) res?: any,
+  ) {
+    if (format !== 'excel' && format !== 'pdf') {
+      throw new BadRequestException('El parámetro format debe ser "excel" o "pdf"');
+    }
+
+    // Obtener órdenes filtradas (sin paginación)
+    const orders = await this.paymentOrdersService.getOrdersForExport(user.id, { status });
+
+    // Resolver nombres de proveedores
+    const supplierIds = [...new Set(orders.map((o: any) => o.supplier_id).filter(Boolean))];
+    const suppliers = await this.suppliersService.findByIds(supplierIds as string[], user.id);
+
+    // Obtener perfil del cliente
+    const profile = await this.profilesService.findOne(user.id);
+    const client = {
+      id: profile.id,
+      full_name: profile.full_name ?? null,
+      email: profile.email,
+      phone: profile.phone ?? null,
+    };
+
+    const filters = { status };
+    const dateStr = new Date().toISOString().slice(0, 10);
+    let buffer: Buffer;
+    let contentType: string;
+    let filename: string;
+
+    if (format === 'excel') {
+      buffer = await this.exportService.generateExcel(orders, suppliers, client, filters);
+      contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      filename = `expedientes-${dateStr}.xlsx`;
+    } else {
+      buffer = await this.exportService.generatePdfReport(orders, suppliers, client, filters);
+      contentType = 'application/pdf';
+      filename = `expedientes-${dateStr}.pdf`;
+    }
+
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': buffer.length,
+    });
+
+    return new StreamableFile(buffer);
   }
 
   @Get(':id')

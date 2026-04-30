@@ -2115,6 +2115,27 @@ export class PaymentOrdersService {
     return { data: data ?? [], total: count ?? 0, page, limit };
   }
 
+  /**
+   * Devuelve TODAS las órdenes del usuario que coinciden con los filtros
+   * (sin paginación). Uso exclusivo para exportación de reportes.
+   */
+  async getOrdersForExport(
+    userId: string,
+    filters?: { status?: string },
+  ) {
+    let query = this.supabase
+      .from('payment_orders')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (filters?.status) query = query.eq('status', filters.status);
+
+    const { data, error } = await query;
+    if (error) throw new BadRequestException(error.message);
+    return data ?? [];
+  }
+
   /** Detalle de una orden del usuario. */
   async getOrderById(userId: string, orderId: string) {
     const { data, error } = await this.supabase
