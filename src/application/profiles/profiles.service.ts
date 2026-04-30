@@ -91,6 +91,36 @@ export class ProfilesService {
     };
   }
 
+  /**
+   * Obtiene el número de teléfono del cliente buscando en las tablas
+   * people o businesses (onboarding), o como fallback en profiles.
+   */
+  async getClientPhone(userId: string): Promise<string | null> {
+    // 1. Buscar en people
+    const { data: person } = await this.supabase
+      .from('people')
+      .select('phone')
+      .eq('user_id', userId)
+      .single();
+    if (person?.phone) return person.phone;
+
+    // 2. Buscar en businesses
+    const { data: business } = await this.supabase
+      .from('businesses')
+      .select('phone')
+      .eq('user_id', userId)
+      .single();
+    if (business?.phone) return business.phone;
+
+    // 3. Fallback a profiles
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('phone')
+      .eq('id', userId)
+      .single();
+    return profile?.phone ?? null;
+  }
+
   // ───────────────────────────────────────────────
   //  Endpoints de administración (Admin / Staff)
   // ───────────────────────────────────────────────

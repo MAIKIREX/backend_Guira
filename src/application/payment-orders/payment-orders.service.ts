@@ -39,6 +39,10 @@ import {
   resolvePsavCryptoSource,
   FIAT_BO_OFF_RAMP_SOURCE_CURRENCIES,
 } from '../../common/constants/bridge-route-catalog.constants';
+import {
+  isValidTransferRoute,
+  getTransferMinAmount,
+} from '../../common/constants/transfer-route-catalog.constants';
 
 @Injectable()
 export class PaymentOrdersService {
@@ -286,12 +290,75 @@ export class PaymentOrdersService {
 
   /**
    * 1.2 Wallet → Wallet (Bridge Transfer, sin PSAV)
-   * Crypto ad-hoc → Crypto ad-hoc vía Bridge Transfer API
+   * Crypto ad-hoc → Crypto del proveedor vía Bridge Transfer API.
+   * El destino se resuelve desde el supplier seleccionado.
    */
   private async createWalletToWallet(
     userId: string,
     dto: CreateInterbankOrderDto,
   ) {
+    // ── 1. Resolver destino desde el proveedor ──
+    const { data: supplier, error: supplierErr } = await this.supabase
+      .from('suppliers')
+      .select('id, name, bank_details, payment_rail')
+      .eq('id', dto.supplier_id)
+      .eq('user_id', userId)
+      .single();
+
+    if (supplierErr || !supplier) {
+      throw new NotFoundException(
+        'Proveedor no encontrado o no pertenece al usuario.',
+      );
+    }
+
+    const destAddress = supplier.bank_details?.wallet_address as
+      | string
+      | undefined;
+    const destNetwork = supplier.bank_details?.wallet_network as
+      | string
+      | undefined;
+    const destCurrency = (
+      (supplier.bank_details?.wallet_currency as string | undefined) ??
+      dto.destination_currency
+    )?.toLowerCase();
+
+    if (!destAddress || !destNetwork || !destCurrency) {
+      throw new BadRequestException(
+        'El proveedor seleccionado no tiene dirección, red o moneda crypto configurada. ' +
+          'Complete los datos del proveedor antes de crear la orden.',
+      );
+    }
+
+    // ── 2. Validar ruta Bridge (src_net/src_cur → dst_net/dst_cur) ──
+    if (
+      !isValidTransferRoute(
+        dto.source_network!,
+        dto.source_currency!,
+        destNetwork,
+        destCurrency,
+      )
+    ) {
+      throw new BadRequestException(
+        `La combinación de origen ${dto.source_currency?.toUpperCase()}/${dto.source_network} ` +
+          `hacia ${destCurrency.toUpperCase()}/${destNetwork} no es soportada por Bridge. ` +
+          `Selecciona una red y moneda de origen válidas para el destino del proveedor.`,
+      );
+    }
+
+    // ── 3. Validar monto mínimo de la ruta ──
+    const minAmount = getTransferMinAmount(
+      dto.source_network!,
+      dto.source_currency!,
+      destNetwork,
+      destCurrency,
+    );
+    if (dto.amount < minAmount) {
+      throw new BadRequestException(
+        `El monto mínimo para esta ruta (${dto.source_currency?.toUpperCase()}/${dto.source_network} → ` +
+          `${destCurrency.toUpperCase()}/${destNetwork}) es ${minAmount} ${dto.source_currency?.toUpperCase()}.`,
+      );
+    }
+
     const { fee_amount, net_amount } = await this.feesService.calculateFee(
       userId,
       'interbank_w2w',
@@ -299,7 +366,7 @@ export class PaymentOrdersService {
       dto.amount,
     );
 
-    // Crear orden
+    // ── 4. Crear orden ──
     const { data: order, error } = await this.supabase
       .from('payment_orders')
       .insert({
@@ -314,14 +381,12 @@ export class PaymentOrdersService {
         source_address: dto.source_address,
         source_network: dto.source_network,
         destination_type: 'crypto_address',
-        destination_address: dto.destination_address,
-        destination_network: dto.destination_network,
-        destination_currency:
-          dto.destination_currency?.toUpperCase() ??
-          dto.source_currency?.toUpperCase(),
+        destination_address: destAddress,
+        destination_network: destNetwork,
+        destination_currency: destCurrency.toUpperCase(),
         exchange_rate_applied: 1,
         amount_destination: net_amount,
-        supplier_id: dto.supplier_id ?? null,
+        supplier_id: dto.supplier_id,
         business_purpose: dto.business_purpose,
         supporting_document_url: dto.supporting_document_url,
         notes: dto.notes,
@@ -332,9 +397,8 @@ export class PaymentOrdersService {
 
     if (error) throw new BadRequestException(error.message);
 
-    // Ejecutar transfer vía Bridge API
+    // ── 5. Ejecutar transfer vía Bridge API ──
     try {
-      // Obtener bridge_customer_id del usuario (requerido por Bridge)
       const { data: profile } = await this.supabase
         .from('profiles')
         .select('bridge_customer_id')
@@ -358,11 +422,9 @@ export class PaymentOrdersService {
             from_address: dto.source_address,
           },
           destination: {
-            payment_rail: dto.destination_network?.toLowerCase(),
-            currency:
-              dto.destination_currency?.toLowerCase() ??
-              dto.source_currency?.toLowerCase(),
-            to_address: dto.destination_address,
+            payment_rail: destNetwork.toLowerCase(),
+            currency: destCurrency.toLowerCase(),
+            to_address: destAddress,
           },
           amount: dto.amount.toString(),
           developer_fee: fee_amount.toString(),
@@ -386,10 +448,8 @@ export class PaymentOrdersService {
         bridge_state: (bridgeResult?.state as string) ?? 'awaiting_funds',
         status: 'pending',
         source_payment_rail: dto.source_network,
-        destination_payment_rail: dto.destination_network,
-        destination_currency:
-          dto.destination_currency?.toUpperCase() ??
-          dto.source_currency?.toUpperCase(),
+        destination_payment_rail: destNetwork,
+        destination_currency: destCurrency.toUpperCase(),
         bridge_raw_response: bridgeResult,
       });
 
@@ -419,7 +479,7 @@ export class PaymentOrdersService {
     }
 
     this.logger.log(
-      `📋 Orden wallet_to_wallet creada: ${order.id} — ${dto.amount} ${dto.source_currency}`,
+      `📋 Orden wallet_to_wallet creada: ${order.id} — ${dto.amount} ${dto.source_currency} → ${destCurrency.toUpperCase()}/${destNetwork} (supplier: ${supplier.name})`,
     );
     return order;
   }

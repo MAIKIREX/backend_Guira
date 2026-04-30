@@ -43,6 +43,7 @@ import {
   FIAT_BO_ALLOWED_DESTINATION_CURRENCIES,
   FIAT_BO_EXCLUDED_SOURCE_CURRENCIES,
 } from '../../common/constants/bridge-route-catalog.constants';
+import { getValidSourceRoutes } from '../../common/constants/transfer-route-catalog.constants';
 
 // ═══════════════════════════════════════════════
 //  USER CONTROLLER — /payment-orders
@@ -173,13 +174,15 @@ export class PaymentOrdersController {
     const supplierIds = [...new Set(orders.map((o: any) => o.supplier_id).filter(Boolean))];
     const suppliers = await this.suppliersService.findByIds(supplierIds as string[], user.id);
 
-    // Obtener perfil del cliente
+    // Obtener perfil del cliente y teléfono
     const profile = await this.profilesService.findOne(user.id);
+    const phone = await this.profilesService.getClientPhone(user.id);
+    
     const client = {
       id: profile.id,
       full_name: profile.full_name ?? null,
       email: profile.email,
-      phone: profile.phone ?? null,
+      phone,
     };
 
     const filters = { status };
@@ -205,6 +208,41 @@ export class PaymentOrdersController {
     });
 
     return new StreamableFile(buffer);
+  }
+
+  @Get('transfer-routes/:supplierId')
+  @ApiOperation({
+    summary:
+      'Rutas de origen válidas dado el destino crypto de un proveedor (wallet_to_wallet)',
+  })
+  async getTransferRoutes(
+    @Param('supplierId', new ParseUUIDPipe()) supplierId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const supplier = await this.suppliersService.findOne(supplierId, user.id);
+    const destNetwork = (supplier as any)?.bank_details?.wallet_network as
+      | string
+      | undefined;
+    const destCurrency = (supplier as any)?.bank_details?.wallet_currency as
+      | string
+      | undefined;
+
+    if (!destNetwork || !destCurrency) {
+      return {
+        dest_network: null,
+        dest_currency: null,
+        sources: [],
+        message:
+          'El proveedor no tiene red/moneda crypto configurada en bank_details.',
+      };
+    }
+
+    const sources = getValidSourceRoutes(destNetwork, destCurrency);
+    return {
+      dest_network: destNetwork.toLowerCase(),
+      dest_currency: destCurrency.toLowerCase(),
+      sources,
+    };
   }
 
   @Get(':id')

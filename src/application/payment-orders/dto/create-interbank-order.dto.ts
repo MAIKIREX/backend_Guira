@@ -89,19 +89,15 @@ export class CreateInterbankOrderDto {
   })
   source_currency?: string;
 
-  // ── destino crypto (wallet_to_wallet, bolivia_to_wallet) ──
+  // ── destino crypto (bolivia_to_wallet) — wallet_to_wallet lo resuelve desde el supplier ──
   @ApiPropertyOptional()
-  @ValidateIf((o) =>
-    ['wallet_to_wallet', 'bolivia_to_wallet'].includes(o.flow_type),
-  )
+  @ValidateIf((o) => o.flow_type === 'bolivia_to_wallet')
   @IsString()
   @IsNotEmpty()
   destination_address?: string;
 
   @ApiPropertyOptional()
-  @ValidateIf((o) =>
-    ['wallet_to_wallet', 'bolivia_to_wallet'].includes(o.flow_type),
-  )
+  @ValidateIf((o) => o.flow_type === 'bolivia_to_wallet')
   @IsString()
   @IsNotEmpty()
   @IsIn([...ALLOWED_NETWORKS], {
@@ -145,11 +141,13 @@ export class CreateInterbankOrderDto {
     description: 'ID del proveedor seleccionado por el usuario',
   })
   @ValidateIf((o) =>
-    ['bolivia_to_world', 'bolivia_to_wallet'].includes(o.flow_type),
+    ['bolivia_to_world', 'bolivia_to_wallet', 'wallet_to_wallet'].includes(
+      o.flow_type,
+    ),
   )
   @IsNotEmpty({
     message:
-      'supplier_id es obligatorio para bolivia_to_world y bolivia_to_wallet',
+      'supplier_id es obligatorio para bolivia_to_world, bolivia_to_wallet y wallet_to_wallet',
   })
   @IsOptional()
   @IsUUID()
