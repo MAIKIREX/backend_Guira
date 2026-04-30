@@ -359,6 +359,13 @@ export class PaymentOrdersService {
       );
     }
 
+    const feePercent = await this.feesService.getFeePercent(
+      userId,
+      'interbank_w2w',
+      'bridge',
+    );
+
+    // fee_amount / net_amount para el registro local de la orden
     const { fee_amount, net_amount } = await this.feesService.calculateFee(
       userId,
       'interbank_w2w',
@@ -419,17 +426,18 @@ export class PaymentOrdersService {
           source: {
             payment_rail: dto.source_network?.toLowerCase(),
             currency: dto.source_currency?.toLowerCase(),
-            from_address: dto.source_address,
+            // Sin from_address → Bridge acepta fondos de cualquier dirección
           },
           destination: {
             payment_rail: destNetwork.toLowerCase(),
             currency: destCurrency.toLowerCase(),
             to_address: destAddress,
           },
-          amount: dto.amount.toString(),
-          developer_fee: fee_amount.toString(),
-          return_instructions: {
-            address: dto.source_address,
+          // Sin amount → Bridge acepta cualquier monto (flexible_amount)
+          developer_fee_percent: feePercent,
+          features: {
+            flexible_amount: true,
+            allow_any_from_address: true,
           },
         },
         idempotencyKey,

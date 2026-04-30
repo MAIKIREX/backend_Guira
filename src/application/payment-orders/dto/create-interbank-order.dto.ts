@@ -64,11 +64,12 @@ export class CreateInterbankOrderDto {
   @IsOptional()
   destination_currency?: string;
 
-  // ── wallet_to_wallet: direcciones crypto ad-hoc ──
+  // ── wallet_to_wallet: dirección de origen como referencia interna (opcional) ──
+  // Bridge ya no la requiere: la transfer usa allow_any_from_address = true.
   @ApiPropertyOptional()
   @ValidateIf((o) => o.flow_type === 'wallet_to_wallet')
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   source_address?: string;
 
   @ApiPropertyOptional()
