@@ -2633,7 +2633,7 @@ export class PaymentOrdersService {
         destination_currency: walletLiqAddr.destination_currency,
         destination_address: walletLiqAddr.destination_address,
         supplier_name: walletSupplier.name,
-        amount_to_deposit: amountDestination,
+        amount_to_deposit: amountToDeposit,
       };
 
       await this.supabase
@@ -2648,7 +2648,7 @@ export class PaymentOrdersService {
 
       this.logger.log(
         `📋 Orden bolivia_to_wallet ${orderId} en processing — staff debe depositar ` +
-          `${amountDestination ?? 'N/A'} ${walletLiqAddr.currency} en liquidation address ${walletLiqAddr.address} ` +
+          `${amountToDeposit ?? 'N/A'} ${walletLiqAddr.currency} en liquidation address ${walletLiqAddr.address} ` +
           `(chain: ${walletLiqAddr.chain}, proveedor: ${walletSupplier.name})`,
       );
     }
