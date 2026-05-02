@@ -176,6 +176,19 @@ export class CreateBusinessDto {
   @IsString()
   business_description?: string;
 
+  /**
+   * P3-A — Bridge accepts `is_dao` boolean.
+   * Indicates if the business is a DAO (Decentralized Autonomous Organization).
+   * Defaults to false in the payload builder if not provided.
+   */
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Whether the business is a DAO (Decentralized Autonomous Organization)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_dao?: boolean;
+
   @ApiPropertyOptional({ example: ['fintech'] })
   @IsOptional()
   @IsArray()

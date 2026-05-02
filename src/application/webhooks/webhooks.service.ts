@@ -270,9 +270,67 @@ export class WebhooksService {
         await this.handleTransferFailed(payload);
         break;
 
-      // ── Virtual accounts ──────────────────────────────────────────────────────
-      case 'virtual_account.funds_received':
-        await this.handleFundsReceived(payload);
+      // ── Virtual accounts (Bridge category: virtual_account.activity.*) ────────
+      // IMPORTANTE: Bridge envía el prefijo de categoría completo en event_type.
+      // Aliases sin prefijo mantenidos por compatibilidad con tests/sandbox manual.
+      case 'virtual_account.activity.funds_received':
+      case 'virtual_account.funds_received': // alias legacy/sandbox
+        await this.handleVaFundsReceived(payload);
+        break;
+
+      case 'virtual_account.activity.payment_submitted':
+      case 'virtual_account.payment_submitted':
+        await this.handleVaPaymentSubmitted(payload);
+        break;
+
+      case 'virtual_account.activity.payment_processed':
+      case 'virtual_account.payment_processed':
+        await this.handleVaPaymentProcessed(payload);
+        break;
+
+      case 'virtual_account.activity.funds_scheduled':
+      case 'virtual_account.funds_scheduled':
+        await this.handleVaFundsScheduled(payload);
+        break;
+
+      case 'virtual_account.activity.in_review':
+      case 'virtual_account.in_review':
+        await this.handleVaInReview(payload);
+        break;
+
+      case 'virtual_account.activity.refund_in_flight':
+      case 'virtual_account.refund_in_flight':
+        await this.handleVaRefundInFlight(payload);
+        break;
+
+      case 'virtual_account.activity.refunded':
+      case 'virtual_account.refunded':
+        await this.handleVaRefunded(payload);
+        break;
+
+      case 'virtual_account.activity.refund_failed':
+      case 'virtual_account.refund_failed':
+        await this.handleVaRefundFailed(payload);
+        break;
+
+      case 'virtual_account.activity.microdeposit':
+      case 'virtual_account.microdeposit':
+        await this.handleVaMicrodeposit(payload);
+        break;
+
+      case 'virtual_account.activity.account_update':
+      case 'virtual_account.account_update':
+        await this.handleVaAccountUpdate(payload);
+        break;
+
+      case 'virtual_account.activity.activation':
+      case 'virtual_account.activation':
+        this.logger.log(`VA activada: ${payload?.event_object_id ?? 'unknown'}`);
+        break;
+
+      case 'virtual_account.activity.deactivation':
+      case 'virtual_account.deactivation':
+        this.logger.log(`VA desactivada: ${payload?.event_object_id ?? 'unknown'}`);
         break;
 
       // ── Liquidation ───────────────────────────────────────────────────────────
@@ -629,21 +687,51 @@ export class WebhooksService {
   }
 
   // ═══════════════════════════════════════════════
-  //  HANDLER: funds_received (REFACTORIZADO)
+  //  HELPER: Extrae el nombre del remitente segun el payment_rail [FIX M-2]
+  //  ACH/SEPA/SPEI/PIX -> source.sender_name | Wire -> source.originator_name
   // ═══════════════════════════════════════════════
 
-  private async handleFundsReceived(
+  private extractVaSenderName(
+    source: Record<string, unknown> | undefined,
+  ): string {
+    if (!source) return 'Desconocido';
+    const rail = source.payment_rail as string | undefined;
+    if (rail === 'wire') {
+      return (source.originator_name as string) ?? 'Desconocido';
+    }
+    return (source.sender_name as string) ?? 'Desconocido';
+  }
+
+  // ═══════════════════════════════════════════════
+  //  HANDLER: virtual_account.activity.funds_received [FIX C-1, C-2, C-3]
+  //  Bridge recibio el deposito fiat — NO acreditamos balance aqui.
+  //  La acreditacion ocurre en handleVaPaymentProcessed (estado terminal).
+  // ═══════════════════════════════════════════════
+
+  private async handleVaFundsReceived(
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const data = payload?.data as Record<string, unknown>;
-    if (!data) throw new Error('Payload sin data');
+    // FIX C-2: event_object es la fuente de datos para eventos VA
+    const data = (payload?.event_object ??
+      payload?.data) as Record<string, unknown>;
+    if (!data) throw new Error('VA funds_received: payload sin event_object/data');
 
     const vaId = data.virtual_account_id as string;
+    const depositId = (data.deposit_id as string) ?? null;
     const amount = parseFloat(data.amount as string);
-    const senderName = (data.sender_name as string) ?? 'Desconocido';
-    const currency = (data.currency as string) ?? 'usd';
+    const currency = ((data.currency as string) ?? 'usd').toUpperCase();
+    const source = data.source as Record<string, unknown> | undefined;
+    const senderName = this.extractVaSenderName(source);
+    const paymentRail = (source?.payment_rail as string) ?? null;
+    const bridgeEventId = (data.id as string) ?? null;
 
-    // 1. Buscar VA — incluyendo flags de external sweep
+    if (!vaId || isNaN(amount)) {
+      throw new Error(
+        `VA funds_received: payload invalido — vaId=${vaId} amount=${amount}`,
+      );
+    }
+
+    // 1. Buscar VA
     const { data: va, error: vaErr } = await this.supabase
       .from('bridge_virtual_accounts')
       .select(
@@ -654,19 +742,36 @@ export class WebhooksService {
 
     if (vaErr || !va) throw new Error(`VA no encontrada: ${vaId}`);
 
-    // 2. INSERT bridge_virtual_account_events (siempre, para auditoría)
+    // 2. Idempotencia: evitar doble procesamiento del mismo deposito [FIX C-5]
+    if (depositId) {
+      const { data: existing } = await this.supabase
+        .from('payment_orders')
+        .select('id')
+        .eq('deposit_id', depositId)
+        .maybeSingle();
+
+      if (existing) {
+        this.logger.warn(
+          `VA funds_received: deposit_id ${depositId} ya existe (order ${existing.id}) — ignorando`,
+        );
+        return;
+      }
+    }
+
+    // 3. Registrar en bridge_virtual_account_events (auditoria)
     await this.supabase.from('bridge_virtual_account_events').insert({
       bridge_virtual_account_id: vaId,
-      bridge_event_id: (payload.id as string) ?? null,
-      event_type: 'virtual_account.funds_received',
+      bridge_event_id: bridgeEventId,
+      deposit_id: depositId,
+      event_type: 'virtual_account.activity.funds_received',
       amount,
       currency,
       sender_name: senderName,
+      payment_rail: paymentRail,
       raw_payload: payload,
     });
 
-    // 3. Calcular fee (aplica en ambos escenarios)
-    // Usar el fee almacenado en la VA. 0% es un valor legítimo (cliente VIP sin cobro).
+    // 4. Calcular fee
     const devFeePercent =
       va.developer_fee_percent != null
         ? parseFloat(String(va.developer_fee_percent))
@@ -674,51 +779,34 @@ export class WebhooksService {
     const feeAmount = parseFloat(((amount * devFeePercent) / 100).toFixed(2));
     const netAmount = parseFloat((amount - feeAmount).toFixed(2));
 
-    // ═══════════════════════════════════════════════════════════
-    //  BIFURCACIÓN: ¿Destino interno (Guira) o externo (Binance, etc.)?
-    // ═══════════════════════════════════════════════════════════
-
+    // 5. Bifurcar: external sweep vs deposito interno
     if (va.is_external_sweep) {
-      // ── CASO B: External Sweep (Doble Asiento Contable) ──────
-      // Los fondos fueron enviados por Bridge a una wallet FUERA de Guira.
-      // Guira no controla ese dinero, así que:
-      //   Credit (+$990) + Debit (-$990) = Balance neto $0.00
       await this.handleExternalSweepDeposit(
-        va,
-        amount,
-        feeAmount,
-        netAmount,
-        currency,
-        senderName,
-        payload,
+        va, amount, feeAmount, netAmount, currency, senderName, payload, depositId,
       );
     } else {
-      // ── CASO A: Fondeo Interno (Wallet de Guira) ─────────────
-      // Los fondos se quedan en la plataforma → incrementar balance
-      await this.handleInternalDeposit(
-        va,
-        amount,
-        feeAmount,
-        netAmount,
-        currency,
-        senderName,
-        payload,
+      await this.handleInternalDepositPending(
+        va, amount, feeAmount, netAmount, currency,
+        senderName, bridgeEventId, depositId,
       );
     }
   }
 
   // ═══════════════════════════════════════════════════════════
-  //  CASO A: Depósito Interno (fondos se quedan en Guira)
-  // ═══════════════════════════════════════════════════════════
+  //  CASO A: Deposito Interno (fondos se quedan en Guira) — ETAPA 1: PENDING
+  //  Crea la payment_order en estado 'pending'. La acreditacion del balance
+  //  ocurre en handleVaPaymentProcessed cuando Bridge confirma on-chain. [FIX C-3]
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  private async handleInternalDeposit(
+  private async handleInternalDepositPending(
     va: Record<string, unknown>,
     amount: number,
     feeAmount: number,
     netAmount: number,
     currency: string,
     senderName: string,
-    payload: Record<string, unknown>,
+    bridgeEventId: string | null,
+    depositId: string | null,
   ): Promise<void> {
     const userId = va.user_id as string;
 
@@ -727,7 +815,7 @@ export class WebhooksService {
     if (!walletId) {
       const { data: wallet } = await this.supabase
         .from('wallets')
-        .select('id, currency')
+        .select('id')
         .eq('user_id', userId)
         .eq('is_active', true)
         .limit(1)
@@ -736,7 +824,7 @@ export class WebhooksService {
       walletId = wallet.id;
     }
 
-    // INSERT payment_order
+    // Crear payment_order en 'pending' — NO se acredita balance todavia
     const { data: order } = await this.supabase
       .from('payment_orders')
       .insert({
@@ -744,35 +832,26 @@ export class WebhooksService {
         wallet_id: walletId,
         source_type: 'bridge_virtual_account',
         source_reference_id: va.id,
+        flow_type: 'va_deposit',
         amount,
         fee_amount: feeAmount,
         net_amount: netAmount,
-        currency: (va.source_currency as string) ?? currency,
+        currency: ((va.source_currency as string) ?? currency).toUpperCase(),
         sender_name: senderName,
-        bridge_event_id: (payload.id as string) ?? null,
-        status: 'completed',
+        bridge_event_id: bridgeEventId,
+        deposit_id: depositId,
+        va_deposit_status: 'funds_received',
+        status: 'pending',
       })
       .select('id')
       .single();
 
-    // INSERT ledger_entry (credit, settled → trigger de DB actualiza balance)
-    await this.supabase.from('ledger_entries').insert({
-      wallet_id: walletId,
-      type: 'credit',
-      amount: netAmount,
-      currency: (va.source_currency as string) ?? currency,
-      status: 'settled',
-      reference_type: 'payment_order',
-      reference_id: order?.id ?? null,
-      description: `Depósito recibido — ${senderName} ($${amount})`,
-    });
-
-    // Notificación
+    // Notificar al usuario que el deposito esta en proceso (no acreditado aun)
     await this.supabase.from('notifications').insert({
       user_id: userId,
       type: 'financial',
-      title: 'Depósito Confirmado',
-      message: `Recibiste $${netAmount.toFixed(2)} en tu wallet Guira (fee: $${feeAmount.toFixed(2)})`,
+      title: 'Deposito en Proceso',
+      message: `Recibimos $${amount.toFixed(2)} de ${senderName}. Tu balance se actualizara cuando Bridge confirme el pago.`,
       reference_type: 'payment_order',
       reference_id: order?.id ?? null,
     });
@@ -780,9 +859,13 @@ export class WebhooksService {
     // Activity log
     await this.supabase.from('activity_logs').insert({
       user_id: userId,
-      action: 'DEPOSIT_RECEIVED',
-      description: `Depósito de $${amount} recibido de ${senderName} via VA → wallet interna`,
+      action: 'VA_DEPOSIT_PENDING',
+      description: `Deposito VA recibido: $${amount} de ${senderName} — pendiente confirmacion on-chain`,
     });
+
+    this.logger.log(
+      `VA deposito pendiente: $${netAmount} para user ${userId} (order ${order?.id ?? 'N/A'})`,
+    );
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -799,6 +882,7 @@ export class WebhooksService {
     currency: string,
     senderName: string,
     payload: Record<string, unknown>,
+    depositId: string | null = null,
   ): Promise<void> {
     const userId = va.user_id as string;
     const externalAddr =
@@ -827,12 +911,15 @@ export class WebhooksService {
         wallet_id: refWalletId,
         source_type: 'bridge_virtual_account',
         source_reference_id: va.id,
+        flow_type: 'va_deposit',
         amount,
         fee_amount: feeAmount,
         net_amount: netAmount,
-        currency: (va.source_currency as string) ?? currency,
+        currency: ((va.source_currency as string) ?? currency).toUpperCase(),
         sender_name: senderName,
         bridge_event_id: (payload.id as string) ?? null,
+        deposit_id: depositId,
+        va_deposit_status: 'payment_processed',
         status: 'swept_external',
       })
       .select('id')
@@ -889,8 +976,458 @@ export class WebhooksService {
     );
   }
 
-  // ═══════════════════════════════════════════════
-  //  HANDLER: transfer.payment_processed
+  // ═══════════════════════════════════════════════════════════
+  //  HANDLER: virtual_account.activity.payment_submitted  [NEW]
+  //  Bridge envio el pago on-chain; actualiza el estado de la order.
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleVaPaymentSubmitted(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const data = (payload?.event_object ?? payload?.data) as Record<string, unknown>;
+    const depositId = (data?.deposit_id as string) ?? null;
+    const vaId = data?.virtual_account_id as string;
+
+    this.logger.log(`VA payment_submitted: depositId=${depositId} va=${vaId}`);
+
+    await this.supabase.from('bridge_virtual_account_events').insert({
+      bridge_virtual_account_id: vaId,
+      bridge_event_id: (data?.id as string) ?? null,
+      deposit_id: depositId,
+      event_type: 'virtual_account.activity.payment_submitted',
+      amount: parseFloat((data?.amount as string) ?? '0'),
+      currency: ((data?.currency as string) ?? 'usd').toUpperCase(),
+      raw_payload: payload,
+    });
+
+    if (depositId) {
+      await this.supabase
+        .from('payment_orders')
+        .update({ va_deposit_status: 'payment_submitted' })
+        .eq('deposit_id', depositId);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HANDLER: virtual_account.activity.payment_processed  [NEW — FIX C-3]
+  //  Estado terminal de exito. AQUI se acredita el balance.
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleVaPaymentProcessed(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const data = (payload?.event_object ?? payload?.data) as Record<string, unknown>;
+    if (!data) throw new Error('VA payment_processed: payload sin event_object/data');
+
+    const depositId = (data.deposit_id as string) ?? null;
+    const vaId = data.virtual_account_id as string;
+
+    this.logger.log(`VA payment_processed: depositId=${depositId} va=${vaId}`);
+
+    // Registrar evento
+    await this.supabase.from('bridge_virtual_account_events').insert({
+      bridge_virtual_account_id: vaId,
+      bridge_event_id: (data.id as string) ?? null,
+      deposit_id: depositId,
+      event_type: 'virtual_account.activity.payment_processed',
+      amount: parseFloat((data.amount as string) ?? '0'),
+      currency: ((data.currency as string) ?? 'usd').toUpperCase(),
+      raw_payload: payload,
+    });
+
+    // Buscar payment_order pendiente por deposit_id
+    const { data: order } = await this.supabase
+      .from('payment_orders')
+      .select('id, user_id, wallet_id, net_amount, currency, va_deposit_status')
+      .eq('deposit_id', depositId ?? '')
+      .eq('status', 'pending')
+      .maybeSingle();
+
+    if (!order) {
+      this.logger.warn(
+        `VA payment_processed: no hay order pendiente para deposit_id=${depositId}`,
+      );
+      return;
+    }
+
+    if (order.va_deposit_status === 'refunded') {
+      this.logger.warn(
+        `VA payment_processed ignorado: order ${order.id} ya fue reembolsada`,
+      );
+      return;
+    }
+
+    const netAmount = parseFloat(String(order.net_amount));
+
+    // Acreditar balance: INSERT ledger_entry settled (trigger actualiza balances)
+    await this.supabase.from('ledger_entries').insert({
+      wallet_id: order.wallet_id,
+      type: 'credit',
+      amount: netAmount,
+      currency: order.currency,
+      status: 'settled',
+      reference_type: 'payment_order',
+      reference_id: order.id,
+      description: `Deposito confirmado via cuenta virtual Bridge`,
+    });
+
+    // Marcar order como completada
+    await this.supabase
+      .from('payment_orders')
+      .update({
+        status: 'completed',
+        va_deposit_status: 'payment_processed',
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', order.id);
+
+    // Notificacion de credito exitoso
+    await this.supabase.from('notifications').insert({
+      user_id: order.user_id,
+      type: 'financial',
+      title: 'Deposito Confirmado',
+      message: `$${netAmount.toFixed(2)} ${order.currency} acreditados en tu wallet Guira.`,
+      reference_type: 'payment_order',
+      reference_id: order.id,
+    });
+
+    await this.supabase.from('activity_logs').insert({
+      user_id: order.user_id,
+      action: 'VA_DEPOSIT_CONFIRMED',
+      description: `Deposito VA confirmado: $${netAmount} acreditados (order ${order.id})`,
+    });
+
+    this.logger.log(
+      `✅ VA deposito confirmado: $${netAmount} ${order.currency} para user ${order.user_id}`,
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HANDLER: virtual_account.activity.funds_scheduled  [NEW — P2-B]
+  //  ACH: fondos en transito. Notificar al usuario con fecha estimada.
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleVaFundsScheduled(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const data = (payload?.event_object ?? payload?.data) as Record<string, unknown>;
+    const vaId = data?.virtual_account_id as string;
+    const depositId = (data?.deposit_id as string) ?? null;
+    const amount = parseFloat((data?.amount as string) ?? '0');
+    const source = data?.source as Record<string, unknown> | undefined;
+    const estimatedArrival = (source?.estimated_arrival_date as string) ?? null;
+
+    this.logger.log(`VA funds_scheduled: va=${vaId} amount=${amount} eta=${estimatedArrival}`);
+
+    await this.supabase.from('bridge_virtual_account_events').insert({
+      bridge_virtual_account_id: vaId,
+      bridge_event_id: (data?.id as string) ?? null,
+      deposit_id: depositId,
+      event_type: 'virtual_account.activity.funds_scheduled',
+      amount,
+      currency: ((data?.currency as string) ?? 'usd').toUpperCase(),
+      payment_rail: (source?.payment_rail as string) ?? null,
+      raw_payload: payload,
+    });
+
+    // Buscar user_id desde la VA para notificar
+    const { data: va } = await this.supabase
+      .from('bridge_virtual_accounts')
+      .select('user_id')
+      .eq('bridge_virtual_account_id', vaId)
+      .single();
+
+    if (va?.user_id) {
+      const etaText = estimatedArrival
+        ? ` Tu deposito ACH llegara aproximadamente el ${estimatedArrival}.`
+        : '';
+      await this.supabase.from('notifications').insert({
+        user_id: va.user_id,
+        type: 'financial',
+        title: 'Deposito ACH en Camino',
+        message: `Detectamos un deposito de $${amount.toFixed(2)} en transito hacia tu cuenta virtual.${etaText}`,
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HANDLER: virtual_account.activity.in_review  [NEW — P3-E]
+  //  Fondos bajo revision de cumplimiento; el balance NO se acredita.
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleVaInReview(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const data = (payload?.event_object ?? payload?.data) as Record<string, unknown>;
+    const vaId = data?.virtual_account_id as string;
+    const depositId = (data?.deposit_id as string) ?? null;
+    const amount = parseFloat((data?.amount as string) ?? '0');
+
+    this.logger.warn(`VA in_review: va=${vaId} depositId=${depositId} amount=${amount}`);
+
+    await this.supabase.from('bridge_virtual_account_events').insert({
+      bridge_virtual_account_id: vaId,
+      bridge_event_id: (data?.id as string) ?? null,
+      deposit_id: depositId,
+      event_type: 'virtual_account.activity.in_review',
+      amount,
+      currency: ((data?.currency as string) ?? 'usd').toUpperCase(),
+      raw_payload: payload,
+    });
+
+    if (depositId) {
+      await this.supabase
+        .from('payment_orders')
+        .update({ va_deposit_status: 'in_review' })
+        .eq('deposit_id', depositId);
+    }
+
+    const { data: va } = await this.supabase
+      .from('bridge_virtual_accounts')
+      .select('user_id')
+      .eq('bridge_virtual_account_id', vaId)
+      .single();
+
+    if (va?.user_id) {
+      await this.supabase.from('notifications').insert({
+        user_id: va.user_id,
+        type: 'compliance',
+        title: 'Deposito en Revision',
+        message: `Tu deposito de $${amount.toFixed(2)} esta siendo revisado por el equipo de cumplimiento. Te notificaremos cuando se resuelva.`,
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HANDLER: virtual_account.activity.refund_in_flight  [NEW — C-4]
+  //  Reembolso iniciado; marcar la order como en proceso de devolucion.
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleVaRefundInFlight(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const data = (payload?.event_object ?? payload?.data) as Record<string, unknown>;
+    const vaId = data?.virtual_account_id as string;
+    const depositId = (data?.deposit_id as string) ?? null;
+    const amount = parseFloat((data?.amount as string) ?? '0');
+
+    this.logger.warn(`VA refund_in_flight: va=${vaId} depositId=${depositId}`);
+
+    await this.supabase.from('bridge_virtual_account_events').insert({
+      bridge_virtual_account_id: vaId,
+      bridge_event_id: (data?.id as string) ?? null,
+      deposit_id: depositId,
+      event_type: 'virtual_account.activity.refund_in_flight',
+      amount,
+      currency: ((data?.currency as string) ?? 'usd').toUpperCase(),
+      raw_payload: payload,
+    });
+
+    if (depositId) {
+      await this.supabase
+        .from('payment_orders')
+        .update({ va_deposit_status: 'refund_in_flight' })
+        .eq('deposit_id', depositId);
+    }
+
+    const { data: va } = await this.supabase
+      .from('bridge_virtual_accounts')
+      .select('user_id')
+      .eq('bridge_virtual_account_id', vaId)
+      .single();
+
+    if (va?.user_id) {
+      await this.supabase.from('notifications').insert({
+        user_id: va.user_id,
+        type: 'financial',
+        title: 'Reembolso en Proceso',
+        message: `Tu deposito de $${amount.toFixed(2)} esta siendo devuelto al remitente original.`,
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HANDLER: virtual_account.activity.refunded  [NEW — FIX C-4 CRITICO]
+  //  Reembolso completado. Revertir credito si el balance ya fue acreditado.
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleVaRefunded(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const data = (payload?.event_object ?? payload?.data) as Record<string, unknown>;
+    if (!data) throw new Error('VA refunded: payload sin event_object/data');
+
+    const vaId = data.virtual_account_id as string;
+    const depositId = (data.deposit_id as string) ?? null;
+    const amount = parseFloat((data.amount as string) ?? '0');
+
+    this.logger.warn(`VA refunded: va=${vaId} depositId=${depositId} amount=${amount}`);
+
+    await this.supabase.from('bridge_virtual_account_events').insert({
+      bridge_virtual_account_id: vaId,
+      bridge_event_id: (data.id as string) ?? null,
+      deposit_id: depositId,
+      event_type: 'virtual_account.activity.refunded',
+      amount,
+      currency: ((data.currency as string) ?? 'usd').toUpperCase(),
+      raw_payload: payload,
+    });
+
+    // Buscar la payment_order asociada
+    const { data: order } = await this.supabase
+      .from('payment_orders')
+      .select('id, user_id, wallet_id, net_amount, currency, status, va_deposit_status')
+      .eq('deposit_id', depositId ?? '')
+      .maybeSingle();
+
+    if (!order) {
+      this.logger.warn(`VA refunded: no se encontro order para deposit_id=${depositId}`);
+      return;
+    }
+
+    // Si la order ya fue completada (balance acreditado), revertir con un debit
+    if (order.status === 'completed') {
+      const netAmount = parseFloat(String(order.net_amount));
+
+      await this.supabase.from('ledger_entries').insert({
+        wallet_id: order.wallet_id,
+        type: 'debit',
+        amount: netAmount,
+        currency: order.currency,
+        status: 'settled',
+        reference_type: 'payment_order',
+        reference_id: order.id,
+        description: `Reversa de deposito Bridge \u2014 reembolso al remitente`,
+        metadata: { reason: 'va_deposit_refunded', deposit_id: depositId },
+      });
+
+      this.logger.warn(
+        `⚠️ Reversa de $${netAmount} aplicada a wallet ${order.wallet_id} (order ${order.id} reembolsada)`,
+      );
+    }
+
+    // Marcar order como reembolsada
+    await this.supabase
+      .from('payment_orders')
+      .update({ status: 'refunded', va_deposit_status: 'refunded' })
+      .eq('id', order.id);
+
+    await this.supabase.from('notifications').insert({
+      user_id: order.user_id,
+      type: 'financial',
+      title: 'Deposito Reembolsado',
+      message: `Tu deposito de $${amount.toFixed(2)} fue devuelto al remitente. Si tu balance ya habia sido acreditado, ha sido corregido automaticamente.`,
+      reference_type: 'payment_order',
+      reference_id: order.id,
+    });
+
+    await this.supabase.from('activity_logs').insert({
+      user_id: order.user_id,
+      action: 'VA_DEPOSIT_REFUNDED',
+      description: `Deposito VA reembolsado: $${amount} (deposit_id=${depositId})`,
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HANDLER: virtual_account.activity.refund_failed  [NEW — C-4]
+  //  El intento de reembolso fallo. Requiere atencion manual.
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleVaRefundFailed(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const data = (payload?.event_object ?? payload?.data) as Record<string, unknown>;
+    const vaId = data?.virtual_account_id as string;
+    const depositId = (data?.deposit_id as string) ?? null;
+    const amount = parseFloat((data?.amount as string) ?? '0');
+
+    this.logger.error(`VA refund_failed: va=${vaId} depositId=${depositId} amount=${amount}`);
+
+    await this.supabase.from('bridge_virtual_account_events').insert({
+      bridge_virtual_account_id: vaId,
+      bridge_event_id: (data?.id as string) ?? null,
+      deposit_id: depositId,
+      event_type: 'virtual_account.activity.refund_failed',
+      amount,
+      currency: ((data?.currency as string) ?? 'usd').toUpperCase(),
+      raw_payload: payload,
+    });
+
+    if (depositId) {
+      await this.supabase
+        .from('payment_orders')
+        .update({ va_deposit_status: 'refund_failed' })
+        .eq('deposit_id', depositId);
+    }
+
+    // Solo log de error + audit — requiere intervencion manual
+    await this.supabase.from('audit_logs').insert({
+      performed_by: null,
+      action: 'VA_REFUND_FAILED',
+      table_name: 'bridge_virtual_account_events',
+      new_values: { va_id: vaId, deposit_id: depositId, amount },
+      source: 'webhook',
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HANDLER: virtual_account.activity.microdeposit  [NEW — P3-B]
+  //  Microdeposito de verificacion: NUNCA se acredita al balance.
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleVaMicrodeposit(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const data = (payload?.event_object ?? payload?.data) as Record<string, unknown>;
+    const vaId = data?.virtual_account_id as string;
+    const amount = parseFloat((data?.amount as string) ?? '0');
+
+    this.logger.log(
+      `VA microdeposit recibido (ignorado para balance): va=${vaId} amount=${amount}`,
+    );
+
+    await this.supabase.from('bridge_virtual_account_events').insert({
+      bridge_virtual_account_id: vaId,
+      bridge_event_id: (data?.id as string) ?? null,
+      event_type: 'virtual_account.activity.microdeposit',
+      amount,
+      currency: ((data?.currency as string) ?? 'usd').toUpperCase(),
+      raw_payload: payload,
+    });
+    // Microdepositos NO se acreditan — Bridge los maneja internamente para verificacion
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HANDLER: virtual_account.activity.account_update  [NEW]
+  //  La VA fue modificada por Bridge; actualizar registro local.
+  // ═══════════════════════════════════════════════════════════
+
+  private async handleVaAccountUpdate(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const data = (payload?.event_object ?? payload?.data) as Record<string, unknown>;
+    const vaId = (data?.id as string) ?? (data?.virtual_account_id as string);
+    const newStatus = (data?.status as string) ?? null;
+
+    this.logger.log(`VA account_update: va=${vaId} newStatus=${newStatus}`);
+
+    if (vaId && newStatus) {
+      await this.supabase
+        .from('bridge_virtual_accounts')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('bridge_virtual_account_id', vaId);
+    }
+
+    await this.supabase.from('audit_logs').insert({
+      performed_by: null,
+      action: 'VA_ACCOUNT_UPDATE',
+      table_name: 'bridge_virtual_accounts',
+      new_values: { bridge_virtual_account_id: vaId, status: newStatus },
+      source: 'webhook',
+    });
+  }
+
+
   // ═══════════════════════════════════════════════
 
   private async handleTransferPaymentProcessed(
@@ -1573,7 +2110,7 @@ export class WebhooksService {
 
           // Audit log
           await this.supabase.from('audit_logs').insert({
-            performed_by: 'system',
+            performed_by: null,
             action: 'DRAIN_MATCHED_TO_ORDER',
             table_name: 'payment_orders',
             record_id: matched.id,
@@ -1621,7 +2158,7 @@ export class WebhooksService {
           .eq('id', matched.id);
 
         await this.supabase.from('audit_logs').insert({
-          performed_by: 'system',
+          performed_by: null,
           action: 'DRAIN_MATCHED_TO_ORDER',
           table_name: 'payment_orders',
           record_id: matched.id,
@@ -1814,7 +2351,7 @@ export class WebhooksService {
 
     // 2. Audit log
     await this.supabase.from('audit_logs').insert({
-      performed_by: 'system',
+      performed_by: null,
       action: 'COMPLETE_PAYMENT_ORDER_VIA_DRAIN',
       table_name: 'payment_orders',
       record_id: order.id,

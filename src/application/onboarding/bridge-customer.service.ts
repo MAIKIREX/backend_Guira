@@ -656,7 +656,7 @@ export class BridgeCustomerService {
       type: 'business',
       business_legal_name: business.legal_name, // H07: business_legal_name
       email: (business.email as string) ?? (profile.email as string),
-      is_dao: false, // AUDIT: Bridge espera este campo; false por defecto
+      is_dao: business.is_dao ?? false, // P3-A: Use actual value from DTO, default false
       registered_address: this.buildAddress({
         // H06: registered_address
         address1: business.address1 as string,
@@ -667,6 +667,15 @@ export class BridgeCustomerService {
         country: business.country as string,
       }),
     };
+
+    // P3-B: Transliteration — Bridge requires transliterated_business_legal_name
+    // when the name contains characters outside Latin-1 range.
+    const legalName = business.legal_name as string;
+    if (legalName && /[^\x20-\x7E\u00C0-\u00FF]/.test(legalName)) {
+      payload.transliterated_business_legal_name = legalName
+        .normalize('NFD')
+        .replace(/[^\x20-\x7E\u00C0-\u00FF]/g, '');
+    }
 
     // Trade name — H08: business_trade_name
     if (business.trade_name) {
@@ -1253,6 +1262,11 @@ export class BridgeCustomerService {
 
         // P0-E: residential_address always present
         person.residential_address = buildPersonAddress(ubo);
+
+        // P2-A: Bridge requires `title` when has_control is true
+        if (person.has_control && ubo.position) {
+          person.title = ubo.position;
+        }
 
         // Identifying information
         const idInfo = await this.buildIdentifyingInformation(

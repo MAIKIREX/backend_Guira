@@ -22,6 +22,7 @@ export class CreateDirectorDto {
   @ApiProperty({ example: 'Slim' })
   @IsString()
   @IsNotEmpty()
+  @Length(2, 1024)
   last_name: string;
 
   /**
@@ -138,6 +139,7 @@ export class CreateUboDto {
   @ApiProperty({ example: 'Martínez' })
   @IsString()
   @IsNotEmpty()
+  @Length(2, 1024)
   last_name: string;
 
   /** ownership_percentage on Bridge side; stored as ownership_percent in DB. */
@@ -261,4 +263,18 @@ export class CreateUboDto {
   @IsOptional()
   @IsBoolean()
   has_control?: boolean;
+
+  /**
+   * P2-A — Bridge requires `title` when has_control is true.
+   * Stored as `position` in DB, mapped to Bridge `title` in buildAssociatedPersons.
+   */
+  @ApiPropertyOptional({
+    example: 'CFO',
+    description:
+      'Cargo del UBO en la empresa. Requerido por Bridge cuando has_control=true.',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 1024)
+  position?: string;
 }
