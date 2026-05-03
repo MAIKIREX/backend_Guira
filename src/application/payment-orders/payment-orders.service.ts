@@ -927,6 +927,8 @@ export class PaymentOrdersService {
         amount_destination: netAmountUsdc,
         psav_deposit_instructions: depositInstructions,
         notes: dto.notes,
+        business_purpose: dto.business_purpose,
+        supporting_document_url: dto.supporting_document_url,
         status: 'waiting_deposit',
       })
       .select()
@@ -1115,6 +1117,8 @@ export class PaymentOrdersService {
         notes:
           dto.notes ??
           `On-ramp crypto flexible: ${(dto.source_currency ?? 'usdc').toUpperCase()} (${dto.source_network}) → Bridge Wallet`,
+        business_purpose: dto.business_purpose,
+        supporting_document_url: dto.supporting_document_url,
         status: 'waiting_deposit',
       })
       .select()
