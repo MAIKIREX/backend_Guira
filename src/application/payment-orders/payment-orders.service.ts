@@ -1338,6 +1338,8 @@ export class PaymentOrdersService {
         amount_destination: parseFloat(
           (net_amount * rateData.effective_rate).toFixed(2),
         ),
+        business_purpose: dto.business_purpose,
+        supporting_document_url: dto.supporting_document_url,
         notes: dto.notes,
         status: 'created',
       })
@@ -1534,6 +1536,8 @@ export class PaymentOrdersService {
         destination_address: dto.destination_address,
         destination_network: dto.destination_network,
         destination_currency: dto.destination_currency ?? sourceCurrency,
+        business_purpose: dto.business_purpose,
+        supporting_document_url: dto.supporting_document_url,
         notes: dto.notes,
         status: 'created',
       })
@@ -1807,6 +1811,7 @@ export class PaymentOrdersService {
         supplier_id: supplier.id,
         notes: dto.notes,
         business_purpose: dto.business_purpose,
+        supporting_document_url: dto.supporting_document_url,
         status: 'created',
       })
       .select()
