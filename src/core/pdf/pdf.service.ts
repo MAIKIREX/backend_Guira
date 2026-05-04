@@ -88,18 +88,22 @@ export class PdfService {
         }
       }
 
-      // Load logo if exists
+      // Load SVG logo if exists
       let logoBlock: any = {
         text: 'Guira\n',
         style: 'brandName',
         alignment: 'left',
       };
       try {
-        const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
+        const logoPath = path.join(
+          process.cwd(),
+          'assets',
+          'LOGO GUIRRA CON LETRA VERTICAL.svg',
+        );
         if (fs.existsSync(logoPath)) {
-          const logoBase64 = fs.readFileSync(logoPath).toString('base64');
+          const svgContent = fs.readFileSync(logoPath, 'utf-8');
           logoBlock = {
-            image: `data:image/png;base64,${logoBase64}`,
+            svg: svgContent,
             width: 70,
             alignment: 'left',
             margin: [0, 0, 0, 10],

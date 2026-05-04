@@ -284,13 +284,17 @@ export class ExportService {
     const HEADER_BG = '#1e40af';
     const EVEN_BG   = '#f1f5f9';
 
-    // Logo (reutilizando el mismo bloque de pdf.service.ts)
+    // Logo SVG (LOGO GUIRRA CON LETRA VERTICAL)
     let logoBlock: any = { text: 'Guira\n', style: 'brandName' };
     try {
-      const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
+      const logoPath = path.join(
+        process.cwd(),
+        'assets',
+        'LOGO GUIRRA CON LETRA VERTICAL.svg',
+      );
       if (fs.existsSync(logoPath)) {
-        const base64 = fs.readFileSync(logoPath).toString('base64');
-        logoBlock = { image: `data:image/png;base64,${base64}`, width: 60, margin: [0, 0, 0, 4] };
+        const svgContent = fs.readFileSync(logoPath, 'utf-8');
+        logoBlock = { svg: svgContent, width: 60, margin: [0, 0, 0, 4] };
       }
     } catch {
       this.logger.warn('No se pudo cargar logo para el PDF de reporte');
