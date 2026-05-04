@@ -157,7 +157,7 @@ export class ExportService {
     // ── Logo ──
     let logoImageId: number | null = null;
     try {
-      const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
+      const logoPath = path.join(process.cwd(), 'assets', 'LOGO GUIRRA 02.png');
       if (fs.existsSync(logoPath)) {
         logoImageId = workbook.addImage({
           buffer: fs.readFileSync(logoPath),
