@@ -79,13 +79,14 @@ const FLOW_LABELS: Record<string, string> = {
   bridge_wallet_to_fiat_us: 'Bridge Wallet → Fiat US',
 };
 
-function buildRows(orders: PaymentOrder[], suppliersMap: Map<string, string>) {
+function buildRows(orders: PaymentOrder[], suppliersMap: Map<string, string>, noSupplierFallback?: string) {
+  const fallback = noSupplierFallback || 'Sin proveedor';
   return orders.map((o) => ({
     id: o.id.slice(0, 8).toUpperCase(),
     fecha: formatDate(o.created_at),
     flujo: FLOW_LABELS[o.flow_type ?? ''] ?? o.flow_type ?? 'N/D',
     estado: STATUS_LABELS[o.status] ?? o.status,
-    proveedor: o.supplier_id ? (suppliersMap.get(o.supplier_id) ?? 'N/D') : 'Sin proveedor',
+    proveedor: o.supplier_id ? (suppliersMap.get(o.supplier_id) ?? 'N/D') : fallback,
     moneda_origen: (o.origin_currency ?? o.currency ?? '').toUpperCase(),
     monto_origen: o.amount_origin ?? o.amount ?? 0,
     moneda_destino: (o.destination_currency ?? '').toUpperCase(),
@@ -124,7 +125,7 @@ export class ExportService {
     filters: { status?: string },
   ): Promise<Buffer> {
     const suppliersMap = new Map(suppliers.map((s) => [s.id, s.name]));
-    const rows = buildRows(orders, suppliersMap);
+    const rows = buildRows(orders, suppliersMap, client.full_name ?? undefined);
     const generatedAt = new Date().toLocaleString('es-BO', { hour12: false });
     const filterLabel = filters.status
       ? (STATUS_LABELS[filters.status] ?? filters.status)
@@ -138,38 +139,88 @@ export class ExportService {
       pageSetup: { orientation: 'landscape', fitToPage: true },
     });
 
-    // ── Paleta de colores ──
-    const BRAND_DARK   = '1E293B'; // Slate-800
-    const BRAND_ACCENT = '3B82F6'; // Blue-500
-    const HEADER_BG    = '1E40AF'; // Blue-800
-    const HEADER_FG    = 'FFFFFF';
-    const ROW_EVEN_BG  = 'F1F5F9'; // Slate-100
-    const SECTION_BG   = 'EFF6FF'; // Blue-50
-    const META_FG      = '64748B'; // Slate-500
+    // ── Paleta "Oceanic Trust" — alineada al frontend ──
+    // Logo gradient: #00D8FF → #0051FF  |  Primary: #0B5FE6  |  Foreground: #0D1B3E
+    const BRAND_PRIMARY  = '0B5FE6'; // Primary blue (punto medio del gradiente logo)
+    const BRAND_NAVY     = '0D1B3E'; // Navy profundo — foreground principal
+    const BRAND_ROYAL    = '0150F2'; // Azul royal sólido del logo
+    const BRAND_TEAL     = '1A9AB7'; // Accent teal sofisticado
+    const BRAND_CYAN     = '01C5FF'; // Cyan claro del gradiente logo
+    const HEADER_BG      = '0B3D91'; // Navy header — derivado oscuro del primary
+    const HEADER_FG      = 'FFFFFF';
+    const ROW_EVEN_BG    = 'EDF4FE'; // Blue-50 wash — sutil como el background del frontend
+    const SECTION_BG     = 'DBEAFE'; // Blue-100 — para totales y secciones destacadas
+    const META_FG        = '4B6A9B'; // Slate azulado — muted foreground
+    const BORDER_BLUE    = 'B8D4F0'; // Borde suave azul (var --border del frontend)
+    const TITLE_BAND_BG  = 'F0F7FF'; // Fondo del bloque de cabecera
+
+    // ── Logo ──
+    let logoImageId: number | null = null;
+    try {
+      const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
+      if (fs.existsSync(logoPath)) {
+        logoImageId = workbook.addImage({
+          buffer: fs.readFileSync(logoPath),
+          extension: 'png',
+        });
+      }
+    } catch {
+      this.logger.warn('No se pudo cargar logo.png para el reporte Excel');
+    }
 
     // ── BLOQUE DE CABECERA DEL REPORTE ──
-    sheet.mergeCells('A1:K1');
-    const titleCell = sheet.getCell('A1');
+
+    // Fondo de la cabecera (filas 1-4)
+    for (let r = 1; r <= 4; r++) {
+      const row = sheet.getRow(r);
+      for (let c = 1; c <= 11; c++) {
+        const cell = row.getCell(c);
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TITLE_BAND_BG } };
+      }
+    }
+
+    // Logo en la esquina superior izquierda
+    if (logoImageId !== null) {
+      sheet.addImage(logoImageId, {
+        tl: { col: 0, row: 0 },
+        ext: { width: 52, height: 52 },
+        editAs: 'absolute',
+      });
+    }
+
+    // Título del reporte (desplazado a columna B para dejar espacio al logo)
+    sheet.mergeCells('B1:K1');
+    const titleCell = sheet.getCell('B1');
     titleCell.value = 'GUIRA — Reporte de Expedientes';
-    titleCell.font = { bold: true, size: 16, color: { argb: BRAND_DARK } };
+    titleCell.font = { bold: true, size: 16, color: { argb: BRAND_NAVY } };
     titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
-    sheet.getRow(1).height = 36;
+    sheet.getRow(1).height = 40;
 
     // ── Datos del cliente ──
-    sheet.mergeCells('A2:K2');
-    sheet.getCell('A2').value = `Cliente: ${client.full_name ?? 'N/D'}   |   Email: ${client.email}   |   Teléfono: ${client.phone ?? 'N/D'}`;
-    sheet.getCell('A2').font = { size: 10, color: { argb: META_FG } };
-    sheet.getRow(2).height = 20;
+    sheet.mergeCells('B2:K2');
+    const clientCell = sheet.getCell('B2');
+    clientCell.value = `Cliente: ${client.full_name ?? 'N/D'}   |   Email: ${client.email}   |   Teléfono: ${client.phone ?? 'N/D'}`;
+    clientCell.font = { size: 10, color: { argb: META_FG } };
+    sheet.getRow(2).height = 22;
 
-    sheet.mergeCells('A3:K3');
-    sheet.getCell('A3').value = `Filtro aplicado: ${filterLabel}   |   Generado: ${generatedAt}   |   Total de expedientes: ${orders.length}`;
-    sheet.getCell('A3').font = { size: 9, color: { argb: META_FG }, italic: true };
+    sheet.mergeCells('B3:K3');
+    const filterCell = sheet.getCell('B3');
+    filterCell.value = `Filtro aplicado: ${filterLabel}   |   Generado: ${generatedAt}   |   Total de expedientes: ${orders.length}`;
+    filterCell.font = { size: 9, color: { argb: META_FG }, italic: true };
     sheet.getRow(3).height = 18;
 
-    // Fila vacía separadora
-    sheet.getRow(4).height = 6;
+    // Línea decorativa de separación (fila 4)
+    sheet.getRow(4).height = 4;
+    for (let c = 1; c <= 11; c++) {
+      sheet.getRow(4).getCell(c).border = {
+        bottom: { style: 'medium', color: { argb: BRAND_PRIMARY } },
+      };
+    }
 
-    // ── Fila de encabezados de tabla ──
+    // Fila vacía separadora
+    sheet.getRow(5).height = 6;
+
+    // ── Fila de encabezados de tabla (fila 6) ──
     const HEADERS = [
       { key: 'id',            label: 'ID',                width: 12 },
       { key: 'fecha',         label: 'Fecha',             width: 20 },
@@ -180,11 +231,12 @@ export class ExportService {
       { key: 'monto_origen',  label: 'Monto Origen',      width: 16 },
       { key: 'moneda_destino',label: 'Moneda Destino',    width: 15 },
       { key: 'monto_destino', label: 'Monto Destino',     width: 16 },
-      { key: 'fee',           label: 'Fee',               width: 14 },
+      { key: 'fee',           label: 'Comisión',           width: 14 },
       { key: 'tipo_cambio',   label: 'Tipo de Cambio',    width: 16 },
     ];
 
-    const headerRow = sheet.getRow(5);
+    const DATA_START_ROW = 6;
+    const headerRow = sheet.getRow(DATA_START_ROW);
     HEADERS.forEach((h, idx) => {
       const col = idx + 1;
       sheet.getColumn(col).width = h.width;
@@ -194,14 +246,14 @@ export class ExportService {
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } };
       cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: false };
       cell.border = {
-        bottom: { style: 'medium', color: { argb: BRAND_ACCENT } },
+        bottom: { style: 'thin', color: { argb: BRAND_CYAN } },
       };
     });
-    headerRow.height = 24;
+    headerRow.height = 26;
 
     // ── Filas de datos ──
     rows.forEach((row, rowIdx) => {
-      const excelRow = sheet.getRow(6 + rowIdx);
+      const excelRow = sheet.getRow(DATA_START_ROW + 1 + rowIdx);
       const isEven = rowIdx % 2 === 1;
       const values = [
         row.id,
@@ -220,43 +272,34 @@ export class ExportService {
       values.forEach((val, colIdx) => {
         const cell = excelRow.getCell(colIdx + 1);
         cell.value = val;
-        cell.font = { size: 9, color: { argb: BRAND_DARK } };
+        cell.font = { size: 9, color: { argb: BRAND_NAVY } };
         cell.alignment = { vertical: 'middle', horizontal: colIdx === 0 ? 'center' : 'left' };
         if (isEven) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ROW_EVEN_BG } };
         }
+        // Bordes laterales sutiles
+        cell.border = {
+          bottom: { style: 'hair', color: { argb: BORDER_BLUE } },
+        };
         // Formato numérico para montos y fee
         if ([6, 8, 9, 10].includes(colIdx)) {
           cell.numFmt = '#,##0.00';
           cell.alignment = { horizontal: 'right', vertical: 'middle' };
         }
       });
-      excelRow.height = 18;
+      excelRow.height = 19;
     });
 
-    // ── Fila de totales ──
-    const totalsRowIdx = 6 + rows.length;
+    // ── Fila de cierre (solo conteo de registros) ──
+    const totalsRowIdx = DATA_START_ROW + 1 + rows.length;
     const totalsRow = sheet.getRow(totalsRowIdx);
-    sheet.mergeCells(`A${totalsRowIdx}:F${totalsRowIdx}`);
+    sheet.mergeCells(`A${totalsRowIdx}:K${totalsRowIdx}`);
     totalsRow.getCell(1).value = `Total de registros: ${rows.length}`;
-    totalsRow.getCell(1).font = { bold: true, size: 9, color: { argb: BRAND_DARK } };
+    totalsRow.getCell(1).font = { bold: true, size: 9, color: { argb: BRAND_NAVY } };
     totalsRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SECTION_BG } };
     totalsRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
-
-    const sumMonto = rows.reduce((acc, r) => acc + r.monto_origen, 0);
-    const sumDest  = rows.reduce((acc, r) => acc + r.monto_destino, 0);
-    const sumFee   = rows.reduce((acc, r) => acc + r.fee, 0);
-
-    [7, 9, 10].forEach((colIdx, i) => {
-      const cell = totalsRow.getCell(colIdx);
-      cell.value = [sumMonto, sumDest, sumFee][i];
-      cell.numFmt = '#,##0.00';
-      cell.font = { bold: true, size: 9, color: { argb: BRAND_DARK } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SECTION_BG } };
-      cell.alignment = { horizontal: 'right', vertical: 'middle' };
-      cell.border = { top: { style: 'medium', color: { argb: BRAND_ACCENT } } };
-    });
-    totalsRow.height = 20;
+    totalsRow.getCell(1).border = { top: { style: 'medium', color: { argb: BRAND_PRIMARY } } };
+    totalsRow.height = 22;
 
     // ── Pie de página ──
     sheet.headerFooter.oddFooter = `&LGuira - Operaciones Financieras Seguras&RGenerado: ${generatedAt}`;
@@ -273,7 +316,7 @@ export class ExportService {
     filters: { status?: string },
   ): Promise<Buffer> {
     const suppliersMap = new Map(suppliers.map((s) => [s.id, s.name]));
-    const rows = buildRows(orders, suppliersMap);
+    const rows = buildRows(orders, suppliersMap, client.full_name ?? undefined);
     const generatedAt = new Date().toLocaleString('es-BO', { hour12: false });
     const filterLabel = filters.status
       ? (STATUS_LABELS[filters.status] ?? filters.status)
@@ -312,7 +355,7 @@ export class ExportService {
         { text: 'Monto Origen',    style: 'th', fillColor: HEADER_BG },
         { text: 'Mon. Destino',    style: 'th', fillColor: HEADER_BG },
         { text: 'Monto Destino',   style: 'th', fillColor: HEADER_BG },
-        { text: 'Fee',             style: 'th', fillColor: HEADER_BG },
+        { text: 'Comisión',       style: 'th', fillColor: HEADER_BG },
         { text: 'Tipo Cambio',     style: 'th', fillColor: HEADER_BG },
       ],
     ];
@@ -396,32 +439,12 @@ export class ExportService {
             paddingRight: () => 4,
           },
         },
-        // Totales
+        // Cierre — solo conteo de registros
         {
-          margin: [0, 8, 0, 0],
-          columns: [
-            { width: '*', text: '' },
-            {
-              width: 'auto',
-              table: {
-                body: [
-                  [
-                    { text: 'Total Monto Origen:', style: 'totalLabel' },
-                    { text: rows.reduce((a, r) => a + r.monto_origen, 0).toFixed(2), style: 'totalValue' },
-                  ],
-                  [
-                    { text: 'Total Monto Destino:', style: 'totalLabel' },
-                    { text: rows.reduce((a, r) => a + r.monto_destino, 0).toFixed(2), style: 'totalValue' },
-                  ],
-                  [
-                    { text: 'Total Fee:', style: 'totalLabel' },
-                    { text: rows.reduce((a, r) => a + r.fee, 0).toFixed(2), style: 'totalValue' },
-                  ],
-                ],
-              },
-              layout: 'noBorders',
-            },
-          ],
+          margin: [0, 10, 0, 0],
+          text: `Total de registros: ${rows.length}`,
+          style: 'totalLabel',
+          alignment: 'right',
         },
       ],
       footer: (currentPage: number, pageCount: number) => ({
