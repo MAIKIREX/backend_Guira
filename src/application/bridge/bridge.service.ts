@@ -1249,13 +1249,15 @@ export class BridgeService {
   }
 
   /**
-   * Actualiza una Liquidation Address en Bridge.
+   * Actualiza una Liquidation Address en Bridge y sincroniza la DB local
+   * con la respuesta confirmada de Bridge (fuente de verdad).
    *
-   * Según la documentación de Bridge (PUT /liquidation_addresses/{id}):
-   * - `external_account_id` y `custom_developer_fee_percent` se pueden actualizar independientemente
-   * - `destination_ach_reference`, `destination_wire_message`, `destination_sepa_reference`,
-   *   `destination_spei_reference`, `destination_reference` para mensajes de pago
-   * - `return_address` para dirección de retorno crypto
+   * Flujo: PUT Bridge → Bridge responde 200 con LA actualizada → sync DB.
+   * Campos editables según la API de Bridge:
+   *   external_account_id, custom_developer_fee_percent,
+   *   destination_ach_reference, destination_wire_message,
+   *   destination_sepa_reference, destination_spei_reference,
+   *   destination_reference, return_address
    */
   async updateLiquidationAddress(
     userId: string,
@@ -1273,7 +1275,6 @@ export class BridgeService {
   ) {
     const profile = await this.getVerifiedProfile(userId);
 
-    // Obtener el bridge_liquidation_address_id real (UUID de Bridge)
     const { data: laRecord, error: laError } = await this.supabase
       .from('bridge_liquidation_addresses')
       .select('bridge_liquidation_address_id')
@@ -1287,38 +1288,24 @@ export class BridgeService {
       );
     }
 
-    // Construir payload — solo incluir campos definidos
+    // Construir payload — solo campos explícitamente enviados
     const bridgePayload: Record<string, unknown> = {};
-    if (updatePayload.external_account_id !== undefined) {
+    if (updatePayload.external_account_id !== undefined)
       bridgePayload.external_account_id = updatePayload.external_account_id;
-    }
-    if (updatePayload.custom_developer_fee_percent !== undefined) {
-      bridgePayload.custom_developer_fee_percent =
-        updatePayload.custom_developer_fee_percent;
-    }
-    if (updatePayload.destination_ach_reference !== undefined) {
-      bridgePayload.destination_ach_reference =
-        updatePayload.destination_ach_reference;
-    }
-    if (updatePayload.destination_wire_message !== undefined) {
-      bridgePayload.destination_wire_message =
-        updatePayload.destination_wire_message;
-    }
-    if (updatePayload.destination_sepa_reference !== undefined) {
-      bridgePayload.destination_sepa_reference =
-        updatePayload.destination_sepa_reference;
-    }
-    if (updatePayload.destination_spei_reference !== undefined) {
-      bridgePayload.destination_spei_reference =
-        updatePayload.destination_spei_reference;
-    }
-    if (updatePayload.destination_reference !== undefined) {
-      bridgePayload.destination_reference =
-        updatePayload.destination_reference;
-    }
-    if (updatePayload.return_address !== undefined) {
+    if (updatePayload.custom_developer_fee_percent !== undefined)
+      bridgePayload.custom_developer_fee_percent = updatePayload.custom_developer_fee_percent;
+    if (updatePayload.destination_ach_reference !== undefined)
+      bridgePayload.destination_ach_reference = updatePayload.destination_ach_reference;
+    if (updatePayload.destination_wire_message !== undefined)
+      bridgePayload.destination_wire_message = updatePayload.destination_wire_message;
+    if (updatePayload.destination_sepa_reference !== undefined)
+      bridgePayload.destination_sepa_reference = updatePayload.destination_sepa_reference;
+    if (updatePayload.destination_spei_reference !== undefined)
+      bridgePayload.destination_spei_reference = updatePayload.destination_spei_reference;
+    if (updatePayload.destination_reference !== undefined)
+      bridgePayload.destination_reference = updatePayload.destination_reference;
+    if (updatePayload.return_address !== undefined)
       bridgePayload.return_address = updatePayload.return_address;
-    }
 
     if (Object.keys(bridgePayload).length === 0) {
       this.logger.warn(
@@ -1327,36 +1314,61 @@ export class BridgeService {
       return null;
     }
 
+    // 1. Enviar PUT a Bridge — su respuesta 200 es la confirmación
     const bridgeResponse = await this.bridgeApi.put<Record<string, unknown>>(
       `/v0/customers/${profile.bridge_customer_id}/liquidation_addresses/${laRecord.bridge_liquidation_address_id}`,
       bridgePayload,
     );
 
-    // Actualizar campos relevantes en DB local
-    const dbUpdate: Record<string, unknown> = {
-      updated_at: new Date().toISOString(),
-    };
-    if (updatePayload.external_account_id !== undefined) {
-      dbUpdate.destination_external_account_id =
-        updatePayload.external_account_id;
-    }
-    if (updatePayload.custom_developer_fee_percent !== undefined) {
-      dbUpdate.developer_fee_percent =
-        updatePayload.custom_developer_fee_percent;
-    }
+    // 2. Solo si Bridge confirmó el update, sincronizar DB local con los datos
+    //    que Bridge devolvió (fuente de verdad), no con los valores de input.
+    const dbSync: Record<string, unknown> = {};
+    if (bridgeResponse.external_account_id !== undefined)
+      dbSync.destination_external_account_id = bridgeResponse.external_account_id ?? null;
+    if (bridgeResponse.custom_developer_fee_percent !== undefined)
+      dbSync.developer_fee_percent = bridgeResponse.custom_developer_fee_percent ?? null;
+    if (bridgeResponse.destination_address !== undefined)
+      dbSync.destination_address = bridgeResponse.destination_address ?? null;
 
-    if (Object.keys(dbUpdate).length > 1) {
-      await this.supabase
+    if (Object.keys(dbSync).length > 0) {
+      const { error: dbError } = await this.supabase
         .from('bridge_liquidation_addresses')
-        .update(dbUpdate)
+        .update(dbSync)
         .eq('id', bridgeLaDbId);
+
+      if (dbError) {
+        this.logger.error(
+          `Bridge confirmó el update pero falló la sync de DB para LA ${bridgeLaDbId}: ${dbError.message}`,
+        );
+      }
     }
 
     this.logger.log(
-      `Liquidation Address ${laRecord.bridge_liquidation_address_id} actualizada en Bridge`,
+      `Liquidation Address ${laRecord.bridge_liquidation_address_id} actualizada en Bridge y DB sincronizada`,
     );
 
     return bridgeResponse;
+  }
+
+  /**
+   * Versión admin de updateLiquidationAddress.
+   * El actor es staff/admin, pero el userId pertenece al cliente dueño de la LA.
+   */
+  async updateLiquidationAddressAdmin(
+    targetUserId: string,
+    bridgeLaDbId: string,
+    updatePayload: {
+      external_account_id?: string;
+      custom_developer_fee_percent?: string | null;
+      destination_ach_reference?: string;
+      destination_wire_message?: string;
+      destination_sepa_reference?: string;
+      destination_spei_reference?: string;
+      destination_reference?: string;
+      return_address?: string;
+    },
+  ) {
+    return this.updateLiquidationAddress(targetUserId, bridgeLaDbId, updatePayload);
   }
 
   // ═══════════════════════════════════════════════════

@@ -304,6 +304,42 @@ export class AdminBridgeController {
     return this.bridgeService.listLiquidationAddressesByUserAdmin(userId);
   }
 
+  @Patch('users/:userId/liquidation-addresses/:laId')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Actualizar liquidation address en Bridge y sincronizar DB (admin)' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        external_account_id: { type: 'string' },
+        custom_developer_fee_percent: { type: 'string', nullable: true },
+        destination_ach_reference: { type: 'string' },
+        destination_wire_message: { type: 'string' },
+        destination_sepa_reference: { type: 'string' },
+        destination_spei_reference: { type: 'string' },
+        destination_reference: { type: 'string' },
+        return_address: { type: 'string' },
+      },
+    },
+  })
+  updateUserLiquidationAddress(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Param('laId', new ParseUUIDPipe()) laId: string,
+    @Body()
+    body: {
+      external_account_id?: string;
+      custom_developer_fee_percent?: string | null;
+      destination_ach_reference?: string;
+      destination_wire_message?: string;
+      destination_sepa_reference?: string;
+      destination_spei_reference?: string;
+      destination_reference?: string;
+      return_address?: string;
+    },
+  ) {
+    return this.bridgeService.updateLiquidationAddressAdmin(userId, laId, body);
+  }
+
   // ── VA Fee Overrides (por usuario) ─────────────────
 
   @Get('users/:userId/va-fee-overrides')
