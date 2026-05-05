@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
-//  CATÁLOGO DE RUTAS TRANSFER WALLET-TO-WALLET — ETAPA 1
-//  Fuente: lista_de_rieles_filtrada.md (Bridge API Transfer)
+//  CATÁLOGO DE RUTAS TRANSFER WALLET-TO-WALLET — ETAPA 2
+//  Fuente: lista_w_t_w.md (Bridge API Transfer)
 //
 //  Estructura de consulta:
 //  Dado un (dest_network, dest_currency) → lista de sources válidos
@@ -9,7 +9,8 @@
 //  Notas:
 //  - Todas las redes en lowercase para normalización.
 //  - Monedas en lowercase para normalización.
-//  - Base excluido: no aparece en la tabla de rieles soportados.
+//  - Solo rutas same-currency: USDC→USDC y USDT→USDT.
+//  - No se permiten conversiones cruzadas entre monedas.
 //
 //  El frontend tiene su réplica en:
 //  m-guira/features/payments/lib/transfer-route-catalog.ts
@@ -25,7 +26,8 @@ export interface TransferSourceRoute {
  * Catálogo de rutas soportadas para wallet_to_wallet (Bridge Transfer API).
  * Indexado por { dest_network }->{ dest_currency }->[ sources ].
  *
- * Transcripción completa de lista_de_rieles_filtrada.md.
+ * Transcripción completa de lista_w_t_w.md.
+ * Solo rutas same-currency: USDC→USDC y USDT→USDT.
  */
 export const TRANSFER_ROUTE_CATALOG: Record<
   string, // dest_network
@@ -34,149 +36,50 @@ export const TRANSFER_ROUTE_CATALOG: Record<
     TransferSourceRoute[]
   >
 > = {
-  // ─── Destino: Ethereum ───────────────────────────────────────────
-  ethereum: {
-    eurc: [
-      { source_network: 'solana', source_currency: 'eurc', min: 1 },
-      { source_network: 'solana', source_currency: 'usdb', min: 1 },
-      { source_network: 'ethereum', source_currency: 'eurc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'pyusd', min: 2 },
-      { source_network: 'ethereum', source_currency: 'usdt', min: 2 },
-      { source_network: 'polygon', source_currency: 'usdc', min: 2 },
-      { source_network: 'stellar', source_currency: 'usdc', min: 2 },
-    ],
-    usdc: [
-      { source_network: 'solana', source_currency: 'eurc', min: 1 },
-      { source_network: 'solana', source_currency: 'pyusd', min: 1 },
-      { source_network: 'solana', source_currency: 'usdb', min: 1 },
-      { source_network: 'solana', source_currency: 'usdc', min: 1 },
-      { source_network: 'solana', source_currency: 'usdt', min: 2 },
-      { source_network: 'ethereum', source_currency: 'eurc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'pyusd', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdt', min: 2 },
-      { source_network: 'tron', source_currency: 'usdt', min: 5 },
-      { source_network: 'polygon', source_currency: 'usdc', min: 1 },
-      { source_network: 'stellar', source_currency: 'usdc', min: 1 },
-    ],
-    pyusd: [
-      { source_network: 'solana', source_currency: 'usdc', min: 1 },
-      { source_network: 'solana', source_currency: 'usdt', min: 2 },
-      { source_network: 'ethereum', source_currency: 'pyusd', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdc', min: 1 },
-      { source_network: 'tron', source_currency: 'usdt', min: 5 },
-      { source_network: 'polygon', source_currency: 'usdc', min: 1 },
-      { source_network: 'stellar', source_currency: 'usdc', min: 1 },
-    ],
-    usdt: [
-      { source_network: 'solana', source_currency: 'usdb', min: 20 },
-      { source_network: 'solana', source_currency: 'usdc', min: 20 },
-      { source_network: 'ethereum', source_currency: 'usdc', min: 20 },
-      { source_network: 'ethereum', source_currency: 'usdt', min: 20 },
-      { source_network: 'tron', source_currency: 'usdt', min: 20 },
-      { source_network: 'polygon', source_currency: 'usdc', min: 20 },
-      { source_network: 'stellar', source_currency: 'usdc', min: 20 },
-    ],
-  },
-
-  // ─── Destino: Solana ─────────────────────────────────────────────
+  // ─── Destino: Solana / USDC ──────────────────────────────────────
   solana: {
-    eurc: [
-      { source_network: 'solana', source_currency: 'usdc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'eurc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdc', min: 2 },
-      { source_network: 'polygon', source_currency: 'usdc', min: 2 },
-      { source_network: 'stellar', source_currency: 'usdc', min: 2 },
-    ],
-    pyusd: [
-      { source_network: 'solana', source_currency: 'usdb', min: 1 },
-      { source_network: 'solana', source_currency: 'usdc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'pyusd', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdc', min: 1 },
-      { source_network: 'tron', source_currency: 'usdt', min: 5 },
-      { source_network: 'polygon', source_currency: 'usdc', min: 1 },
-      { source_network: 'stellar', source_currency: 'usdc', min: 1 },
-    ],
-    usdb: [
-      { source_network: 'solana', source_currency: 'eurc', min: 1 },
-      { source_network: 'solana', source_currency: 'usdc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'eurc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdt', min: 2 },
-      { source_network: 'tron', source_currency: 'usdt', min: 5 },
-      { source_network: 'polygon', source_currency: 'usdc', min: 1 },
-      { source_network: 'stellar', source_currency: 'usdc', min: 1 },
-    ],
     usdc: [
-      { source_network: 'solana', source_currency: 'eurc', min: 1 },
-      { source_network: 'solana', source_currency: 'pyusd', min: 1 },
       { source_network: 'solana', source_currency: 'usdc', min: 1 },
-      { source_network: 'solana', source_currency: 'usdt', min: 2 },
-      { source_network: 'ethereum', source_currency: 'eurc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'pyusd', min: 1 },
       { source_network: 'ethereum', source_currency: 'usdc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdt', min: 2 },
-      { source_network: 'tron', source_currency: 'usdt', min: 5 },
       { source_network: 'polygon', source_currency: 'usdc', min: 1 },
       { source_network: 'stellar', source_currency: 'usdc', min: 1 },
     ],
-    usdt: [
-      { source_network: 'solana', source_currency: 'pyusd', min: 20 },
-      { source_network: 'solana', source_currency: 'usdb', min: 20 },
-      { source_network: 'ethereum', source_currency: 'usdt', min: 20 },
-      { source_network: 'tron', source_currency: 'usdt', min: 20 },
-      { source_network: 'polygon', source_currency: 'usdc', min: 20 },
-      { source_network: 'stellar', source_currency: 'usdc', min: 20 },
+  },
+
+  // ─── Destino: Ethereum / USDC ────────────────────────────────────
+  ethereum: {
+    usdc: [
+      { source_network: 'solana', source_currency: 'usdc', min: 1 },
+      { source_network: 'polygon', source_currency: 'usdc', min: 1 },
+      { source_network: 'stellar', source_currency: 'usdc', min: 1 },
     ],
   },
 
-  // ─── Destino: Tron ───────────────────────────────────────────────
-  tron: {
-    usdt: [
-      { source_network: 'solana', source_currency: 'usdb', min: 5 },
-      { source_network: 'solana', source_currency: 'usdc', min: 2 },
-      { source_network: 'solana', source_currency: 'usdt', min: 5 },
-      { source_network: 'ethereum', source_currency: 'usdc', min: 5 },
-      { source_network: 'ethereum', source_currency: 'usdt', min: 5 },
-      { source_network: 'tron', source_currency: 'usdt', min: 5 },
-      { source_network: 'polygon', source_currency: 'usdc', min: 5 },
-      { source_network: 'stellar', source_currency: 'usdc', min: 5 },
-    ],
-  },
-
-  // ─── Destino: Polygon ────────────────────────────────────────────
+  // ─── Destino: Polygon / USDC ─────────────────────────────────────
   polygon: {
     usdc: [
-      { source_network: 'solana', source_currency: 'eurc', min: 1 },
-      { source_network: 'solana', source_currency: 'pyusd', min: 1 },
-      { source_network: 'solana', source_currency: 'usdb', min: 1 },
       { source_network: 'solana', source_currency: 'usdc', min: 1 },
-      { source_network: 'solana', source_currency: 'usdt', min: 2 },
-      { source_network: 'ethereum', source_currency: 'eurc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'pyusd', min: 1 },
       { source_network: 'ethereum', source_currency: 'usdc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdt', min: 2 },
-      { source_network: 'tron', source_currency: 'usdt', min: 5 },
+      { source_network: 'stellar', source_currency: 'usdc', min: 1 },
+    ],
+  },
+
+  // ─── Destino: Stellar / USDC ─────────────────────────────────────
+  stellar: {
+    usdc: [
+      { source_network: 'solana', source_currency: 'usdc', min: 1 },
+      { source_network: 'ethereum', source_currency: 'usdc', min: 1 },
       { source_network: 'polygon', source_currency: 'usdc', min: 1 },
       { source_network: 'stellar', source_currency: 'usdc', min: 1 },
     ],
   },
 
-  // ─── Destino: Stellar ────────────────────────────────────────────
-  stellar: {
-    usdc: [
-      { source_network: 'solana', source_currency: 'eurc', min: 1 },
-      { source_network: 'solana', source_currency: 'pyusd', min: 1 },
-      { source_network: 'solana', source_currency: 'usdb', min: 1 },
-      { source_network: 'solana', source_currency: 'usdc', min: 1 },
-      { source_network: 'solana', source_currency: 'usdt', min: 2 },
-      { source_network: 'ethereum', source_currency: 'eurc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'pyusd', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdc', min: 1 },
-      { source_network: 'ethereum', source_currency: 'usdt', min: 2 },
+  // ─── Destino: Tron / USDT ────────────────────────────────────────
+  tron: {
+    usdt: [
+      { source_network: 'solana', source_currency: 'usdt', min: 5 },
+      { source_network: 'ethereum', source_currency: 'usdt', min: 5 },
       { source_network: 'tron', source_currency: 'usdt', min: 5 },
-      { source_network: 'polygon', source_currency: 'usdc', min: 1 },
-      { source_network: 'stellar', source_currency: 'usdc', min: 1 },
     ],
   },
 };

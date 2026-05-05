@@ -1395,8 +1395,8 @@ export class PaymentOrdersService {
           currency: psavDestCurrency.toLowerCase(),
           to_address: psavAccount.crypto_address,
         },
-        amount: dto.amount.toString(),
-        developer_fee: fee_amount.toString(),
+        amount: dto.amount.toFixed(2),
+        developer_fee: fee_amount.toFixed(2),
         client_reference_id: order.id,
       };
 
@@ -1616,8 +1616,8 @@ export class PaymentOrdersService {
           currency: (dto.destination_currency ?? sourceCurrency).toLowerCase(),
           to_address: dto.destination_address,
         },
-        amount: dto.amount.toString(),
-        developer_fee: fee_amount.toString(),
+        amount: dto.amount.toFixed(2),
+        developer_fee: fee_amount.toFixed(2),
         client_reference_id: order.id,
       };
 
@@ -1806,7 +1806,7 @@ export class PaymentOrdersService {
         source_type: 'bridge_wallet',
         source_currency: sourceCurrency,
         amount: dto.amount,
-        currency: wallet.currency,
+        currency: sourceCurrency,
         fee_amount,
         net_amount,
         destination_type: 'external_account',
@@ -2765,6 +2765,7 @@ export class PaymentOrdersService {
     if (
       [
         'fiat_bo_to_bridge_wallet',
+        'crypto_to_bridge_wallet',
         'bolivia_to_world',
         'bolivia_to_wallet',
       ].includes(order.flow_type ?? '')

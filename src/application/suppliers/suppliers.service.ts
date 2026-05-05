@@ -85,7 +85,7 @@ export class SuppliersService {
           FIAT_RAIL_TO_CURRENCY[dto.payment_rail] ?? dto.currency.toLowerCase();
 
         const la = await this.bridgeService.createLiquidationAddress(userId, {
-          currency: 'usdt',
+          currency: 'usdc',
           chain: 'solana',
           external_account_id: ea.bridge_external_account_id as string,
           destination_payment_rail: dto.payment_rail,
@@ -105,13 +105,19 @@ export class SuppliersService {
       }
     } else {
       // Proveedor crypto: crear liquidation address apuntando a la wallet del proveedor
+      // Regla de moneda: Tron → USDT, todas las demás redes → USDC.
+      // Esto evita el exchange rate de Bridge al mantener la misma moneda de entrada y salida.
       try {
+        const isTron =
+          (dto.wallet_network ?? 'solana').toLowerCase() === 'tron';
+        const laCurrency = isTron ? 'usdt' : 'usdc';
+
         const la = await this.bridgeService.createLiquidationAddress(userId, {
-          currency: 'usdt',
+          currency: laCurrency,
           chain: 'solana',
           destination_address: dto.wallet_address,
           destination_payment_rail: dto.wallet_network ?? 'solana',
-          destination_currency: dto.wallet_currency ?? 'usdt',
+          destination_currency: laCurrency,
         });
 
         bridge_liquidation_address_id =
