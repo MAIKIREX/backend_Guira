@@ -128,6 +128,100 @@ export function isValidFiatBoDestination(currency: string): boolean {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  RUTAS ON-RAMP INDEXADAS POR DESTINO — crypto_to_bridge_wallet
+//  Fuente: lista_permitida_moneda_origen_destino.md
+//
+//  Estructura: { [dest_currency]: [{ network, currency, min }, ...] }
+//
+//  Uso: valida qué combinaciones de origen son permitidas dado
+//  el token destino ya seleccionado por el usuario.
+// ═══════════════════════════════════════════════════════════════════
+
+export interface AllowedSourceEntry {
+  network: string;
+  currency: string;
+  min: number;
+}
+
+/**
+ * Combinaciones de origen permitidas por token de destino.
+ * Destino siempre Solana (wallet custodial).
+ */
+export const BRIDGE_ON_RAMP_ALLOWED_SOURCES_BY_DEST: Record<
+  string,
+  AllowedSourceEntry[]
+> = {
+  usdc: [
+    { network: 'ethereum', currency: 'usdc', min: 1 },
+    { network: 'polygon',  currency: 'usdc', min: 1 },
+    { network: 'solana',   currency: 'usdc', min: 1 },
+    { network: 'stellar',  currency: 'usdc', min: 1 },
+  ],
+  usdt: [
+    { network: 'ethereum', currency: 'usdt', min: 20 },
+    { network: 'tron',     currency: 'usdt', min: 20 },
+  ],
+  usdb: [],
+  pyusd: [
+    { network: 'ethereum', currency: 'pyusd', min: 1 },
+  ],
+  eurc: [
+    { network: 'ethereum', currency: 'eurc', min: 1 },
+    { network: 'solana',   currency: 'eurc', min: 1 },
+  ],
+};
+
+/** Dado un token destino, retorna las redes de origen disponibles (sin duplicados) */
+export function getSourceNetworksForDest(destCurrency: string): string[] {
+  const sources =
+    BRIDGE_ON_RAMP_ALLOWED_SOURCES_BY_DEST[destCurrency.toLowerCase()] ?? [];
+  return [...new Set(sources.map((s) => s.network))];
+}
+
+/** Dado un token destino + red de origen, retorna las monedas de origen disponibles */
+export function getSourceCurrenciesForDestAndNetwork(
+  destCurrency: string,
+  sourceNetwork: string,
+): string[] {
+  const sources =
+    BRIDGE_ON_RAMP_ALLOWED_SOURCES_BY_DEST[destCurrency.toLowerCase()] ?? [];
+  return sources
+    .filter((s) => s.network === sourceNetwork.toLowerCase())
+    .map((s) => s.currency);
+}
+
+/** Mínimo de transacción dado el token destino, red de origen y moneda de origen */
+export function getMinAmountByDest(
+  destCurrency: string,
+  sourceNetwork: string,
+  sourceCurrency: string,
+): number {
+  const sources =
+    BRIDGE_ON_RAMP_ALLOWED_SOURCES_BY_DEST[destCurrency.toLowerCase()] ?? [];
+  const match = sources.find(
+    (s) =>
+      s.network === sourceNetwork.toLowerCase() &&
+      s.currency === sourceCurrency.toLowerCase(),
+  );
+  return match?.min ?? 1;
+}
+
+/** Valida si una combinación origen→destino es permitida según el documento */
+export function isValidOnRampSourceForDest(
+  destCurrency: string,
+  sourceNetwork: string,
+  sourceCurrency: string,
+): boolean {
+  const sources =
+    BRIDGE_ON_RAMP_ALLOWED_SOURCES_BY_DEST[destCurrency.toLowerCase()] ?? [];
+  return sources.some(
+    (s) =>
+      s.network === sourceNetwork.toLowerCase() &&
+      s.currency === sourceCurrency.toLowerCase(),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  CATÁLOGO DE RUTAS OFF-RAMP (bridge_wallet_to_crypto)
 //  Fuente: lista_bridge_out.md (filtrada a tokens soportados)
 //
