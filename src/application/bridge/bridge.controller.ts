@@ -295,6 +295,15 @@ export class AdminBridgeController {
     );
   }
 
+  // ── Liquidation Addresses (por usuario) ────────────
+
+  @Get('users/:userId/liquidation-addresses')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Listar liquidation addresses de un usuario (admin)' })
+  listUserLiquidationAddresses(@Param('userId', new ParseUUIDPipe()) userId: string) {
+    return this.bridgeService.listLiquidationAddressesByUserAdmin(userId);
+  }
+
   // ── VA Fee Overrides (por usuario) ─────────────────
 
   @Get('users/:userId/va-fee-overrides')

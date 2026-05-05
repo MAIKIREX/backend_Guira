@@ -1237,6 +1237,17 @@ export class BridgeService {
     );
   }
 
+  async listLiquidationAddressesByUserAdmin(userId: string) {
+    const { data, error } = await this.supabase
+      .from('bridge_liquidation_addresses')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  }
+
   /**
    * Actualiza una Liquidation Address en Bridge.
    *
