@@ -337,6 +337,20 @@ export class PdfService {
     };
   }
 
+  // ─── Merge two 2-col row arrays into 4-col rows ───────
+
+  private mergeColumns(left: any[][], right: any[][]): any[][] {
+    const maxLen = Math.max(left.length, right.length);
+    const merged: any[][] = [];
+    const empty = { text: '', style: 'tLabel' };
+    for (let i = 0; i < maxLen; i++) {
+      const l = left[i] ?? [empty, empty];
+      const r = right[i] ?? [empty, empty];
+      merged.push([l[0], l[1], r[0], r[1]]);
+    }
+    return merged;
+  }
+
   // ═══════════════════════════════════════════════════════
   //  MAIN PDF GENERATION
   // ═══════════════════════════════════════════════════════
@@ -384,40 +398,116 @@ export class PdfService {
 
       // ── Build document ────────────────────────────────
 
+      // Formal bordered-table layout for sections
+      const borderedLayout = {
+        hLineWidth: (i: number, node: any) => 0.6,
+        vLineWidth: (i: number, node: any) => (i === 0 || i === node.table.widths.length ? 0.6 : 0),
+        hLineColor: () => COLORS.border,
+        vLineColor: () => COLORS.border,
+        paddingLeft: () => 10,
+        paddingRight: () => 10,
+        paddingTop: () => 6,
+        paddingBottom: () => 6,
+      };
+
+      // Section header row (navy bg, white text, spans full table)
+      const sectionHeader = (title: string, cols: number) => {
+        const cells: any[] = [{ text: title, style: 'sectionHeader', colSpan: cols }];
+        for (let i = 1; i < cols; i++) cells.push({});
+        return cells;
+      };
+
+      // ── Client table ──
+      const clientTable = {
+        table: {
+          headerRows: 1,
+          widths: ['25%', '25%', '25%', '25%'],
+          body: [
+            sectionHeader('DATOS DEL CLIENTE', 4),
+            [
+              { text: 'Nombre / Razón Social', style: 'cellLabel' },
+              { text: this.toDisplay(client?.full_name), style: 'cellValue', colSpan: 3 },
+              {}, {},
+            ],
+            [
+              { text: 'Correo Electrónico', style: 'cellLabel' },
+              { text: this.toDisplay(client?.email), style: 'cellValue' },
+              { text: 'Teléfono', style: 'cellLabel' },
+              { text: this.toDisplay(client?.phone), style: 'cellValue' },
+            ],
+          ],
+        },
+        layout: borderedLayout,
+        margin: [0, 0, 0, 14] as [number, number, number, number],
+      };
+
+      // ── Origin / Destination side-by-side ──
+      const operationTable = {
+        table: {
+          headerRows: 1,
+          widths: ['25%', '25%', '25%', '25%'],
+          body: [
+            sectionHeader('DETALLES DE LA OPERACIÓN', 4),
+            // Sub-headers
+            [
+              { text: 'ORIGEN', style: 'subHeader', colSpan: 2 }, {},
+              { text: 'DESTINO', style: 'subHeader', colSpan: 2 }, {},
+            ],
+            // Merge origin and destination rows side by side
+            ...this.mergeColumns(originRows, destRows),
+          ],
+        },
+        layout: {
+          ...borderedLayout,
+          // Add a subtle vertical line between origin and destination
+          vLineWidth: (i: number, node: any) => {
+            if (i === 0 || i === node.table.widths.length) return 0.6;
+            if (i === 2) return 0.4; // center divider
+            return 0;
+          },
+          vLineColor: (i: number) => i === 2 ? COLORS.borderLight : COLORS.border,
+        },
+        margin: [0, 0, 0, 14] as [number, number, number, number],
+      };
+
+      // ── Traceability table ──
+      const traceTable = {
+        table: {
+          headerRows: 1,
+          widths: ['30%', '70%'],
+          body: [
+            sectionHeader('TRAZABILIDAD Y REFERENCIAS', 2),
+            ...traceRows,
+          ],
+        },
+        layout: borderedLayout,
+        margin: [0, 0, 0, 20] as [number, number, number, number],
+      };
+
       const docDefinition: TDocumentDefinitions = {
         pageSize: 'A4',
-        pageMargins: [40, 40, 40, 50],
-        defaultStyle: { font: 'Helvetica', fontSize: 9.5, color: COLORS.text },
-
-        // ═══ HEADER BAND ═══
-        header: {
-          table: {
-            widths: ['*'],
-            body: [[{ text: '', fillColor: COLORS.navy, margin: [0, 0, 0, 0] }]],
-          },
-          layout: 'noBorders',
-          margin: [0, 0, 0, 0],
-        },
+        pageMargins: [36, 36, 36, 60],
+        defaultStyle: { font: 'Helvetica', fontSize: 9, color: COLORS.text },
 
         content: [
-          // ── Top bar (navy) with logo + title ──
+          // ═══ HEADER BAND (navy) ═══
           {
             table: {
               widths: ['*'],
               body: [[
                 {
                   columns: [
-                    { ...logo, margin: [0, 0, 0, 0] },
+                    { ...logo, margin: [0, 2, 0, 0] },
                     {
                       stack: [
                         { text: 'COMPROBANTE DE TRANSACCIÓN', style: 'headerTitle' },
-                        { text: flowLabel, style: 'headerSubtitle' },
+                        { text: flowLabel, style: 'headerSubtitle', margin: [0, 3, 0, 0] },
                       ],
                       alignment: 'right' as const,
                     },
                   ],
                   fillColor: COLORS.navy,
-                  margin: [20, 18, 20, 18],
+                  margin: [20, 16, 20, 16],
                 },
               ]],
             },
@@ -425,46 +515,51 @@ export class PdfService {
             margin: [0, 0, 0, 0],
           },
 
-          // ── Accent stripe ──
+          // ═══ ACCENT STRIPE (thin teal line) ═══
+          {
+            canvas: [{ type: 'rect', x: 0, y: 0, w: 523, h: 3, color: COLORS.accent }],
+            margin: [0, 0, 0, 14],
+          },
+
+          // ═══ META ROW — bordered cells ═══
           {
             table: {
-              widths: ['*'],
-              body: [[{ text: '', fillColor: COLORS.accent, margin: [0, 0, 0, 0] }]],
+              widths: ['40%', '30%', '30%'],
+              body: [[
+                {
+                  stack: [
+                    { text: 'N° DE OPERACIÓN', style: 'metaLabel' },
+                    { text: order.id ?? 'N/D', style: 'metaId' },
+                  ],
+                  margin: [8, 6, 8, 6],
+                },
+                {
+                  stack: [
+                    { text: 'FECHA DE EMISIÓN', style: 'metaLabel' },
+                    { text: this.fmtDate(order.created_at), style: 'metaValue' },
+                  ],
+                  margin: [8, 6, 8, 6],
+                },
+                {
+                  stack: [
+                    { text: 'ESTADO', style: 'metaLabel' },
+                    { text: statusLabel, style: 'metaValue', color: stColor, bold: true, fontSize: 11 },
+                  ],
+                  margin: [8, 6, 8, 6],
+                  alignment: 'right' as const,
+                },
+              ]],
             },
-            layout: 'noBorders',
-            margin: [0, 0, 0, 16],
+            layout: {
+              hLineWidth: () => 0.5,
+              vLineWidth: (i: number, node: any) => (i === 0 || i === node.table.widths.length ? 0.5 : 0.3),
+              hLineColor: () => COLORS.border,
+              vLineColor: () => COLORS.border,
+            },
+            margin: [0, 0, 0, 14],
           },
 
-          // ── Meta row: ID + date + status ──
-          {
-            columns: [
-              {
-                stack: [
-                  { text: 'N° OPERACIÓN', style: 'metaLabel' },
-                  { text: order.id ?? 'N/D', style: 'metaValue', fontSize: 8.5 },
-                ],
-                width: '45%',
-              },
-              {
-                stack: [
-                  { text: 'FECHA DE EMISIÓN', style: 'metaLabel' },
-                  { text: this.fmtDate(order.created_at), style: 'metaValue' },
-                ],
-                width: '30%',
-              },
-              {
-                stack: [
-                  { text: 'ESTADO', style: 'metaLabel' },
-                  { text: statusLabel, style: 'metaValue', color: stColor, bold: true },
-                ],
-                width: '25%',
-                alignment: 'right' as const,
-              },
-            ],
-            margin: [0, 0, 0, 16],
-          },
-
-          // ── Amount banner ──
+          // ═══ AMOUNT PANEL ═══
           {
             table: {
               widths: ['*'],
@@ -473,135 +568,110 @@ export class PdfService {
                   columns: [
                     {
                       stack: [
-                        { text: 'MONTO ACREDITADO', style: 'bannerLabel' },
-                        { text: `${this.fmtAmount(amountDest)} ${destCcy}`, style: 'bannerAmount' },
+                        { text: 'MONTO ACREDITADO', style: 'amountLabel' },
+                        { text: `${this.fmtAmount(amountDest)} ${destCcy}`, style: 'amountValue' },
                       ],
                       width: '*',
                     },
                     {
                       stack: [
-                        { text: statusLabel, style: 'bannerStatus', color: stColor },
+                        { text: 'TIPO DE SERVICIO', style: 'amountLabel' },
+                        { text: flowLabel, style: 'amountType' },
                       ],
                       width: 'auto',
                       alignment: 'right' as const,
-                      margin: [0, 8, 0, 0],
                     },
                   ],
                   fillColor: COLORS.surface,
-                  margin: [16, 14, 16, 14],
+                  margin: [16, 12, 16, 12],
                 },
               ]],
             },
             layout: {
-              hLineWidth: () => 0.5,
-              vLineWidth: () => 0.5,
+              hLineWidth: () => 0.6,
+              vLineWidth: () => 0.6,
               hLineColor: () => COLORS.border,
               vLineColor: () => COLORS.border,
             },
-            margin: [0, 0, 0, 20],
+            margin: [0, 0, 0, 16],
           },
 
-          // ── SECTION: Datos del Cliente ──
-          { text: 'Datos del Cliente', style: 'sectionTitle' },
-          this.divider(),
-          {
-            columns: [
-              {
-                width: '50%',
-                table: {
-                  widths: ['35%', '65%'],
-                  body: [
-                    this.row('Nombre', this.toDisplay(client?.full_name)),
-                    this.row('Correo', this.toDisplay(client?.email)),
-                  ],
-                },
-                layout: this.cleanTableLayout(),
-              },
-              {
-                width: '50%',
-                table: {
-                  widths: ['35%', '65%'],
-                  body: [
-                    this.row('Teléfono', this.toDisplay(client?.phone)),
-                    this.row('ID Cliente', this.toDisplay(client?.id)?.slice(0, 8) + '...'),
-                  ],
-                },
-                layout: this.cleanTableLayout(),
-              },
-            ],
-            columnGap: 12,
-            margin: [0, 6, 0, 18],
-          },
+          // ═══ SECTION TABLES ═══
+          clientTable,
+          operationTable,
+          traceTable,
 
-          // ── SECTION: Detalles de Origen ──
-          { text: 'Detalles de Origen', style: 'sectionTitle' },
-          this.divider(),
+          // ═══ ACCENT BOTTOM LINE ═══
           {
-            table: { widths: ['30%', '70%'], body: originRows },
-            layout: this.cleanTableLayout(),
-            margin: [0, 6, 0, 18],
-          },
-
-          // ── SECTION: Detalles de Destino ──
-          { text: 'Detalles de Destino', style: 'sectionTitle' },
-          this.divider(),
-          {
-            table: { widths: ['30%', '70%'], body: destRows },
-            layout: this.cleanTableLayout(),
-            margin: [0, 6, 0, 18],
-          },
-
-          // ── SECTION: Trazabilidad ──
-          { text: 'Trazabilidad y Referencias', style: 'sectionTitle' },
-          this.divider(),
-          {
-            table: { widths: ['30%', '70%'], body: traceRows },
-            layout: this.cleanTableLayout(),
-            margin: [0, 6, 0, 24],
-          },
-
-          // ── Bottom accent line ──
-          {
-            table: {
-              widths: ['*'],
-              body: [[{ text: '', fillColor: COLORS.accent, margin: [0, 0, 0, 0] }]],
-            },
-            layout: 'noBorders',
+            canvas: [{ type: 'rect', x: 0, y: 0, w: 523, h: 2, color: COLORS.accent }],
             margin: [0, 0, 0, 12],
           },
 
-          // ── Disclaimer ──
+          // ═══ LEGAL DISCLAIMER ═══
           {
-            text: 'Este comprobante es generado de forma automática por la plataforma Guira y constituye un registro operativo de la transacción descrita. No representa un documento fiscal ni tributario.',
+            text: [
+              { text: 'Aviso Legal: ', bold: true },
+              'Este comprobante es generado de forma automática por la plataforma Guira y constituye un registro ',
+              'operativo de la transacción aquí descrita. No sustituye documentación fiscal, tributaria ni contable ',
+              'requerida por las autoridades competentes. La información contenida es confidencial y de uso exclusivo ',
+              'del titular de la cuenta. Ante cualquier discrepancia, comuníquese con soporte@guira.com.',
+            ],
             style: 'disclaimer',
-            alignment: 'center' as const,
+            alignment: 'justify' as const,
           },
         ],
 
         // ═══ FOOTER ═══
         footer: (currentPage, pageCount) => ({
           columns: [
-            { text: 'Guira — Operaciones Financieras Seguras', style: 'footerText', alignment: 'left' as const },
-            { text: `Página ${currentPage} de ${pageCount}`, style: 'footerText', alignment: 'right' as const },
+            {
+              stack: [
+                { text: 'Guira — Plataforma de Operaciones Financieras', style: 'footerBrand' },
+                { text: 'www.guira.com  |  soporte@guira.com', style: 'footerContact' },
+              ],
+              alignment: 'left' as const,
+            },
+            {
+              text: `Página ${currentPage} de ${pageCount}`,
+              style: 'footerPage',
+              alignment: 'right' as const,
+            },
           ],
-          margin: [40, 8, 40, 0],
+          margin: [36, 0, 36, 0],
         }),
 
         // ═══ STYLES ═══
         styles: {
-          brandFallback: { fontSize: 22, bold: true, color: COLORS.white },
-          headerTitle: { fontSize: 16, bold: true, color: COLORS.white, characterSpacing: 0.8 },
-          headerSubtitle: { fontSize: 10, color: COLORS.accent, margin: [0, 4, 0, 0] },
-          metaLabel: { fontSize: 8, bold: true, color: COLORS.muted, characterSpacing: 0.6, margin: [0, 0, 0, 2] },
+          // Header
+          brandFallback: { fontSize: 20, bold: true, color: COLORS.white },
+          headerTitle: { fontSize: 14, bold: true, color: COLORS.white, characterSpacing: 1.2 },
+          headerSubtitle: { fontSize: 9, color: COLORS.accent, characterSpacing: 0.3 },
+
+          // Meta cells
+          metaLabel: { fontSize: 7.5, bold: true, color: COLORS.muted, characterSpacing: 0.8, margin: [0, 0, 0, 3] },
+          metaId: { fontSize: 7.5, color: COLORS.text, characterSpacing: 0.2 },
           metaValue: { fontSize: 9.5, color: COLORS.text },
-          bannerLabel: { fontSize: 8, bold: true, color: COLORS.muted, characterSpacing: 0.8, margin: [0, 0, 0, 4] },
-          bannerAmount: { fontSize: 22, bold: true, color: COLORS.navy },
-          bannerStatus: { fontSize: 13, bold: true },
-          sectionTitle: { fontSize: 11, bold: true, color: COLORS.primary, characterSpacing: 0.4, margin: [0, 0, 0, 6] },
-          tLabel: { fontSize: 9, color: COLORS.muted, margin: [0, 0, 0, 0] },
-          tValue: { fontSize: 9.5, color: COLORS.text, bold: true, margin: [0, 0, 0, 0] },
-          disclaimer: { fontSize: 7.5, color: COLORS.muted, italics: true, margin: [20, 0, 20, 0] },
-          footerText: { fontSize: 7.5, color: COLORS.muted },
+
+          // Amount panel
+          amountLabel: { fontSize: 7.5, bold: true, color: COLORS.muted, characterSpacing: 0.8, margin: [0, 0, 0, 4] },
+          amountValue: { fontSize: 20, bold: true, color: COLORS.navy },
+          amountType: { fontSize: 9, color: COLORS.primary, bold: true, margin: [0, 4, 0, 0] },
+
+          // Section tables
+          sectionHeader: { fontSize: 9, bold: true, color: COLORS.white, fillColor: COLORS.navy, characterSpacing: 1 },
+          subHeader: { fontSize: 8, bold: true, color: COLORS.primary, characterSpacing: 0.6, margin: [0, 2, 0, 2] },
+          cellLabel: { fontSize: 8, color: COLORS.muted },
+          cellValue: { fontSize: 9, color: COLORS.text, bold: true },
+
+          // Detail tables (origin, dest, trace)
+          tLabel: { fontSize: 8.5, color: COLORS.muted },
+          tValue: { fontSize: 9, color: COLORS.text, bold: true },
+
+          // Legal / Footer
+          disclaimer: { fontSize: 7, color: COLORS.muted, lineHeight: 1.4, margin: [0, 0, 0, 0] },
+          footerBrand: { fontSize: 7.5, bold: true, color: COLORS.navy },
+          footerContact: { fontSize: 7, color: COLORS.muted, margin: [0, 1, 0, 0] },
+          footerPage: { fontSize: 7.5, color: COLORS.muted },
         },
       };
 
