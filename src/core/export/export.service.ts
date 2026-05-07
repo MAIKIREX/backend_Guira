@@ -3,6 +3,7 @@ import * as ExcelJS from 'exceljs';
 const pdfmake = require('pdfmake');
 import * as fs from 'fs';
 import * as path from 'path';
+import sharp = require('sharp');
 
 // ── Tipos internos ──────────────────────────────────────────────────────────
 
@@ -154,18 +155,23 @@ export class ExportService {
     const BORDER_BLUE    = 'B8D4F0'; // Borde suave azul (var --border del frontend)
     const TITLE_BAND_BG  = 'F0F7FF'; // Fondo del bloque de cabecera
 
-    // ── Logo ──
+    // ── Logo (SVG → PNG via sharp) ──
     let logoImageId: number | null = null;
     try {
-      const logoPath = path.join(process.cwd(), 'assets', 'LOGO GUIRRA 02.png');
+      const logoPath = path.join(process.cwd(), 'assets', 'LOGO GUIRRA ISOTIPO.svg');
       if (fs.existsSync(logoPath)) {
+        const svgBuffer = fs.readFileSync(logoPath);
+        const pngBuffer = await sharp(svgBuffer)
+          .resize({ width: 200, height: 200, fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+          .png()
+          .toBuffer();
         logoImageId = workbook.addImage({
-          buffer: fs.readFileSync(logoPath) as any,
+          buffer: pngBuffer as any,
           extension: 'png',
         });
       }
-    } catch {
-      this.logger.warn('No se pudo cargar logo.png para el reporte Excel');
+    } catch (err) {
+      this.logger.warn('No se pudo cargar LOGO GUIRRA ISOTIPO.svg para el reporte Excel', err);
     }
 
     // ── BLOQUE DE CABECERA DEL REPORTE ──
@@ -327,20 +333,20 @@ export class ExportService {
     const HEADER_BG = '#1e40af';
     const EVEN_BG   = '#f1f5f9';
 
-    // Logo SVG (LOGO GUIRRA CON LETRA VERTICAL)
+    // Logo SVG (LOGO GUIRRA ISOTIPO)
     let logoBlock: any = { text: 'Guira\n', style: 'brandName' };
     try {
       const logoPath = path.join(
         process.cwd(),
         'assets',
-        'LOGO GUIRRA CON LETRA VERTICAL.svg',
+        'LOGO GUIRRA ISOTIPO.svg',
       );
       if (fs.existsSync(logoPath)) {
         const svgContent = fs.readFileSync(logoPath, 'utf-8');
         logoBlock = { svg: svgContent, width: 60, margin: [0, 0, 0, 4] };
       }
     } catch {
-      this.logger.warn('No se pudo cargar logo para el PDF de reporte');
+      this.logger.warn('No se pudo cargar logo ISOTIPO para el PDF de reporte');
     }
 
     const tableBody: any[][] = [
