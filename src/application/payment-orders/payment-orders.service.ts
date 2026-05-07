@@ -2514,7 +2514,8 @@ export class PaymentOrdersService {
         'flow_type, destination_currency, currency, amount, created_at',
       )
       .eq('flow_category', 'interbank')
-      .in('flow_type', ['bolivia_to_world', 'world_to_bolivia']);
+      .in('flow_type', ['bolivia_to_world', 'world_to_bolivia'])
+      .eq('status', 'completed');
 
     if (month) {
       const start = new Date(`${month}-01T00:00:00.000Z`);
@@ -2570,6 +2571,7 @@ export class PaymentOrdersService {
       .select('created_at')
       .eq('flow_category', 'interbank')
       .in('flow_type', ['bolivia_to_world', 'world_to_bolivia'])
+      .eq('status', 'completed')
       .order('created_at', { ascending: false });
 
     if (error) throw new BadRequestException(error.message);
