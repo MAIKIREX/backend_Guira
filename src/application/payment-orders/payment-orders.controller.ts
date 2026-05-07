@@ -402,6 +402,20 @@ export class AdminPaymentOrdersController {
     return this.paymentOrdersService.getOrderStats();
   }
 
+  @Get('global-flow-stats')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Flujos globales interbank agrupados por mes (mapa)' })
+  getGlobalFlowStats(@Query('month') month?: string) {
+    return this.paymentOrdersService.getGlobalFlowStats(month);
+  }
+
+  @Get('global-flow-months')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Meses disponibles con transacciones interbank' })
+  getGlobalFlowMonths() {
+    return this.paymentOrdersService.getGlobalFlowMonths();
+  }
+
   // ── Acciones de estado ──
 
   @Post(':id/approve')
