@@ -145,14 +145,25 @@ export class PdfService {
   // ─── Origin details (per service) ─────────────────────
 
   private buildOriginRows(order: any, metadata: any, clientWallet: any): any[][] {
-    const originCcy = (order.origin_currency ?? order.currency ?? '').toUpperCase();
+    const originCcy = (order.origin_currency ?? order.source_currency ?? order.currency ?? '').toUpperCase();
+    const ft = order.flow_type;
+
+    // Resolve exchange rate: use stored value, or fallback to 1.00 for stablecoin same-token flows
+    const STABLECOIN_FLOWS = ['bridge_wallet_to_crypto', 'bridge_wallet_to_fiat_us', 'crypto_to_bridge_wallet'];
+    let exchangeRateDisplay: string;
+    if (order.exchange_rate_applied != null && order.exchange_rate_applied !== 0) {
+      exchangeRateDisplay = this.toDisplay(order.exchange_rate_applied);
+    } else if (STABLECOIN_FLOWS.includes(ft)) {
+      exchangeRateDisplay = '1.00 (stablecoin)';
+    } else {
+      exchangeRateDisplay = this.toDisplay(order.exchange_rate_applied);
+    }
+
     const rows: any[][] = [
       this.row('Monto Origen', `${this.fmtAmount(order.amount_origin ?? order.amount)} ${originCcy}`),
       this.row('Comisión', `${this.fmtAmount(order.fee_total ?? order.fee_amount)} ${originCcy}`),
-      this.row('Tipo de Cambio', this.toDisplay(order.exchange_rate_applied)),
+      this.row('Tipo de Cambio', exchangeRateDisplay),
     ];
-
-    const ft = order.flow_type;
 
     // Off-ramp flows: show source wallet
     if (['bridge_wallet_to_fiat_bo', 'bridge_wallet_to_fiat_us', 'bridge_wallet_to_crypto'].includes(ft)) {
@@ -162,10 +173,12 @@ export class PdfService {
       );
     }
 
-    // Crypto on-ramp: show source network/currency from metadata
+    // Crypto on-ramp: show source network from order column (NOT metadata)
     if (ft === 'crypto_to_bridge_wallet') {
       rows.push(
-        this.row('Red de Depósito', this.toDisplay(this.readMeta(metadata, 'source_network') || order.origin_currency)),
+        this.row('Red de Depósito', this.toDisplay(
+          order.source_network ?? this.readMeta(metadata, 'source_network') ?? order.origin_currency
+        )),
       );
     }
 
@@ -268,12 +281,36 @@ export class PdfService {
     }
 
     // ── bridge_wallet_to_fiat_us ─────────────────────────
-    // FIX H2b: was falling to generic else — now shows USD bank details
+    // FIX: Read bank details from supplier.bank_details as primary source,
+    // since metadata is never populated for this flow.
     else if (ft === 'bridge_wallet_to_fiat_us') {
-      const bankName = this.readMeta(metadata, 'destination_bank') || this.readMeta(metadata, 'bank_name');
-      const acctNum = order.destination_address ?? this.readMeta(metadata, 'destination_account') ?? this.readMeta(metadata, 'account_number');
-      const routing = this.readMeta(metadata, 'routing_number');
-      const holder = this.readMeta(metadata, 'account_holder') || this.readMeta(metadata, 'beneficiary_name');
+      // 1. Try metadata first (legacy/future-proof)
+      let bankName = this.readMeta(metadata, 'destination_bank') || this.readMeta(metadata, 'bank_name');
+      let acctNum = order.destination_address ?? this.readMeta(metadata, 'destination_account') ?? this.readMeta(metadata, 'account_number');
+      let routing = this.readMeta(metadata, 'routing_number');
+      let holder = this.readMeta(metadata, 'account_holder') || this.readMeta(metadata, 'beneficiary_name');
+
+      // 2. Fallback: read from supplier.bank_details (ACH data)
+      if (!bankName && supplier?.bank_details) {
+        const ach = (supplier.bank_details as any).ach ?? supplier.bank_details;
+        bankName = ach?.bank_name ?? '';
+        if (!acctNum) acctNum = ach?.account_number ?? '';
+        if (!routing) routing = ach?.routing_number ?? '';
+        if (!holder) holder = ach?.account_holder_name ?? supplier?.name ?? '';
+      }
+
+      // 3. Fallback: read from supplier.external_accounts
+      if (!bankName && supplier?.external_accounts?.length) {
+        const ext = supplier.external_accounts.find(
+          (a: any) => a.id === order.external_account_id,
+        );
+        if (ext) {
+          bankName = ext.bank_name ?? '';
+          if (!acctNum) acctNum = ext.account_number ?? '';
+          if (!holder) holder = ext.account_holder_name ?? '';
+        }
+      }
+
       rows.push(
         this.row('Banco Destino', this.toDisplay(bankName)),
         this.row('Cuenta Destino', this.toDisplay(acctNum)),
@@ -284,10 +321,12 @@ export class PdfService {
     }
 
     // ── bridge_wallet_to_crypto ──────────────────────────
-    // FIX H2c: was falling to generic else — now shows crypto destination
+    // FIX: Read destination_network from order column (NOT metadata)
     else if (ft === 'bridge_wallet_to_crypto') {
       const destAddr = order.destination_address ?? this.readMeta(metadata, 'destination_address');
-      const destNet = this.readMeta(metadata, 'destination_network') || this.readMeta(metadata, 'dest_network');
+      const destNet = order.destination_network
+        ?? this.readMeta(metadata, 'destination_network')
+        ?? this.readMeta(metadata, 'dest_network');
       rows.push(
         this.row('Wallet Destino', this.toDisplay(destAddr)),
         this.row('Red Destino', this.toDisplay(destNet)),
@@ -318,7 +357,9 @@ export class PdfService {
       'wallet_to_wallet', 'bolivia_to_wallet',
       'fiat_bo_to_bridge_wallet', 'fiat_us_to_bridge_wallet',
     ].includes(order.flow_type)) {
-      return order.destination_currency ?? order.currency ?? 'N/D';
+      // FIX: Do NOT fallback to order.currency — it can be 'BOB' for bolivia_to_wallet
+      // which is the fiat origin, not the stablecoin destination.
+      return order.destination_currency ?? 'N/D';
     }
     return 'N/D';
   }

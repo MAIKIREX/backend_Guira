@@ -1112,6 +1112,7 @@ export class PaymentOrdersService {
         source_network: dto.source_network,
         destination_type: 'bridge_wallet',
         destination_currency: resolvedDestCurrency.toUpperCase(),
+        exchange_rate_applied: 1.0,
         bridge_transfer_id: bridgeTransfer.id as string,
         bridge_source_deposit_instructions: depositInstructions,
         notes:
@@ -1540,6 +1541,7 @@ export class PaymentOrdersService {
         destination_address: dto.destination_address,
         destination_network: dto.destination_network,
         destination_currency: dto.destination_currency ?? sourceCurrency,
+        exchange_rate_applied: 1.0,
         business_purpose: dto.business_purpose,
         supporting_document_url: dto.supporting_document_url,
         notes: dto.notes,
@@ -1811,6 +1813,7 @@ export class PaymentOrdersService {
         net_amount,
         destination_type: 'external_account',
         destination_currency: extAccount.currency ?? 'USD',
+        exchange_rate_applied: 1.0,
         external_account_id: extAccount.id,
         supplier_id: supplier.id,
         notes: dto.notes,
