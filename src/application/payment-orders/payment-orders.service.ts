@@ -588,6 +588,7 @@ export class PaymentOrdersService {
           },
           // Sin amount → Bridge acepta cualquier monto (flexible_amount)
           developer_fee_percent: feePercent,
+          client_reference_id: order.id,
           features: {
             flexible_amount: true,
             allow_any_from_address: true,
@@ -1215,7 +1216,7 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile.bridge_customer_id,
           source: {
-            payment_rail: dto.source_network,
+            payment_rail: dto.source_network?.toLowerCase(),
             currency: resolvedSourceCurrency,
           },
           destination: {
@@ -1224,6 +1225,7 @@ export class PaymentOrdersService {
             bridge_wallet_id: wallet.provider_wallet_id,
           },
           developer_fee_percent: feePercent,
+          client_reference_id: orderId,
           features: {
             allow_any_from_address: true,
             flexible_amount: true,
@@ -1930,6 +1932,13 @@ export class PaymentOrdersService {
       );
     }
 
+    if (!extAccount.payment_rail) {
+      throw new BadRequestException(
+        'La cuenta bancaria del proveedor no tiene payment_rail configurado. ' +
+          'Actualice los datos del proveedor antes de realizar el retiro.',
+      );
+    }
+
     // Validar bridge_customer_id antes de operar con saldo
     const { data: profile } = await this.supabase
       .from('profiles')
@@ -2024,7 +2033,7 @@ export class PaymentOrdersService {
             bridge_wallet_id: wallet.provider_wallet_id,
           },
           destination: {
-            payment_rail: extAccount.payment_rail ?? 'ach',
+            payment_rail: extAccount.payment_rail,
             currency: (extAccount.currency ?? 'usd').toLowerCase(),
             external_account_id: extAccount.bridge_external_account_id,
           },
@@ -2053,7 +2062,7 @@ export class PaymentOrdersService {
           bridge_transfer_id: transferId,
           source_payment_rail: 'bridge_wallet',
           source_currency: sourceCurrency.toLowerCase(),
-          destination_payment_rail: extAccount.payment_rail ?? 'ach',
+          destination_payment_rail: extAccount.payment_rail,
           destination_currency: (extAccount.currency ?? 'usd').toLowerCase(),
           amount: dto.amount,
           developer_fee_amount: fee_amount,
@@ -2162,6 +2171,13 @@ export class PaymentOrdersService {
       );
     }
 
+    if (!extAccount.payment_rail) {
+      throw new BadRequestException(
+        'La cuenta bancaria del proveedor no tiene payment_rail configurado. ' +
+          'Actualice los datos del proveedor antes de realizar el retiro.',
+      );
+    }
+
     // 3. Calcular fee
     const sourceCurrency = dto.source_currency?.toUpperCase() ?? 'USDC';
     const { fee_amount, net_amount } = await this.feesService.calculateFee(
@@ -2248,7 +2264,7 @@ export class PaymentOrdersService {
             from_address: dto.source_address,
           },
           destination: {
-            payment_rail: extAccount.payment_rail ?? 'ach',
+            payment_rail: extAccount.payment_rail,
             currency: (extAccount.currency ?? 'usd').toLowerCase(),
             external_account_id: extAccount.bridge_external_account_id,
           },
@@ -2281,7 +2297,7 @@ export class PaymentOrdersService {
           bridge_transfer_id: transferId,
           source_payment_rail: dto.source_network.toLowerCase(),
           source_currency: sourceCurrency.toLowerCase(),
-          destination_payment_rail: extAccount.payment_rail ?? 'ach',
+          destination_payment_rail: extAccount.payment_rail,
           destination_currency: (extAccount.currency ?? 'usd').toLowerCase(),
           amount: dto.amount,
           developer_fee_amount: fee_amount,
