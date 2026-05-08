@@ -9,6 +9,8 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/dto/notifications.dto';
 
 export interface CreateReviewRequestPayload {
   userId: string;
@@ -59,6 +61,7 @@ export class OrderReviewService {
 
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ── Cron: marcar expiradas cada hora ──────────────────────────
@@ -347,6 +350,16 @@ export class OrderReviewService {
       table_name: 'order_review_requests',
       new_values: { id: reviewId, status: 'rejected', staff_notes: staffNotes },
       source: 'admin_panel',
+    });
+
+    await this.notificationsService.sendNotification({
+      userId: updated.user_id,
+      type: NotificationType.FINANCIAL,
+      title: 'Expediente rechazado',
+      message: `Tu solicitud de ${updated.flow_type.replace(/_/g, ' ')} por ${updated.amount} ${updated.currency} fue rechazada. Motivo: ${staffNotes}`,
+      link: '/panel/pagos',
+      referenceType: 'order_review_request',
+      referenceId: reviewId,
     });
 
     this.logger.log(`❌ Review request ${reviewId} rechazada por ${actorId}`);

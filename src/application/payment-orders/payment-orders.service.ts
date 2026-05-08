@@ -14,6 +14,8 @@ import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { BridgeApiClient } from '../bridge/bridge-api.client';
 import { ClientBankAccountsService } from '../client-bank-accounts/client-bank-accounts.service';
 import { OrderReviewService } from './order-review.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/dto/notifications.dto';
 import {
   CreateInterbankOrderDto,
   InterbankFlowType,
@@ -57,6 +59,7 @@ export class PaymentOrdersService {
     private readonly bridgeApi: BridgeApiClient,
     private readonly bankAccountsService: ClientBankAccountsService,
     private readonly orderReviewService: OrderReviewService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ═══════════════════════════════════════════════
@@ -3551,6 +3554,17 @@ export class PaymentOrdersService {
 
     // 3. Vincular el payment_order_id a la review
     await this.orderReviewService.linkPaymentOrder(reviewId, (order as any).id);
+
+    // 4. Notificar al cliente
+    await this.notificationsService.sendNotification({
+      userId: review.user_id,
+      type: NotificationType.FINANCIAL,
+      title: 'Expediente aprobado',
+      message: `Tu solicitud de ${review.flow_type.replace(/_/g, ' ')} por ${review.amount} ${review.currency} fue aprobada. Tu expediente está en proceso.`,
+      link: `/panel/pagos/${(order as any).id}`,
+      referenceType: 'payment_order',
+      referenceId: (order as any).id,
+    });
 
     return { review, order };
   }
