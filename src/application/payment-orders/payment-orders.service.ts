@@ -89,44 +89,21 @@ export class PaymentOrdersService {
     }
   }
 
-  private getFlowFallbackCategory(flowType: string): 'INTERBANK' | 'RAMP' {
-    const interbankFlows = [
-      'bolivia_to_world',
-      'bolivia_to_wallet',
-      'wallet_to_wallet',
-      'world_to_bolivia',
-      'world_to_wallet',
-    ];
-    return interbankFlows.includes(flowType) ? 'INTERBANK' : 'RAMP';
-  }
-
-  // Límites globales desde app_settings (fallback 3-nivel)
+  // Límites globales desde app_settings — clave específica por servicio
   private async getGlobalLimits(
     flowType: string,
   ): Promise<{ flow_type: string; min_usd: number; max_usd: number }> {
     const serviceKey = flowType.toUpperCase();
-    const fallbackPrefix = this.getFlowFallbackCategory(flowType);
 
     const { data: rows } = await this.supabase
       .from('app_settings')
       .select('key, value')
-      .in('key', [
-        `MIN_${serviceKey}_USD`,
-        `MAX_${serviceKey}_USD`,
-        `MIN_${fallbackPrefix}_USD`,
-        `MAX_${fallbackPrefix}_USD`,
-      ]);
+      .in('key', [`MIN_${serviceKey}_USD`, `MAX_${serviceKey}_USD`]);
 
     const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value]));
 
-    const min = parseFloat(
-      map[`MIN_${serviceKey}_USD`] ?? map[`MIN_${fallbackPrefix}_USD`] ?? '0',
-    );
-    const max = parseFloat(
-      map[`MAX_${serviceKey}_USD`] ??
-        map[`MAX_${fallbackPrefix}_USD`] ??
-        '999999',
-    );
+    const min = parseFloat(map[`MIN_${serviceKey}_USD`] ?? '0');
+    const max = parseFloat(map[`MAX_${serviceKey}_USD`] ?? '999999');
 
     return { flow_type: flowType, min_usd: min, max_usd: max };
   }
@@ -149,7 +126,7 @@ export class PaymentOrdersService {
     return data ?? null;
   }
 
-  // Límites efectivos: override → global (por flow) → global (grupo) → hardcoded
+  // Límites efectivos: override personal → global por servicio → hardcoded
   async getPaymentLimits(
     flowType: string,
     userId?: string,
@@ -196,10 +173,6 @@ export class PaymentOrdersService {
           'MAX_BRIDGE_WALLET_TO_CRYPTO_USD',
           'MIN_BRIDGE_WALLET_TO_FIAT_US_USD',
           'MAX_BRIDGE_WALLET_TO_FIAT_US_USD',
-          'MIN_INTERBANK_USD',
-          'MAX_INTERBANK_USD',
-          'MIN_RAMP_USD',
-          'MAX_RAMP_USD',
         ]
           .map((k) => `key.eq.${k}`)
           .join(','),

@@ -567,11 +567,25 @@ export class AdminPaymentOrdersController {
 
   @Patch('limits/:key')
   @Roles('admin', 'super_admin')
-  @ApiOperation({ summary: 'Actualizar un límite de monto (MIN_* o MAX_*_USD)' })
+  @ApiOperation({ summary: 'Actualizar un límite de monto por servicio (MIN_* o MAX_*_USD)' })
   updateLimit(
     @Param('key') key: string,
     @Body() dto: { value: number },
   ) {
+    const ALLOWED_LIMIT_KEYS = new Set([
+      'MIN_BOLIVIA_TO_WORLD_USD',        'MAX_BOLIVIA_TO_WORLD_USD',
+      'MIN_BOLIVIA_TO_WALLET_USD',       'MAX_BOLIVIA_TO_WALLET_USD',
+      'MIN_WALLET_TO_WALLET_USD',        'MAX_WALLET_TO_WALLET_USD',
+      'MIN_WORLD_TO_BOLIVIA_USD',        'MAX_WORLD_TO_BOLIVIA_USD',
+      'MIN_FIAT_BO_TO_BRIDGE_WALLET_USD','MAX_FIAT_BO_TO_BRIDGE_WALLET_USD',
+      'MIN_CRYPTO_TO_BRIDGE_WALLET_USD', 'MAX_CRYPTO_TO_BRIDGE_WALLET_USD',
+      'MIN_BRIDGE_WALLET_TO_FIAT_BO_USD','MAX_BRIDGE_WALLET_TO_FIAT_BO_USD',
+      'MIN_BRIDGE_WALLET_TO_FIAT_US_USD','MAX_BRIDGE_WALLET_TO_FIAT_US_USD',
+      'MIN_BRIDGE_WALLET_TO_CRYPTO_USD', 'MAX_BRIDGE_WALLET_TO_CRYPTO_USD',
+    ]);
+    if (!ALLOWED_LIMIT_KEYS.has(key)) {
+      throw new BadRequestException(`Clave de límite no permitida: ${key}`);
+    }
     if (typeof dto.value !== 'number' || dto.value < 0) {
       throw new BadRequestException('value debe ser un número >= 0');
     }
