@@ -303,6 +303,101 @@ export class FeesService {
   }
 
   // ───────────────────────────────────────────────
+  //  Preview de fee — para estimación en UI
+  // ───────────────────────────────────────────────
+
+  /**
+   * Calcula el fee que se aplicaría a un usuario para una operación dada,
+   * sin crear ningún registro. Devuelve también si proviene de un override personal.
+   */
+  async previewFee(
+    userId: string,
+    operationType: string,
+    paymentRail: string,
+    amount: number,
+  ): Promise<{
+    fee_amount: number;
+    net_amount: number;
+    fee_type: string;
+    fee_percent: number;
+    fee_fixed: number;
+    min_fee: number;
+    max_fee: number;
+    is_override: boolean;
+  }> {
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data: override } = await this.supabase
+      .from('customer_fee_overrides')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('operation_type', operationType)
+      .eq('payment_rail', paymentRail)
+      .eq('is_active', true)
+      .or(`valid_from.is.null,valid_from.lte.${today}`)
+      .or(`valid_until.is.null,valid_until.gte.${today}`)
+      .maybeSingle();
+
+    let feeConfig = override;
+    let isOverride = !!override;
+
+    if (!feeConfig) {
+      const { data: globalFee } = await this.supabase
+        .from('fees_config')
+        .select('*')
+        .eq('operation_type', operationType)
+        .eq('payment_rail', paymentRail)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      feeConfig = globalFee;
+      isOverride = false;
+    }
+
+    if (!feeConfig) {
+      return {
+        fee_amount: 0,
+        net_amount: amount,
+        fee_type: 'percent',
+        fee_percent: 0,
+        fee_fixed: 0,
+        min_fee: 0,
+        max_fee: 0,
+        is_override: false,
+      };
+    }
+
+    const amountCents = Math.round(amount * 100);
+    const feePercent = parseFloat(feeConfig.fee_percent ?? '0');
+    const feeFixedCents = Math.round(parseFloat(feeConfig.fee_fixed ?? '0') * 100);
+
+    let feeCents = 0;
+    if (feeConfig.fee_type === 'percent') {
+      feeCents = Math.round((amountCents * feePercent) / 100);
+    } else if (feeConfig.fee_type === 'fixed') {
+      feeCents = feeFixedCents;
+    } else if (feeConfig.fee_type === 'mixed') {
+      feeCents = feeFixedCents + Math.round((amountCents * feePercent) / 100);
+    }
+
+    const minFeeCents = Math.round(parseFloat(feeConfig.min_fee ?? '0') * 100);
+    const maxFeeCents = Math.round(parseFloat(feeConfig.max_fee ?? '0') * 100);
+    if (minFeeCents > 0) feeCents = Math.max(feeCents, minFeeCents);
+    if (maxFeeCents > 0) feeCents = Math.min(feeCents, maxFeeCents);
+
+    return {
+      fee_amount: feeCents / 100,
+      net_amount: (amountCents - feeCents) / 100,
+      fee_type: feeConfig.fee_type ?? 'percent',
+      fee_percent: parseFloat(feeConfig.fee_percent ?? '0'),
+      fee_fixed: parseFloat(feeConfig.fee_fixed ?? '0'),
+      min_fee: parseFloat(feeConfig.min_fee ?? '0'),
+      max_fee: parseFloat(feeConfig.max_fee ?? '0'),
+      is_override: isOverride,
+    };
+  }
+
+  // ───────────────────────────────────────────────
   //  Servicio  interno — Cálculo de fee
   // ───────────────────────────────────────────────
 

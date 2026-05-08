@@ -6,8 +6,10 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   ParseUUIDPipe,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -42,6 +44,31 @@ export class FeesController {
   @ApiResponse({ status: 200, description: 'Tarifas activas' })
   getPublicFees() {
     return this.feesService.getPublicFees();
+  }
+
+  @Get('preview')
+  @ApiOperation({
+    summary: 'Previsualizar fee para el usuario autenticado',
+    description:
+      'Devuelve el fee que se aplicaría a la operación, considerando overrides personales. No crea ningún registro.',
+  })
+  @ApiResponse({ status: 200, description: 'Estimación de fee' })
+  previewFee(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('operation_type') operationType: string,
+    @Query('payment_rail') paymentRail: string,
+    @Query('amount') amountRaw: string,
+  ) {
+    if (!operationType || !paymentRail || !amountRaw) {
+      throw new BadRequestException(
+        'Se requieren los parámetros operation_type, payment_rail y amount.',
+      );
+    }
+    const amount = parseFloat(amountRaw);
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new BadRequestException('El parámetro amount debe ser un número positivo.');
+    }
+    return this.feesService.previewFee(user.id, operationType, paymentRail, amount);
   }
 }
 
