@@ -49,24 +49,40 @@ export class LedgerService {
     const offset = (page - 1) * limit;
     const safeLimit = Math.min(limit, 100);
 
-    // Ledger entries se vinculan al user vía wallets
+    // 1. Obtener wallet IDs del usuario
+    const { data: wallets, error: walletsError } = await this.supabase
+      .from('wallets')
+      .select('id')
+      .eq('user_id', userId);
+
+    if (walletsError) {
+      this.logger.error(
+        `Error obteniendo wallets para user ${userId}: ${walletsError.message}`,
+      );
+      throw new BadRequestException(walletsError.message);
+    }
+
+    const walletIds = wallets?.map((w) => w.id) ?? [];
+
+    // Si el usuario no tiene wallets, retornar vacío inmediatamente
+    if (walletIds.length === 0) {
+      this.logger.warn(`Usuario ${userId} no tiene wallets — ledger vacío`);
+      return {
+        entries: [],
+        pagination: { page, limit: safeLimit, total: 0, totalPages: 0 },
+      };
+    }
+
+    // 2. Construir query con filtros ANTES de paginación
     let query = this.supabase
       .from('ledger_entries')
       .select(
         'id, type, amount, currency, status, reference_type, reference_id, description, metadata, created_at, wallet_id',
         { count: 'exact' },
       )
-      .in(
-        'wallet_id',
-        // Subquery: obtener wallet_ids del usuario
-        (
-          await this.supabase.from('wallets').select('id').eq('user_id', userId)
-        ).data?.map((w) => w.id) ?? [],
-      )
-      .order('created_at', { ascending: false })
-      .range(offset, offset + safeLimit - 1);
+      .in('wallet_id', walletIds);
 
-    // Aplicar filtros
+    // Aplicar filtros de negocio
     if (filters.from) {
       query = query.gte('created_at', filters.from);
     }
@@ -83,9 +99,18 @@ export class LedgerService {
       query = query.eq('status', filters.status);
     }
 
+    // 3. Ordenar y paginar al final
+    query = query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + safeLimit - 1);
+
     const { data, error, count } = await query;
 
     if (error) throw new BadRequestException(error.message);
+
+    this.logger.debug(
+      `Ledger history: user=${userId}, wallets=${walletIds.length}, entries=${data?.length ?? 0}, total=${count ?? 0}, filters=${JSON.stringify(filters)}`,
+    );
 
     return {
       entries: data ?? [],
