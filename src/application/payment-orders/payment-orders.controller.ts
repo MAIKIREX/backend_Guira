@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -10,6 +11,7 @@ import {
   Res,
   StreamableFile,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -19,8 +21,9 @@ import {
 } from '@nestjs/swagger';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import { Roles } from '../../core/decorators/roles.decorator';
-import type { AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
+import { Public, type AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
 import { PaymentOrdersService } from './payment-orders.service';
+import { OrderReviewService } from './order-review.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { PsavService } from '../psav/psav.service';
 import { PdfService } from '../../core/pdf/pdf.service';
@@ -63,6 +66,7 @@ export class PaymentOrdersController {
     private readonly exportService: ExportService,
     private readonly profilesService: ProfilesService,
     private readonly walletsService: WalletsService,
+    private readonly orderReviewService: OrderReviewService,
   ) {}
 
   // ── Crear órdenes ──
@@ -73,7 +77,10 @@ export class PaymentOrdersController {
     @Body() dto: CreateInterbankOrderDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.paymentOrdersService.createInterbankOrder(user.id, dto);
+    const reviewContext = (dto as any).client_reason
+      ? { clientReason: (dto as any).client_reason, documentUrl: dto.supporting_document_url }
+      : undefined;
+    return this.paymentOrdersService.createInterbankOrder(user.id, dto, reviewContext);
   }
 
   @Post('wallet-ramp')
@@ -82,7 +89,10 @@ export class PaymentOrdersController {
     @Body() dto: CreateWalletRampOrderDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.paymentOrdersService.createWalletRampOrder(user.id, dto);
+    const reviewContext = (dto as any).client_reason
+      ? { clientReason: (dto as any).client_reason, documentUrl: dto.supporting_document_url }
+      : undefined;
+    return this.paymentOrdersService.createWalletRampOrder(user.id, dto, reviewContext);
   }
 
   // ── Consultas ──
@@ -106,6 +116,17 @@ export class PaymentOrdersController {
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
+  }
+
+  @Get('limits/:flow_type')
+  @ApiOperation({
+    summary: 'Límites de monto (min/max USD) para un flow_type — incluye override personal si existe',
+  })
+  getPaymentLimits(
+    @Param('flow_type') flow_type: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.paymentOrdersService.getPaymentLimits(flow_type, user.id);
   }
 
   @Get('route-catalog')
@@ -356,6 +377,32 @@ export class PaymentOrdersController {
   ) {
     return this.paymentOrdersService.cancelOrder(user.id, id);
   }
+
+  // ── Solicitudes de revisión por exceso de límite (cliente) ──
+
+  @Get('review-requests')
+  @ApiOperation({ summary: 'Listar mis solicitudes de revisión por exceso de límite' })
+  getMyReviews(@CurrentUser() user: AuthenticatedUser) {
+    return this.orderReviewService.getMyReviews(user.id);
+  }
+
+  @Get('review-requests/:id')
+  @ApiOperation({ summary: 'Detalle de una solicitud de revisión propia' })
+  getMyReview(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.orderReviewService.getMyReview(user.id, id);
+  }
+
+  @Delete('review-requests/:id')
+  @ApiOperation({ summary: 'Cancelar una solicitud de revisión pendiente' })
+  cancelReview(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.orderReviewService.cancelReview(user.id, id);
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -370,6 +417,7 @@ export class AdminPaymentOrdersController {
     private readonly paymentOrdersService: PaymentOrdersService,
     private readonly exchangeRatesService: ExchangeRatesService,
     private readonly psavService: PsavService,
+    private readonly orderReviewService: OrderReviewService,
   ) {}
 
   // ── Listados ──
@@ -508,6 +556,85 @@ export class AdminPaymentOrdersController {
     return this.psavService.updateAccount(id, dto as any);
   }
 
+  // ── Limits Admin ──
+
+  @Get('limits')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Listar todos los límites de monto por servicio' })
+  getAllLimits() {
+    return this.paymentOrdersService.getAllPaymentLimits();
+  }
+
+  @Patch('limits/:key')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Actualizar un límite de monto (MIN_* o MAX_*_USD)' })
+  updateLimit(
+    @Param('key') key: string,
+    @Body() dto: { value: number },
+  ) {
+    if (typeof dto.value !== 'number' || dto.value < 0) {
+      throw new BadRequestException('value debe ser un número >= 0');
+    }
+    return this.paymentOrdersService.updatePaymentLimit(key, dto.value);
+  }
+
+  // ── Limit Overrides por cliente ──
+
+  @Get('limit-overrides/:userId')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Listar overrides de límite de un cliente VIP' })
+  getLimitOverrides(@Param('userId', new ParseUUIDPipe()) userId: string) {
+    return this.paymentOrdersService.getLimitOverrides(userId);
+  }
+
+  @Post('limit-overrides')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Crear override de límite para un cliente VIP' })
+  createLimitOverride(
+    @Body() dto: {
+      user_id: string;
+      flow_type: string;
+      min_usd?: number | null;
+      max_usd?: number | null;
+      valid_from?: string;
+      valid_until?: string;
+      notes?: string;
+    },
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    if (!dto.user_id || !dto.flow_type) {
+      throw new BadRequestException('user_id y flow_type son requeridos');
+    }
+    return this.paymentOrdersService.createLimitOverride(dto, actor.id);
+  }
+
+  @Patch('limit-overrides/:id')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Actualizar override de límite (valores, is_active, valid_until, notes)' })
+  updateLimitOverride(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: {
+      min_usd?: number | null;
+      max_usd?: number | null;
+      is_active?: boolean;
+      valid_until?: string;
+      notes?: string;
+    },
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.paymentOrdersService.updateLimitOverride(id, dto, actor.id);
+  }
+
+  @Delete('limit-overrides/:id')
+  @Roles('super_admin')
+  @ApiOperation({ summary: 'Eliminar override de límite permanentemente (solo super_admin)' })
+  deleteLimitOverride(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.paymentOrdersService.deleteLimitOverride(id, actor.id);
+  }
+
   // ── Exchange Rates Admin ──
 
   @Get('exchange-rates')
@@ -535,5 +662,60 @@ export class AdminPaymentOrdersController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.exchangeRatesService.updateRate(pair, dto, user.id);
+  }
+
+  // ── Revisiones por exceso de límite (admin) ──
+
+  @Get('order-reviews')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Listar solicitudes de revisión por exceso de límite' })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'flow_type', required: false })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  listOrderReviews(
+    @Query('status') status?: string,
+    @Query('flow_type') flow_type?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.orderReviewService.listReviews({
+      status,
+      flow_type,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @Get('order-reviews/:id')
+  @Roles('staff', 'admin', 'super_admin')
+  @ApiOperation({ summary: 'Detalle de una solicitud de revisión' })
+  getOrderReview(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.orderReviewService.getReviewById(id);
+  }
+
+  @Post('order-reviews/:id/approve')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Aprobar solicitud: crea el expediente y lo vincula' })
+  approveOrderReview(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: { staff_notes?: string },
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.paymentOrdersService.createOrderFromReview(id, actor.id, dto.staff_notes);
+  }
+
+  @Post('order-reviews/:id/reject')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Rechazar solicitud de revisión' })
+  rejectOrderReview(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: { staff_notes: string },
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    if (!dto.staff_notes || dto.staff_notes.trim().length < 10) {
+      throw new BadRequestException('staff_notes es obligatorio (mínimo 10 caracteres)');
+    }
+    return this.orderReviewService.rejectReview(id, actor.id, dto.staff_notes);
   }
 }

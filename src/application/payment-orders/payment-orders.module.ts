@@ -4,6 +4,7 @@ import {
   AdminPaymentOrdersController,
 } from './payment-orders.controller';
 import { PaymentOrdersService } from './payment-orders.service';
+import { OrderReviewService } from './order-review.service';
 import { FeesModule } from '../fees/fees.module';
 import { PsavModule } from '../psav/psav.module';
 import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
@@ -27,8 +28,8 @@ import { WalletsModule } from '../wallets/wallets.module';
     WalletsModule,
   ],
   controllers: [PaymentOrdersController, AdminPaymentOrdersController],
-  providers: [PaymentOrdersService],
-  exports: [PaymentOrdersService],
+  providers: [PaymentOrdersService, OrderReviewService],
+  exports: [PaymentOrdersService, OrderReviewService],
 })
 export class PaymentOrdersModule {}
 

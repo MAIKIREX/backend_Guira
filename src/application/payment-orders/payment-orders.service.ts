@@ -13,6 +13,7 @@ import { PsavService } from '../psav/psav.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { BridgeApiClient } from '../bridge/bridge-api.client';
 import { ClientBankAccountsService } from '../client-bank-accounts/client-bank-accounts.service';
+import { OrderReviewService } from './order-review.service';
 import {
   CreateInterbankOrderDto,
   InterbankFlowType,
@@ -55,6 +56,7 @@ export class PaymentOrdersService {
     private readonly exchangeRatesService: ExchangeRatesService,
     private readonly bridgeApi: BridgeApiClient,
     private readonly bankAccountsService: ClientBankAccountsService,
+    private readonly orderReviewService: OrderReviewService,
   ) {}
 
   // ═══════════════════════════════════════════════
@@ -84,27 +86,154 @@ export class PaymentOrdersService {
     }
   }
 
-  private async validateAmountLimits(
+  private getFlowFallbackCategory(flowType: string): 'INTERBANK' | 'RAMP' {
+    const interbankFlows = [
+      'bolivia_to_world',
+      'bolivia_to_wallet',
+      'wallet_to_wallet',
+      'world_to_bolivia',
+      'world_to_wallet',
+    ];
+    return interbankFlows.includes(flowType) ? 'INTERBANK' : 'RAMP';
+  }
+
+  // Límites globales desde app_settings (fallback 3-nivel)
+  private async getGlobalLimits(
+    flowType: string,
+  ): Promise<{ flow_type: string; min_usd: number; max_usd: number }> {
+    const serviceKey = flowType.toUpperCase();
+    const fallbackPrefix = this.getFlowFallbackCategory(flowType);
+
+    const { data: rows } = await this.supabase
+      .from('app_settings')
+      .select('key, value')
+      .in('key', [
+        `MIN_${serviceKey}_USD`,
+        `MAX_${serviceKey}_USD`,
+        `MIN_${fallbackPrefix}_USD`,
+        `MAX_${fallbackPrefix}_USD`,
+      ]);
+
+    const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value]));
+
+    const min = parseFloat(
+      map[`MIN_${serviceKey}_USD`] ?? map[`MIN_${fallbackPrefix}_USD`] ?? '0',
+    );
+    const max = parseFloat(
+      map[`MAX_${serviceKey}_USD`] ??
+        map[`MAX_${fallbackPrefix}_USD`] ??
+        '999999',
+    );
+
+    return { flow_type: flowType, min_usd: min, max_usd: max };
+  }
+
+  // Override activo para un usuario: valid_from ≤ hoy ≤ valid_until (o null)
+  private async getActiveLimitOverride(
+    userId: string,
+    flowType: string,
+  ): Promise<{ min_usd: number | null; max_usd: number | null } | null> {
+    const today = new Date().toISOString().split('T')[0];
+    const { data } = await this.supabase
+      .from('customer_limit_overrides')
+      .select('min_usd, max_usd')
+      .eq('user_id', userId)
+      .eq('flow_type', flowType)
+      .eq('is_active', true)
+      .lte('valid_from', today)
+      .or(`valid_until.is.null,valid_until.gte.${today}`)
+      .maybeSingle();
+    return data ?? null;
+  }
+
+  // Límites efectivos: override → global (por flow) → global (grupo) → hardcoded
+  async getPaymentLimits(
+    flowType: string,
+    userId?: string,
+  ): Promise<{ flow_type: string; min_usd: number; max_usd: number }> {
+    const global = await this.getGlobalLimits(flowType);
+
+    if (userId) {
+      const override = await this.getActiveLimitOverride(userId, flowType);
+      if (override) {
+        return {
+          flow_type: flowType,
+          min_usd: override.min_usd ?? global.min_usd,
+          max_usd: override.max_usd ?? global.max_usd,
+        };
+      }
+    }
+
+    return global;
+  }
+
+  async getAllPaymentLimits(): Promise<
+    Array<{ key: string; value: number; description: string }>
+  > {
+    const { data, error } = await this.supabase
+      .from('app_settings')
+      .select('key, value, description')
+      .or(
+        [
+          'MIN_BOLIVIA_TO_WORLD_USD',
+          'MAX_BOLIVIA_TO_WORLD_USD',
+          'MIN_BOLIVIA_TO_WALLET_USD',
+          'MAX_BOLIVIA_TO_WALLET_USD',
+          'MIN_WALLET_TO_WALLET_USD',
+          'MAX_WALLET_TO_WALLET_USD',
+          'MIN_WORLD_TO_BOLIVIA_USD',
+          'MAX_WORLD_TO_BOLIVIA_USD',
+          'MIN_FIAT_BO_TO_BRIDGE_WALLET_USD',
+          'MAX_FIAT_BO_TO_BRIDGE_WALLET_USD',
+          'MIN_CRYPTO_TO_BRIDGE_WALLET_USD',
+          'MAX_CRYPTO_TO_BRIDGE_WALLET_USD',
+          'MIN_BRIDGE_WALLET_TO_FIAT_BO_USD',
+          'MAX_BRIDGE_WALLET_TO_FIAT_BO_USD',
+          'MIN_BRIDGE_WALLET_TO_CRYPTO_USD',
+          'MAX_BRIDGE_WALLET_TO_CRYPTO_USD',
+          'MIN_BRIDGE_WALLET_TO_FIAT_US_USD',
+          'MAX_BRIDGE_WALLET_TO_FIAT_US_USD',
+          'MIN_INTERBANK_USD',
+          'MAX_INTERBANK_USD',
+          'MIN_RAMP_USD',
+          'MAX_RAMP_USD',
+        ]
+          .map((k) => `key.eq.${k}`)
+          .join(','),
+      )
+      .order('key');
+
+    if (error) throw new BadRequestException(error.message);
+
+    return (data ?? []).map((r) => ({
+      key: r.key,
+      value: parseFloat(r.value),
+      description: r.description ?? '',
+    }));
+  }
+
+  async updatePaymentLimit(
+    key: string,
+    value: number,
+  ): Promise<{ key: string; value: number }> {
+    const { error } = await this.supabase
+      .from('app_settings')
+      .update({ value: String(value) })
+      .eq('key', key);
+
+    if (error) throw new BadRequestException(error.message);
+    return { key, value };
+  }
+
+  private async checkAmountLimits(
     amount: number,
-    category: 'interbank' | 'wallet_ramp',
+    flowType: string,
     currency?: string,
-  ): Promise<void> {
-    const prefix = category === 'interbank' ? 'INTERBANK' : 'RAMP';
-    const { data: minSetting } = await this.supabase
-      .from('app_settings')
-      .select('value')
-      .eq('key', `MIN_${prefix}_USD`)
-      .single();
-    const { data: maxSetting } = await this.supabase
-      .from('app_settings')
-      .select('value')
-      .eq('key', `MAX_${prefix}_USD`)
-      .single();
+    userId?: string,
+  ): Promise<{ amountUsd: number; min: number; max: number; exceeded: boolean }> {
+    const { min_usd: min, max_usd: max } =
+      await this.getPaymentLimits(flowType, userId);
 
-    const min = parseFloat(minSetting?.value ?? '0');
-    const max = parseFloat(maxSetting?.value ?? '999999');
-
-    // Normalizar el monto a USD para comparación justa.
     // BOB se convierte con el tipo de cambio actual.
     // Stablecoins (USDC, USDT, USDB, PYUSD, EURC) se tratan como ~1:1 USD.
     let amountUsd = amount;
@@ -114,18 +243,14 @@ export class PaymentOrdersService {
       const rateData = await this.exchangeRatesService.getRate('BOB_USD');
       amountUsd = parseFloat((amount / rateData.effective_rate).toFixed(2));
     }
-    // Para USD, USDC, USDT, USDB, PYUSD → amountUsd = amount (1:1)
 
     if (amountUsd < min) {
       throw new BadRequestException(
         `El monto mínimo es $${min} USD (tu monto equivale a ~$${amountUsd} USD)`,
       );
     }
-    if (amountUsd > max) {
-      throw new BadRequestException(
-        `El monto máximo es $${max} USD (tu monto equivale a ~$${amountUsd} USD)`,
-      );
-    }
+
+    return { amountUsd, min, max, exceeded: amountUsd > max };
   }
 
   private async getUserWallet(userId: string, walletId?: string) {
@@ -151,7 +276,11 @@ export class PaymentOrdersService {
   //  INTERBANK ORDERS (CATEGORY: interbank)
   // ═══════════════════════════════════════════════
 
-  async createInterbankOrder(userId: string, dto: CreateInterbankOrderDto) {
+  async createInterbankOrder(
+    userId: string,
+    dto: CreateInterbankOrderDto,
+    reviewContext?: { clientReason: string; documentUrl?: string },
+  ) {
     await this.validateRateLimit(userId);
 
     // Resolver la moneda de entrada para normalizar límites a USD
@@ -167,7 +296,28 @@ export class PaymentOrdersService {
       // WORLD_TO_BOLIVIA, WORLD_TO_WALLET → USD (default)
     }
 
-    await this.validateAmountLimits(dto.amount, 'interbank', inputCurrency);
+    const limitCheck = await this.checkAmountLimits(dto.amount, dto.flow_type, inputCurrency, userId);
+
+    if (limitCheck.exceeded) {
+      if (!reviewContext?.clientReason) {
+        throw new BadRequestException(
+          `El monto excede el límite máximo de $${limitCheck.max} USD. Envía una solicitud de revisión con el motivo de la operación.`,
+        );
+      }
+      const review = await this.orderReviewService.createReviewRequest({
+        userId,
+        flowType: dto.flow_type,
+        amount: dto.amount,
+        currency: inputCurrency,
+        amountUsdEquiv: limitCheck.amountUsd,
+        limitUsd: limitCheck.max,
+        excessUsd: parseFloat((limitCheck.amountUsd - limitCheck.max).toFixed(2)),
+        requestPayload: dto as unknown as Record<string, unknown>,
+        clientReason: reviewContext.clientReason,
+        documentUrl: reviewContext.documentUrl,
+      });
+      return { _type: 'review_request' as const, review };
+    }
 
     switch (dto.flow_type) {
       case InterbankFlowType.BOLIVIA_TO_WORLD:
@@ -731,7 +881,11 @@ export class PaymentOrdersService {
   //  WALLET RAMP ORDERS (CATEGORY: wallet_ramp)
   // ═══════════════════════════════════════════════
 
-  async createWalletRampOrder(userId: string, dto: CreateWalletRampOrderDto) {
+  async createWalletRampOrder(
+    userId: string,
+    dto: CreateWalletRampOrderDto,
+    reviewContext?: { clientReason: string; documentUrl?: string },
+  ) {
     await this.validateRateLimit(userId);
 
     // Resolver la moneda de entrada para normalizar límites a USD
@@ -750,7 +904,28 @@ export class PaymentOrdersService {
       // FIAT_US_TO_BRIDGE_WALLET → USD (default)
     }
 
-    await this.validateAmountLimits(dto.amount, 'wallet_ramp', inputCurrency);
+    const limitCheck = await this.checkAmountLimits(dto.amount, dto.flow_type, inputCurrency, userId);
+
+    if (limitCheck.exceeded) {
+      if (!reviewContext?.clientReason) {
+        throw new BadRequestException(
+          `El monto excede el límite máximo de $${limitCheck.max} USD. Envía una solicitud de revisión con el motivo de la operación.`,
+        );
+      }
+      const review = await this.orderReviewService.createReviewRequest({
+        userId,
+        flowType: dto.flow_type,
+        amount: dto.amount,
+        currency: inputCurrency,
+        amountUsdEquiv: limitCheck.amountUsd,
+        limitUsd: limitCheck.max,
+        excessUsd: parseFloat((limitCheck.amountUsd - limitCheck.max).toFixed(2)),
+        requestPayload: dto as unknown as Record<string, unknown>,
+        clientReason: reviewContext.clientReason,
+        documentUrl: reviewContext.documentUrl,
+      });
+      return { _type: 'review_request' as const, review };
+    }
 
     switch (dto.flow_type) {
       case WalletRampFlowType.FIAT_BO_TO_BRIDGE_WALLET:
@@ -3159,5 +3334,262 @@ export class PaymentOrdersService {
     }
 
     return updated;
+  }
+
+  // ═══════════════════════════════════════════════
+  //  CUSTOMER LIMIT OVERRIDES — CRUD Admin
+  // ═══════════════════════════════════════════════
+
+  /** Lista todos los overrides de límite de un usuario. */
+  async getLimitOverrides(userId: string) {
+    const { data, error } = await this.supabase
+      .from('customer_limit_overrides')
+      .select('*')
+      .eq('user_id', userId)
+      .order('flow_type');
+
+    if (error) throw new BadRequestException(error.message);
+    return data ?? [];
+  }
+
+  /** Crea un override de límite para un cliente VIP. */
+  async createLimitOverride(
+    dto: {
+      user_id: string;
+      flow_type: string;
+      min_usd?: number | null;
+      max_usd?: number | null;
+      valid_from?: string;
+      valid_until?: string;
+      notes?: string;
+    },
+    actorId: string,
+  ) {
+    // Verificar que no exista ya un override activo para (user_id, flow_type)
+    const today = new Date().toISOString().split('T')[0];
+    const { data: conflict } = await this.supabase
+      .from('customer_limit_overrides')
+      .select('id')
+      .eq('user_id', dto.user_id)
+      .eq('flow_type', dto.flow_type)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (conflict) {
+      throw new BadRequestException(
+        `Ya existe un override activo para el flujo "${dto.flow_type}". Desactívalo o elimínalo primero.`,
+      );
+    }
+
+    const { data, error } = await this.supabase
+      .from('customer_limit_overrides')
+      .insert({
+        ...dto,
+        valid_from: dto.valid_from ?? today,
+        is_active: true,
+        created_by: actorId,
+      })
+      .select()
+      .single();
+
+    if (error) throw new BadRequestException(error.message);
+
+    await this.supabase.from('audit_logs').insert({
+      actor_id: actorId,
+      action: 'limit_override_created',
+      entity_type: 'customer_limit_override',
+      entity_id: data.id,
+      details: {
+        user_id: dto.user_id,
+        flow_type: dto.flow_type,
+        min_usd: dto.min_usd,
+        max_usd: dto.max_usd,
+        valid_from: dto.valid_from ?? today,
+      },
+    });
+
+    return data;
+  }
+
+  /** Actualiza un override de límite existente. */
+  async updateLimitOverride(
+    overrideId: string,
+    dto: {
+      min_usd?: number | null;
+      max_usd?: number | null;
+      is_active?: boolean;
+      valid_until?: string;
+      notes?: string;
+    },
+    actorId: string,
+  ) {
+    const { data: current, error: findError } = await this.supabase
+      .from('customer_limit_overrides')
+      .select('*')
+      .eq('id', overrideId)
+      .single();
+
+    if (findError || !current)
+      throw new NotFoundException('Override de límite no encontrado');
+
+    // Si se está activando, verificar que no haya otro activo para el mismo (user_id, flow_type)
+    if (dto.is_active === true && !current.is_active) {
+      const { data: conflict } = await this.supabase
+        .from('customer_limit_overrides')
+        .select('id')
+        .eq('user_id', current.user_id)
+        .eq('flow_type', current.flow_type)
+        .eq('is_active', true)
+        .neq('id', overrideId)
+        .maybeSingle();
+
+      if (conflict) {
+        throw new BadRequestException(
+          `Ya existe un override activo para el flujo "${current.flow_type}". Desactívalo primero.`,
+        );
+      }
+    }
+
+    const { data, error } = await this.supabase
+      .from('customer_limit_overrides')
+      .update({ ...dto, updated_at: new Date().toISOString() })
+      .eq('id', overrideId)
+      .select()
+      .single();
+
+    if (error || !data)
+      throw new BadRequestException('No se pudo actualizar el override de límite');
+
+    await this.supabase.from('audit_logs').insert({
+      actor_id: actorId,
+      action: 'limit_override_updated',
+      entity_type: 'customer_limit_override',
+      entity_id: overrideId,
+      details: {
+        user_id: current.user_id,
+        flow_type: current.flow_type,
+        previous: { min_usd: current.min_usd, max_usd: current.max_usd, is_active: current.is_active },
+        updated: dto,
+      },
+    });
+
+    return data;
+  }
+
+  /** Elimina permanentemente un override de límite. Solo super_admin. */
+  async deleteLimitOverride(overrideId: string, actorId: string) {
+    const { data: current, error: findError } = await this.supabase
+      .from('customer_limit_overrides')
+      .select('*')
+      .eq('id', overrideId)
+      .single();
+
+    if (findError || !current)
+      throw new NotFoundException('Override de límite no encontrado');
+
+    const { error } = await this.supabase
+      .from('customer_limit_overrides')
+      .delete()
+      .eq('id', overrideId);
+
+    if (error) throw new BadRequestException('No se pudo eliminar el override de límite');
+
+    await this.supabase.from('audit_logs').insert({
+      actor_id: actorId,
+      action: 'limit_override_deleted',
+      entity_type: 'customer_limit_override',
+      entity_id: overrideId,
+      details: {
+        user_id: current.user_id,
+        flow_type: current.flow_type,
+        min_usd: current.min_usd,
+        max_usd: current.max_usd,
+      },
+    });
+  }
+
+  // ── Aprobar revisión → crear orden ───────────────────────────
+
+  /**
+   * Llamado por el controller admin al aprobar una review request.
+   * Recupera el payload guardado y llama al método de creación correspondiente
+   * sin pasar reviewContext (el límite se salta porque el staff ya aprobó).
+   * Para saltarlo de forma controlada, se fuerza el monto hacia el límite
+   * modificando el payload temporalmente usando un override interno.
+   */
+  async createOrderFromReview(
+    reviewId: string,
+    actorId: string,
+    staffNotes?: string,
+  ) {
+    // 1. Aprobar en la tabla (lock optimista)
+    const { review, payload } = await this.orderReviewService.approveReview(reviewId, actorId, staffNotes);
+
+    const flowType = review.flow_type;
+    const interbankFlows = [
+      'bolivia_to_world', 'bolivia_to_wallet', 'wallet_to_wallet', 'world_to_bolivia', 'world_to_wallet',
+    ];
+
+    let order: Record<string, unknown>;
+
+    // 2. Crear la orden saltando la validación de máximo (el staff ya aprobó)
+    //    Se usa un método privado interno que no revisa el límite superior.
+    try {
+      if (interbankFlows.includes(flowType)) {
+        order = await this.createInterbankOrderBypassLimit(review.user_id, payload as unknown as CreateInterbankOrderDto);
+      } else {
+        order = await this.createWalletRampOrderBypassLimit(review.user_id, payload as unknown as CreateWalletRampOrderDto);
+      }
+    } catch (err) {
+      // Si la creación falla, revertir la aprobación a pending_review para que pueda reintentarse
+      await this.supabase
+        .from('order_review_requests')
+        .update({ status: 'pending_review', reviewed_by: null, reviewed_at: null })
+        .eq('id', reviewId);
+      throw err;
+    }
+
+    // 3. Vincular el payment_order_id a la review
+    await this.orderReviewService.linkPaymentOrder(reviewId, (order as any).id);
+
+    return { review, order };
+  }
+
+  // Versión de createInterbankOrder que omite el check de límite máximo.
+  private async createInterbankOrderBypassLimit(userId: string, dto: CreateInterbankOrderDto) {
+    switch (dto.flow_type) {
+      case InterbankFlowType.BOLIVIA_TO_WORLD:
+        return this.createBoliviaToWorld(userId, dto);
+      case InterbankFlowType.WALLET_TO_WALLET:
+        return this.createWalletToWallet(userId, dto);
+      case InterbankFlowType.BOLIVIA_TO_WALLET:
+        return this.createBoliviaToWallet(userId, dto);
+      case InterbankFlowType.WORLD_TO_BOLIVIA:
+        return this.createWorldToBolivia(userId, dto);
+      case InterbankFlowType.WORLD_TO_WALLET:
+        return this.createWorldToWallet(userId, dto);
+      default:
+        throw new BadRequestException(`Flujo no soportado: ${dto.flow_type}`);
+    }
+  }
+
+  // Versión de createWalletRampOrder que omite el check de límite máximo.
+  private async createWalletRampOrderBypassLimit(userId: string, dto: CreateWalletRampOrderDto) {
+    switch (dto.flow_type) {
+      case WalletRampFlowType.FIAT_BO_TO_BRIDGE_WALLET:
+        return this.createFiatBoToBridgeWallet(userId, dto);
+      case WalletRampFlowType.CRYPTO_TO_BRIDGE_WALLET:
+        return this.createCryptoToBridgeWallet(userId, dto);
+      case WalletRampFlowType.FIAT_US_TO_BRIDGE_WALLET:
+        return this.createFiatUsToBridgeWallet(userId, dto);
+      case WalletRampFlowType.BRIDGE_WALLET_TO_FIAT_BO:
+        return this.createBridgeWalletToFiatBo(userId, dto);
+      case WalletRampFlowType.BRIDGE_WALLET_TO_CRYPTO:
+        return this.createBridgeWalletToCrypto(userId, dto);
+      case WalletRampFlowType.BRIDGE_WALLET_TO_FIAT_US:
+        return this.createBridgeWalletToFiatUs(userId, dto);
+      default:
+        throw new BadRequestException(`Flujo no soportado: ${dto.flow_type}`);
+    }
   }
 }
