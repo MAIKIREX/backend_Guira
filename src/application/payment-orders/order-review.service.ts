@@ -220,7 +220,7 @@ export class OrderReviewService {
 
     let query = this.supabase
       .from('order_review_requests')
-      .select('*, profiles:user_id(id, full_name, email)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(from, to);
 
@@ -230,18 +230,41 @@ export class OrderReviewService {
     const { data, error, count } = await query;
 
     if (error) throw new BadRequestException(error.message);
-    return { data: (data ?? []) as unknown as OrderReviewRequest[], total: count ?? 0 };
+
+    const rows = (data ?? []) as unknown as OrderReviewRequest[];
+
+    // Enrich with profile data (separate query — FK points to auth.users, not profiles)
+    const userIds = [...new Set(rows.map((r) => r.user_id))];
+    if (userIds.length > 0) {
+      const { data: profiles } = await this.supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .in('id', userIds);
+      const profileMap = new Map((profiles ?? []).map((p: any) => [p.id, p]));
+      rows.forEach((r: any) => { r.profiles = profileMap.get(r.user_id) ?? null; });
+    }
+
+    return { data: rows, total: count ?? 0 };
   }
 
   async getReviewById(reviewId: string): Promise<OrderReviewRequest> {
     const { data, error } = await this.supabase
       .from('order_review_requests')
-      .select('*, profiles:user_id(id, full_name, email)')
+      .select('*')
       .eq('id', reviewId)
       .single();
 
     if (error || !data) throw new NotFoundException('Solicitud de revisión no encontrada');
-    return data as unknown as OrderReviewRequest;
+
+    const row = data as any;
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('id, full_name, email')
+      .eq('id', row.user_id)
+      .single();
+    row.profiles = profile ?? null;
+
+    return row as unknown as OrderReviewRequest;
   }
 
   // ── Aprobar (staff) ───────────────────────────────────────────
