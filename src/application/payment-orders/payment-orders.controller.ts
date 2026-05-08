@@ -247,6 +247,22 @@ export class PaymentOrdersController {
     };
   }
 
+  @Get('my-flow-stats')
+  @ApiOperation({ summary: 'Flujos interbank del usuario agrupados por moneda (mapa del dashboard)' })
+  @ApiQuery({ name: 'month', required: false })
+  getMyFlowStats(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('month') month?: string,
+  ) {
+    return this.paymentOrdersService.getMyFlowStats(user.id, month);
+  }
+
+  @Get('my-flow-months')
+  @ApiOperation({ summary: 'Meses con transacciones interbank completadas del usuario' })
+  getMyFlowMonths(@CurrentUser() user: AuthenticatedUser) {
+    return this.paymentOrdersService.getMyFlowMonths(user.id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Detalle de una orden' })
   getOrderById(

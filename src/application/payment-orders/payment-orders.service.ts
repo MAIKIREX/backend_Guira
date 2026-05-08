@@ -2444,6 +2444,93 @@ export class PaymentOrdersService {
     return updated;
   }
 
+  // ── Flujos del usuario para mapa del dashboard ──
+
+  /** Flujos interbank del usuario agrupados por moneda — alimenta el mapa del dashboard. */
+  async getMyFlowStats(userId: string, month?: string) {
+    let query = this.supabase
+      .from('payment_orders')
+      .select(
+        'flow_type, destination_currency, currency, amount, created_at',
+      )
+      .eq('user_id', userId)
+      .eq('flow_category', 'interbank')
+      .in('flow_type', ['bolivia_to_world', 'world_to_bolivia'])
+      .eq('status', 'completed');
+
+    if (month) {
+      const start = new Date(`${month}-01T00:00:00.000Z`);
+      const end = new Date(start);
+      end.setMonth(end.getMonth() + 1);
+      query = query
+        .gte('created_at', start.toISOString())
+        .lt('created_at', end.toISOString());
+    }
+
+    const { data, error } = await query;
+    if (error) throw new BadRequestException(error.message);
+
+    const rows = data ?? [];
+
+    const buckets = new Map<
+      string,
+      {
+        flow_type: string;
+        destination_currency: string;
+        currency: string;
+        transaction_count: number;
+        total_amount: number;
+      }
+    >();
+
+    for (const row of rows) {
+      const destCurrency = (row.destination_currency ?? '').toUpperCase();
+      const srcCurrency = (row.currency ?? '').toUpperCase();
+      const key = `${row.flow_type}|${destCurrency}|${srcCurrency}`;
+      const existing = buckets.get(key);
+      if (existing) {
+        existing.transaction_count++;
+        existing.total_amount += parseFloat(row.amount ?? 0);
+      } else {
+        buckets.set(key, {
+          flow_type: row.flow_type,
+          destination_currency: destCurrency,
+          currency: srcCurrency,
+          transaction_count: 1,
+          total_amount: parseFloat(row.amount ?? 0),
+        });
+      }
+    }
+
+    return Array.from(buckets.values());
+  }
+
+  /** Meses con transacciones interbank completadas del usuario. */
+  async getMyFlowMonths(userId: string) {
+    const { data, error } = await this.supabase
+      .from('payment_orders')
+      .select('created_at')
+      .eq('user_id', userId)
+      .eq('flow_category', 'interbank')
+      .in('flow_type', ['bolivia_to_world', 'world_to_bolivia'])
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false });
+
+    if (error) throw new BadRequestException(error.message);
+
+    const months = new Set<string>();
+    for (const row of data ?? []) {
+      if (row.created_at) {
+        const d = new Date(row.created_at);
+        months.add(
+          `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`,
+        );
+      }
+    }
+
+    return Array.from(months).sort((a, b) => b.localeCompare(a));
+  }
+
   // ═══════════════════════════════════════════════
   //  ADMIN OPERATIONS
   // ═══════════════════════════════════════════════
