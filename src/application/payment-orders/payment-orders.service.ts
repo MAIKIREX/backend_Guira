@@ -1413,7 +1413,7 @@ export class PaymentOrdersService {
       !FIAT_BO_OFF_RAMP_SOURCE_CURRENCIES.includes(sourceCurrency.toLowerCase())
     ) {
       throw new BadRequestException(
-        `El token ${sourceCurrency} no está habilitado para retiro a Bolivia en este momento.`,
+        `El token ${sourceCurrency} no está habilitado para retiro a Bolivia. Tokens permitidos: ${FIAT_BO_OFF_RAMP_SOURCE_CURRENCIES.map((t) => t.toUpperCase()).join(', ')}.`,
       );
     }
 
@@ -1425,7 +1425,9 @@ export class PaymentOrdersService {
 
     if (!psavMatch) {
       throw new BadRequestException(
-        `No hay canal PSAV configurado compatible con ${sourceCurrency}. Contacta al administrador.`,
+        `No es posible retirar ${sourceCurrency} a Bolivia en este momento. ` +
+          `El operador PSAV no tiene habilitada una cuenta ${sourceCurrency} activa. ` +
+          `Por favor retira usando uno de los tokens disponibles o contacta al soporte.`,
       );
     }
 

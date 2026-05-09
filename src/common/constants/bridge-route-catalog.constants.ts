@@ -244,38 +244,39 @@ export const BRIDGE_RAMP_OFF_ROUTES: Record<
   string,
   Record<string, Record<string, number>>
 > = {
+  // Source: bridge_wallet (Solana). Multiple destination currencies per network.
   usdc: {
-    ethereum: { pyusd: 1, usdc: 1, usdt: 20 },
-    solana: { eurc: 1, pyusd: 1, usdb: 1, usdc: 1 },
-    tron: { usdt: 2 },
-    polygon: { usdc: 1 },
-    stellar: { usdc: 1 },
+    ethereum: { usdc: 1,  pyusd: 1,  usdt: 20 },
+    solana:   { usdc: 1,  eurc: 1,   pyusd: 1, usdb: 1 },
+    tron:     { usdt: 2 },
+    polygon:  { usdc: 1 },
+    stellar:  { usdc: 1 },
   },
   usdt: {
-    ethereum: { pyusd: 2, usdc: 2 },
-    solana: { usdb: 2, usdc: 2 },
-    tron: { usdt: 5 },
-    polygon: { usdc: 2 },
-    stellar: { usdc: 2 },
+    ethereum: { usdc: 2,  pyusd: 2 },
+    solana:   { usdc: 2,  usdb: 2 },
+    tron:     { usdt: 5 },
+    polygon:  { usdc: 2 },
+    stellar:  { usdc: 2 },
   },
   usdb: {
-    ethereum: { usdc: 1, usdt: 20 },
-    solana: { pyusd: 1, usdt: 20 },
-    tron: { usdt: 5 },
-    polygon: { usdc: 1 },
-    stellar: { usdc: 1 },
+    ethereum: { usdc: 1,  usdt: 20 },
+    solana:   { pyusd: 1, usdt: 20 },
+    tron:     { usdt: 5 },
+    polygon:  { usdc: 1 },
+    stellar:  { usdc: 1 },
   },
   pyusd: {
     ethereum: { pyusd: 1 },
-    solana: { usdc: 1, usdt: 20 },
-    polygon: { usdc: 1 },
-    stellar: { usdc: 1 },
+    solana:   { usdc: 1,  usdt: 20 },
+    polygon:  { usdc: 1 },
+    stellar:  { usdc: 1 },
   },
   eurc: {
-    ethereum: { eurc: 1, usdc: 1 },
-    solana: { eurc: 1, usdb: 1, usdc: 1 },
-    polygon: { usdc: 1 },
-    stellar: { usdc: 1 },
+    ethereum: { usdc: 1,  eurc: 1 },
+    solana:   { usdc: 1,  eurc: 1,  usdb: 1 },
+    polygon:  { usdc: 1 },
+    stellar:  { usdc: 1 },
   },
 };
 
@@ -307,23 +308,20 @@ export function getOffRampMinAmount(
 
 // ═══════════════════════════════════════════════════════════════════
 //  CATÁLOGO FIAT_BO OFF-RAMP (bridge_wallet_to_fiat_bo)
-//  Subconjunto de BRIDGE_RAMP_OFF_ROUTES filtrado a destinos PSAV
-//  posibles (USDC, USDT en Solana).
+//  Match estricto mismo token: el token origen en Bridge wallet debe
+//  coincidir exactamente con la divisa de la cuenta PSAV crypto.
 //
 //  Estructura: { [source_currency]: { [psav_network]: { [psav_currency]: min_amount } } }
 //
-//  Reglas aplicadas:
-//  - EURC excluido (Etapa 1 — requiere validación EUR→BOB)
-//  - Solo destinos que correspondan a divisas PSAV configurables
-//  - Derivado de lista_bridge_out.md
+//  Reglas:
+//  - USDC en Bridge wallet → PSAV USDC (Solana)
+//  - USDT en Bridge wallet → PSAV USDT (Solana)
+//  - Sin match → operación bloqueada con mensaje al usuario
 // ═══════════════════════════════════════════════════════════════════
-
-/** Tokens de origen excluidos para bridge_wallet_to_fiat_bo (Etapa 1) */
-export const FIAT_BO_EXCLUDED_SOURCE_CURRENCIES = ['eurc'] as const;
 
 /**
  * Rutas off-ramp válidas para bridge_wallet_to_fiat_bo.
- * Solo incluye destinos que pueden existir como PSAV crypto (USDC, USDT).
+ * Match estricto: source_currency debe igualar la divisa de la cuenta PSAV.
  * { [source_currency]: { [psav_network]: { [psav_currency]: min_amount } } }
  */
 export const FIAT_BO_OFF_RAMP_ROUTES: Record<
@@ -331,9 +329,7 @@ export const FIAT_BO_OFF_RAMP_ROUTES: Record<
   Record<string, Record<string, number>>
 > = {
   usdc: { solana: { usdc: 1 } },
-  usdt: { solana: { usdc: 2 } },
-  usdb: { solana: { usdt: 20 } },
-  pyusd: { solana: { usdc: 1, usdt: 20 } },
+  usdt: { tron:   { usdt: 5 } },
 };
 
 /** Tokens de origen válidos para fiat_bo off-ramp */
@@ -372,11 +368,10 @@ export function getFiatBoOffRampMinAmount(
 
 /**
  * Dado un token de origen y una lista de cuentas PSAV activas,
- * resuelve la mejor cuenta PSAV para la transferencia.
+ * resuelve la cuenta PSAV con divisa idéntica al token origen.
  *
- * Prioridad:
- *  1. Same-currency (source == psav.currency) — evita cross-currency swap
- *  2. Menor monto mínimo — menor fricción para el usuario
+ * Match estricto: USDT→PSAV USDT, USDC→PSAV USDC.
+ * No hay fallback cruzado — si no existe cuenta PSAV con esa divisa, retorna null.
  *
  * @returns { psavAccount, destCurrency, minAmount } o null si no hay ruta
  */
@@ -390,40 +385,19 @@ export function resolveFiatBoPsavMatch<
   const routes = FIAT_BO_OFF_RAMP_ROUTES[srcLower];
   if (!routes) return null;
 
-  type Candidate = {
-    psav: T;
-    destCurrency: string;
-    minAmount: number;
-    isSameCurrency: boolean;
-  };
-  const candidates: Candidate[] = [];
+  // Buscar cuenta PSAV con exactamente la misma divisa que el token origen
+  const psav = psavAccounts.find(
+    (a) => a.currency.toLowerCase() === srcLower,
+  );
+  if (!psav) return null;
 
-  for (const psav of psavAccounts) {
-    const psavNetwork = (psav.crypto_network ?? '').toLowerCase();
-    const psavCurrency = psav.currency.toLowerCase();
-    const minAmount = routes[psavNetwork]?.[psavCurrency] ?? 0;
-    if (minAmount > 0) {
-      candidates.push({
-        psav,
-        destCurrency: psav.currency,
-        minAmount,
-        isSameCurrency: srcLower === psavCurrency,
-      });
-    }
-  }
+  const psavNetwork = (psav.crypto_network ?? '').toLowerCase();
+  const minAmount = routes[psavNetwork]?.[srcLower] ?? 0;
+  if (minAmount === 0) return null;
 
-  if (candidates.length === 0) return null;
-
-  // Sort: same-currency first, then by lowest minAmount
-  candidates.sort((a, b) => {
-    if (a.isSameCurrency !== b.isSameCurrency) return a.isSameCurrency ? -1 : 1;
-    return a.minAmount - b.minAmount;
-  });
-
-  const best = candidates[0];
   return {
-    psavAccount: best.psav,
-    destCurrency: best.destCurrency,
-    minAmount: best.minAmount,
+    psavAccount: psav,
+    destCurrency: psav.currency,
+    minAmount,
   };
 }
