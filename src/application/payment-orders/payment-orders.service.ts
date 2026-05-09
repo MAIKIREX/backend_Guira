@@ -1766,15 +1766,6 @@ export class PaymentOrdersService {
         );
       }
 
-      // DIAGNÓSTICO TEMPORAL: dry_run para ruta USDT → Tron/USDT
-      // Bridge no ejecuta el transfer real; responde 200 OK para validar
-      // la estructura del payload. NO mover fondos reales con esta flag.
-      // Solo aplica para: source=usdt, dest_rail=tron, dest_currency=usdt.
-      // Remover cuando Bridge confirme soporte completo de la ruta en producción.
-      const isDryRunDiagnostic =
-        sourceCurrency.toLowerCase() === 'usdt' &&
-        destinationRail === 'tron' &&
-        destCurrency === 'usdt';
 
       const transferPayload = {
         on_behalf_of: profile?.bridge_customer_id,
@@ -1791,7 +1782,6 @@ export class PaymentOrdersService {
         amount: dto.amount.toFixed(2),
         developer_fee: fee_amount.toFixed(2),
         client_reference_id: order.id,
-        ...(isDryRunDiagnostic ? { dry_run: true } : {}),
       };
 
       console.log(
