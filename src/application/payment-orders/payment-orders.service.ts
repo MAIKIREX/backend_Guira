@@ -245,6 +245,11 @@ export class PaymentOrdersService {
     if (error || !data) {
       throw new NotFoundException('Wallet no encontrada para este usuario');
     }
+    if (!data.provider_wallet_id) {
+      throw new BadRequestException(
+        'La wallet seleccionada no está vinculada a Bridge. Por favor inicializa tus wallets primero.',
+      );
+    }
     return data;
   }
 
