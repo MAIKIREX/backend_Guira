@@ -29,7 +29,7 @@ export class WalletsService {
     const { data: wallets, error } = await this.supabase
       .from('wallets')
       .select(
-        'id, address, network, provider_key, label, is_active, created_at',
+        'id, address, network, provider_key, provider_wallet_id, label, is_active, created_at',
       )
       .eq('user_id', userId)
       .eq('is_active', true)
@@ -90,6 +90,7 @@ export class WalletsService {
         address: w.address,
         network: w.network,
         provider: w.provider_key ?? 'bridge',
+        provider_wallet_id: w.provider_wallet_id ?? null,
         label: w.label,
         is_active: w.is_active,
         created_at: w.created_at,
