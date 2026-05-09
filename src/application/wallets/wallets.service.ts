@@ -60,9 +60,7 @@ export class WalletsService {
 
     return wallets.map((w) => {
       // Obtener las currencies soportadas para esta wallet según su network
-      const supportedCurrencies = networkCurrenciesMap.get(w.network ?? '') ?? [
-        w.currency?.toUpperCase(),
-      ];
+      const supportedCurrencies = networkCurrenciesMap.get(w.network ?? '') ?? ['USDC'];
 
       // Filtrar balances que corresponden a las currencies soportadas en esta network
       const tokenBalances = supportedCurrencies.map((cur) => {
@@ -89,7 +87,6 @@ export class WalletsService {
 
       return {
         id: w.id,
-        currency: w.currency,
         address: w.address,
         network: w.network,
         provider: w.provider_key ?? 'bridge',
