@@ -69,6 +69,17 @@ export const FIAT_BO_ALLOWED_DESTINATION_CURRENCIES = [
 ] as const;
 
 /**
+ * Tokens de origen excluidos para fiat_bo_to_bridge_wallet.
+ * PSAV solo opera con USDC (Solana) y USDT (Ethereum/Tron) como fuentes crypto.
+ * usdb, pyusd y eurc no son soportados como fuente directa por PSAV.
+ */
+export const FIAT_BO_EXCLUDED_SOURCE_CURRENCIES = [
+  'usdb',
+  'pyusd',
+  'eurc',
+] as const;
+
+/**
  * Resuelve la red y moneda de origen del PSAV para fiat_bo_to_bridge_wallet.
  * Hardcoded Etapa 1 — PSAV opera en Solana (USDC) y Ethereum (USDT).
  *
