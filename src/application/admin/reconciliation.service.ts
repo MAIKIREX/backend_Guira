@@ -29,58 +29,60 @@ export class ReconciliationService {
       );
 
     // 2. Obtener todos los usuarios con wallets activas
-    const { data: users } = await this.supabase
+    const { data: wallets } = await this.supabase
       .from('wallets')
-      .select('user_id, id, currency')
-      .eq('status', 'active');
+      .select('user_id, id')
+      .eq('is_active', true);
 
     const discrepancies: any[] = [];
     let usersChecked = 0;
 
-    for (const wallet of users ?? []) {
+    for (const wallet of wallets ?? []) {
       try {
-        // 3. Obtener entradas del ledger totales (Crédito - Débito)
-        const { data: ledgerCredit } = await this.supabase
-          .from('ledger_entries')
-          .select('amount')
-          .eq('wallet_id', wallet.id)
-          .eq('type', 'credit')
-          .eq('status', 'settled');
-        const creditSum =
-          ledgerCredit?.reduce((acc, curr) => acc + Number(curr.amount), 0) ??
-          0;
-
-        const { data: ledgerDebit } = await this.supabase
-          .from('ledger_entries')
-          .select('amount')
-          .eq('wallet_id', wallet.id)
-          .eq('type', 'debit')
-          .eq('status', 'settled');
-        const debitSum =
-          ledgerDebit?.reduce((acc, curr) => acc + Number(curr.amount), 0) ?? 0;
-
-        const ledgerTotal = creditSum - debitSum;
-
-        // 4. Obtener saldo registrado real en tabla balances
-        const { data: balance } = await this.supabase
+        // 3. Obtener todas las monedas del usuario desde balances
+        const { data: userBalances } = await this.supabase
           .from('balances')
-          .select('amount')
-          .eq('user_id', wallet.user_id)
-          .eq('currency', wallet.currency)
-          .single();
+          .select('currency, amount')
+          .eq('user_id', wallet.user_id);
 
-        const balanceTotal = balance ? Number(balance.amount) : 0;
+        for (const userBalance of userBalances ?? []) {
+          const currency = userBalance.currency;
 
-        // Tolerancia a centavos de float math
-        if (Math.abs(ledgerTotal - balanceTotal) > 0.01) {
-          discrepancies.push({
-            user_id: wallet.user_id,
-            wallet_id: wallet.id,
-            currency: wallet.currency,
-            ledger_total: ledgerTotal,
-            balance_total: balanceTotal,
-            difference: ledgerTotal - balanceTotal,
-          });
+          // 4. Sumar entradas del ledger para este wallet + moneda
+          const { data: ledgerCredit } = await this.supabase
+            .from('ledger_entries')
+            .select('amount')
+            .eq('wallet_id', wallet.id)
+            .eq('currency', currency)
+            .eq('type', 'credit')
+            .eq('status', 'settled');
+
+          const { data: ledgerDebit } = await this.supabase
+            .from('ledger_entries')
+            .select('amount')
+            .eq('wallet_id', wallet.id)
+            .eq('currency', currency)
+            .eq('type', 'debit')
+            .eq('status', 'settled');
+
+          const creditSum =
+            ledgerCredit?.reduce((acc, curr) => acc + Number(curr.amount), 0) ?? 0;
+          const debitSum =
+            ledgerDebit?.reduce((acc, curr) => acc + Number(curr.amount), 0) ?? 0;
+          const ledgerTotal = creditSum - debitSum;
+          const balanceTotal = Number(userBalance.amount);
+
+          // Tolerancia a centavos de float math
+          if (Math.abs(ledgerTotal - balanceTotal) > 0.01) {
+            discrepancies.push({
+              user_id: wallet.user_id,
+              wallet_id: wallet.id,
+              currency,
+              ledger_total: ledgerTotal,
+              balance_total: balanceTotal,
+              difference: ledgerTotal - balanceTotal,
+            });
+          }
         }
         usersChecked++;
       } catch (err) {

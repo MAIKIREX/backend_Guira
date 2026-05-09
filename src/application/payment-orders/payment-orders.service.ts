@@ -232,7 +232,7 @@ export class PaymentOrdersService {
   private async getUserWallet(userId: string, walletId?: string) {
     const query = this.supabase
       .from('wallets')
-      .select('id, currency, network, address, provider_wallet_id')
+      .select('id, network, address, provider_wallet_id')
       .eq('user_id', userId)
       .eq('is_active', true);
 
@@ -835,7 +835,7 @@ export class PaymentOrdersService {
         fee_amount,
         net_amount,
         destination_type: 'bridge_wallet',
-        destination_currency: wallet.currency,
+        destination_currency: dto.destination_currency ?? 'usdc',
         supplier_id: dto.supplier_id ?? null,
         business_purpose: dto.business_purpose,
         supporting_document_url: dto.supporting_document_url,
@@ -935,7 +935,7 @@ export class PaymentOrdersService {
     const wallet = await this.getUserWallet(userId, dto.wallet_id);
 
     const resolvedFiatBoDest = (
-      dto.destination_currency ?? wallet.currency
+      dto.destination_currency ?? 'usdc'
     ).toLowerCase();
     if (!isValidFiatBoDestination(resolvedFiatBoDest)) {
       throw new BadRequestException(
@@ -1138,9 +1138,9 @@ export class PaymentOrdersService {
         'El usuario no tiene un bridge_customer_id configurado. Por favor, completa el registro.',
       );
     }
-    // ── Resolver moneda destino explícita (ya no se hereda de wallet.currency) ──
+    // ── Resolver moneda destino explícita ──
     const resolvedDestCurrency = (
-      dto.destination_currency ?? wallet.currency
+      dto.destination_currency ?? 'usdc'
     ).toLowerCase();
     const resolvedSourceCurrency = (
       dto.source_currency ?? 'usdc'
@@ -1256,7 +1256,7 @@ export class PaymentOrdersService {
         flow_category: 'wallet_ramp',
         requires_psav: false,
         amount: dto.amount ?? 0,
-        currency: (dto.source_currency ?? wallet.currency).toUpperCase(),
+        currency: (dto.source_currency ?? 'usdc').toUpperCase(),
         fee_amount,
         net_amount,
         source_type: 'crypto_external',
@@ -1361,7 +1361,7 @@ export class PaymentOrdersService {
         fee_amount,
         net_amount,
         destination_type: 'bridge_wallet',
-        destination_currency: wallet.currency,
+        destination_currency: dto.destination_currency ?? 'usdc',
         bridge_source_deposit_instructions: depositInstructions,
         notes: dto.notes,
         status: 'waiting_deposit',
@@ -1405,7 +1405,7 @@ export class PaymentOrdersService {
     );
 
     const sourceCurrency = (
-      dto.source_currency ?? wallet.currency
+      dto.source_currency ?? 'usdc'
     ).toUpperCase();
 
     // Validar token y ruta PSAV antes de tocar el saldo — sin coste de rollback si falla
@@ -1656,7 +1656,7 @@ export class PaymentOrdersService {
 
     // Verificar saldo del token específico
     const sourceCurrency = (
-      dto.source_currency ?? wallet.currency
+      dto.source_currency ?? 'usdc'
     ).toUpperCase();
     const { data: balance } = await this.supabase
       .from('balances')
@@ -1778,8 +1778,11 @@ export class PaymentOrdersService {
         client_reference_id: order.id,
       };
 
-      this.logger.log(
-        `🔍 Bridge Transfer payload (crypto): ${JSON.stringify(transferPayload)}`,
+      console.log(
+        '\n══════════ [bridge_wallet_to_crypto] PAYLOAD → Bridge API ══════════',
+        '\nPOST /v0/transfers',
+        '\n' + JSON.stringify(transferPayload, null, 2),
+        '\n════════════════════════════════════════════════════════════════════\n',
       );
 
       const idempotencyKey = `po_w2c_${order.id}`;
@@ -1787,6 +1790,12 @@ export class PaymentOrdersService {
         '/v0/transfers',
         transferPayload,
         idempotencyKey,
+      );
+
+      console.log(
+        '\n══════════ [bridge_wallet_to_crypto] RESPONSE ← Bridge API ════════',
+        '\n' + JSON.stringify(bridgeResult, null, 2),
+        '\n════════════════════════════════════════════════════════════════════\n',
       );
 
       const transferId = (bridgeResult?.id ?? null) as string | null;
@@ -1837,6 +1846,12 @@ export class PaymentOrdersService {
       order.status = 'processing';
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      console.log(
+        '\n══════════ [bridge_wallet_to_crypto] ERROR ← Bridge API ════════════',
+        '\nmessage:', message,
+        '\nraw:', err,
+        '\n════════════════════════════════════════════════════════════════════\n',
+      );
       // Revertir
       await this.supabase.rpc('release_reserved_balance', {
         p_user_id: userId,
@@ -1936,7 +1951,7 @@ export class PaymentOrdersService {
 
     // Verificar saldo del token específico
     const sourceCurrency = (
-      dto.source_currency ?? wallet.currency
+      dto.source_currency ?? 'usdc'
     ).toUpperCase();
     const { data: balance } = await this.supabase
       .from('balances')
@@ -2081,7 +2096,7 @@ export class PaymentOrdersService {
     }
 
     this.logger.log(
-      `📋 Orden bridge_wallet_to_fiat_us: ${order.id} — ${dto.amount} ${wallet.currency}→USD`,
+      `📋 Orden bridge_wallet_to_fiat_us: ${order.id} — ${dto.amount} ${sourceCurrency}→USD`,
     );
     return order;
   }

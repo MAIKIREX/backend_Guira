@@ -29,7 +29,7 @@ export class WalletsService {
     const { data: wallets, error } = await this.supabase
       .from('wallets')
       .select(
-        'id, currency, address, network, provider_key, label, is_active, created_at',
+        'id, address, network, provider_key, label, is_active, created_at',
       )
       .eq('user_id', userId)
       .eq('is_active', true)
@@ -234,7 +234,6 @@ export class WalletsService {
         const chainFromBridge = bridgeWallet.chain ?? wc.network;
         await this.supabase.from('wallets').insert({
           user_id: userId,
-          currency: wc.currencies[0]?.toUpperCase() ?? 'USDC',
           address: bridgeWallet.address,
           network: chainFromBridge,
           provider_key: 'bridge',
