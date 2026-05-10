@@ -58,7 +58,7 @@ export const BRIDGE_RAMP_ON_ROUTES: Record<
 
 /**
  * Tokens destino permitidos para fiat_bo_to_bridge_wallet.
- * PSAV envía USDC en Solana para usdc/usdb/pyusd/eurc, USDT en Ethereum para usdt.
+ * Cada token destino tiene su red origen directa (ver resolvePsavCryptoSource).
  */
 export const FIAT_BO_ALLOWED_DESTINATION_CURRENCIES = [
   'usdc',
@@ -70,30 +70,27 @@ export const FIAT_BO_ALLOWED_DESTINATION_CURRENCIES = [
 
 /**
  * Tokens de origen excluidos para fiat_bo_to_bridge_wallet.
- * PSAV solo opera con USDC (Solana) y USDT (Ethereum/Tron) como fuentes crypto.
- * usdb, pyusd y eurc no son soportados como fuente directa por PSAV.
+ * Con el nuevo flujo Etapa 2 todas las divisas tienen fuente directa:
+ * USDC/USDT/PYUSD/EURC → Ethereum, USDB → Tempo.
+ * No hay exclusiones vigentes.
  */
-export const FIAT_BO_EXCLUDED_SOURCE_CURRENCIES = [
-  'usdb',
-  'pyusd',
-  'eurc',
-] as const;
+export const FIAT_BO_EXCLUDED_SOURCE_CURRENCIES: readonly string[] = [];
 
 /**
  * Resuelve la red y moneda de origen del PSAV para fiat_bo_to_bridge_wallet.
- * Hardcoded Etapa 1 — PSAV opera en Solana (USDC) y Ethereum (USDT).
+ * Etapa 2 — cada divisa destino tiene red origen propia.
  *
- * destino usdt  → ethereum/usdt (único token disponible en Ethereum para PSAV)
- * resto         → solana/usdc   (usdc, usdb, pyusd, eurc)
+ * destino usdb  → tempo/usdb
+ * resto         → ethereum/{misma moneda}  (usdc, usdt, pyusd, eurc)
  */
 export function resolvePsavCryptoSource(destCurrency: string): {
   payment_rail: string;
   currency: string;
 } {
-  if (destCurrency.toLowerCase() === 'usdt') {
-    return { payment_rail: 'ethereum', currency: 'usdt' };
+  if (destCurrency.toLowerCase() === 'usdb') {
+    return { payment_rail: 'tempo', currency: 'usdb' };
   }
-  return { payment_rail: 'solana', currency: 'usdc' };
+  return { payment_rail: 'ethereum', currency: destCurrency.toLowerCase() };
 }
 
 /** Dado una red, retorna las monedas de origen válidas */

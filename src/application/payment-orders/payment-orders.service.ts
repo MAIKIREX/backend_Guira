@@ -33,9 +33,9 @@ import {
 } from './dto/admin-order-action.dto';
 import { ALLOWED_NETWORKS } from '../../common/constants/guira-crypto-config.constants';
 import {
-  isValidBridgeRampRoute,
+  isValidOnRampSourceForDest,
+  getMinAmountByDest,
   isValidFiatBoDestination,
-  getMinAmount,
   isValidOffRampRoute,
   getOffRampMinAmount,
   resolveFiatBoPsavMatch,
@@ -1160,10 +1160,10 @@ export class PaymentOrdersService {
 
     // ── Validar compatibilidad de ruta contra catálogo Bridge ──
     if (
-      !isValidBridgeRampRoute(
+      !isValidOnRampSourceForDest(
+        resolvedDestCurrency,
         resolvedSourceNetwork,
         resolvedSourceCurrency,
-        resolvedDestCurrency,
       )
     ) {
       throw new BadRequestException(
@@ -1172,7 +1172,8 @@ export class PaymentOrdersService {
     }
 
     // ── Validar monto mínimo según catálogo Bridge (solo si se envía monto) ──
-    const minAmount = getMinAmount(
+    const minAmount = getMinAmountByDest(
+      resolvedDestCurrency,
       resolvedSourceNetwork,
       resolvedSourceCurrency,
     );
@@ -1194,7 +1195,7 @@ export class PaymentOrdersService {
         {
           on_behalf_of: profile.bridge_customer_id,
           source: {
-            payment_rail: dto.source_network?.toLowerCase(),
+            payment_rail: resolvedSourceNetwork,
             currency: resolvedSourceCurrency,
           },
           destination: {
@@ -1265,9 +1266,9 @@ export class PaymentOrdersService {
         fee_amount,
         net_amount,
         source_type: 'crypto_external',
-        source_currency: (dto.source_currency ?? 'usdc').toUpperCase(),
+        source_currency: resolvedSourceCurrency.toUpperCase(),
         source_address: dto.source_address ?? null,
-        source_network: dto.source_network,
+        source_network: resolvedSourceNetwork,
         destination_type: 'bridge_wallet',
         destination_currency: resolvedDestCurrency.toUpperCase(),
         exchange_rate_applied: 1.0,
@@ -1275,7 +1276,7 @@ export class PaymentOrdersService {
         bridge_source_deposit_instructions: depositInstructions,
         notes:
           dto.notes ??
-          `On-ramp crypto flexible: ${(dto.source_currency ?? 'usdc').toUpperCase()} (${dto.source_network}) → Bridge Wallet`,
+          `On-ramp crypto flexible: ${resolvedSourceCurrency.toUpperCase()} (${resolvedSourceNetwork}) → Bridge Wallet`,
         business_purpose: dto.business_purpose,
         supporting_document_url: dto.supporting_document_url,
         status: 'waiting_deposit',
