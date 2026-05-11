@@ -107,6 +107,9 @@ export class CreateInterbankOrderDto {
   @ValidateIf((o) => o.flow_type === 'bolivia_to_wallet')
   @IsString()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toLowerCase() : value,
+  )
   @IsIn([...ALLOWED_NETWORKS], {
     message: `Red de destino no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}`,
   })

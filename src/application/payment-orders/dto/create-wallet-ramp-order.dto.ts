@@ -10,6 +10,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ALLOWED_NETWORKS,
@@ -70,6 +71,9 @@ export class CreateWalletRampOrderDto {
   @ValidateIf((o) => o.flow_type === 'bridge_wallet_to_crypto')
   @IsString()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toLowerCase() : value,
+  )
   @IsIn([...ALLOWED_NETWORKS], {
     message: `Red de destino no soportada. Redes permitidas: ${ALLOWED_NETWORKS.join(', ')}`,
   })
@@ -90,6 +94,9 @@ export class CreateWalletRampOrderDto {
   @IsNotEmpty({
     message: 'Debe especificar la moneda de destino (destination_currency)',
   })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toLowerCase() : value,
+  )
   @IsIn([...ALLOWED_CRYPTO_CURRENCIES], {
     message: `Moneda de destino no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}`,
   })
@@ -136,6 +143,9 @@ export class CreateWalletRampOrderDto {
   )
   @IsString()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toLowerCase() : value,
+  )
   @IsIn([...ALLOWED_NETWORKS, ...WALLET_TO_FIAT_ALLOWED_NETWORKS], {
     message: `Red de origen no soportada. Redes permitidas: ${[...ALLOWED_NETWORKS, ...WALLET_TO_FIAT_ALLOWED_NETWORKS].join(', ')}`,
   })
@@ -165,6 +175,9 @@ export class CreateWalletRampOrderDto {
   @IsNotEmpty({
     message: 'Debe especificar la moneda de origen (source_currency)',
   })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toLowerCase() : value,
+  )
   @IsIn([...ALLOWED_CRYPTO_CURRENCIES], {
     message: `Moneda de origen no soportada. Monedas permitidas: ${ALLOWED_CRYPTO_CURRENCIES.join(', ')}`,
   })
