@@ -1660,6 +1660,14 @@ export class PaymentOrdersService {
       dto.amount,
     );
 
+    // Obtener el porcentaje de fee para enviarlo a Bridge como developer_fee_percent
+    // (Bridge calcula el monto real; evita discrepancias de redondeo)
+    const feePercent = await this.feesService.getFeePercent(
+      userId,
+      'ramp_off_crypto',
+      'bridge',
+    );
+
     // Verificar saldo del token específico
     const sourceCurrency = (
       dto.source_currency ?? 'usdc'
@@ -1781,7 +1789,7 @@ export class PaymentOrdersService {
           to_address: dto.destination_address,
         },
         amount: dto.amount.toFixed(2),
-        developer_fee: fee_amount.toFixed(2),
+        developer_fee_percent: feePercent,
         client_reference_id: order.id,
       };
 
