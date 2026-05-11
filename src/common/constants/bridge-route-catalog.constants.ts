@@ -246,45 +246,36 @@ export function isValidOnRampSourceForDest(
 
 /**
  * Catálogo de rutas soportadas para off-ramp bridge_wallet_to_crypto.
+ * Solo rutas same-token (source_currency == destination_currency).
+ * Fuente: documentación Bridge — lista_filtrada_misma_moneda.md
  * { [source_currency]: { [dest_network]: { [dest_currency]: min_amount } } }
  */
 export const BRIDGE_RAMP_OFF_ROUTES: Record<
   string,
   Record<string, Record<string, number>>
 > = {
-  // Source: bridge_wallet (Solana). Multiple destination currencies per network.
+  // Source: bridge_wallet (Solana). Same-token only.
   usdc: {
-    ethereum: { usdc: 1,  pyusd: 1,  usdt: 20 },
-    solana:   { usdc: 1,  eurc: 1,   pyusd: 1, usdb: 1 },
-    tron:     { usdt: 2 },
+    ethereum: { usdc: 1 },
+    solana:   { usdc: 1 },
     polygon:  { usdc: 1 },
     stellar:  { usdc: 1 },
   },
   usdt: {
-    ethereum: { usdc: 2,  pyusd: 2 },
-    solana:   { usdc: 2,  usdb: 2 },
+    ethereum: { usdt: 20 },
+    solana:   { usdt: 20 },
     tron:     { usdt: 5 },
-    polygon:  { usdc: 2 },
-    stellar:  { usdc: 2 },
   },
   usdb: {
-    ethereum: { usdc: 1,  usdt: 20 },
-    solana:   { pyusd: 1, usdt: 20 },
-    tron:     { usdt: 5 },
-    polygon:  { usdc: 1 },
-    stellar:  { usdc: 1 },
+    solana: { usdb: 1 },
   },
   pyusd: {
     ethereum: { pyusd: 1 },
-    solana:   { usdc: 1,  usdt: 20 },
-    polygon:  { usdc: 1 },
-    stellar:  { usdc: 1 },
   },
   eurc: {
-    ethereum: { usdc: 1,  eurc: 1 },
-    solana:   { usdc: 1,  eurc: 1,  usdb: 1 },
-    polygon:  { usdc: 1 },
-    stellar:  { usdc: 1 },
+    ethereum: { eurc: 1 },
+    solana:   { eurc: 1 },
+    stellar:  { eurc: 1 },
   },
 };
 
