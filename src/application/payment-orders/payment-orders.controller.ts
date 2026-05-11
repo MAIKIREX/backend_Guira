@@ -129,6 +129,14 @@ export class PaymentOrdersController {
     return this.paymentOrdersService.getPaymentLimits(flow_type, user.id);
   }
 
+  @Get('active-exclusive')
+  @ApiOperation({
+    summary: 'Verificar si el usuario tiene un expediente exclusivo activo',
+  })
+  getActiveExclusiveOrder(@CurrentUser() user: AuthenticatedUser) {
+    return this.paymentOrdersService.getActiveExclusiveOrder(user.id);
+  }
+
   @Get('route-catalog')
   @ApiOperation({
     summary: 'Catálogo de rutas Bridge soportadas (on-ramp y off-ramp)',
