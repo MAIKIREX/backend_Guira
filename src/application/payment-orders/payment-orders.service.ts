@@ -860,6 +860,58 @@ export class PaymentOrdersService {
   }
 
   // ═══════════════════════════════════════════════
+  //  BLOQUEO PREVENTIVO: COLISIÓN DE LIQUIDATION ADDRESS
+  // ═══════════════════════════════════════════════
+
+  /**
+   * Verifica que el usuario no tenga otra orden on-ramp activa que
+   * compartiría la misma liquidation address en Bridge.
+   *
+   * Bridge reutiliza la dirección de depósito para el mismo customer +
+   * moneda + red.  Si hay dos transfers activas (awaiting_funds) con
+   * la misma dirección, Bridge puede asignar el depósito a la transfer
+   * equivocada.
+   *
+   * Cubre TODAS las monedas (USDC, USDT, EURC, PYUSD, USDB) y redes
+   * (ethereum, solana, polygon, tron, stellar, base, etc.).
+   */
+  private async assertNoConflictingOnRampOrder(
+    userId: string,
+    sourceCurrency: string,
+    sourceNetwork: string,
+  ): Promise<void> {
+    const normalizedCurrency = sourceCurrency.toUpperCase();
+    const normalizedNetwork = sourceNetwork.toLowerCase();
+
+    const { data: conflicting } = await this.supabase
+      .from('payment_orders')
+      .select('id, flow_type, created_at')
+      .eq('user_id', userId)
+      .eq('status', 'waiting_deposit')
+      .in('flow_type', [
+        'fiat_bo_to_bridge_wallet',
+        'crypto_to_bridge_wallet',
+      ])
+      .eq('source_network', normalizedNetwork)
+      .or(
+        `source_currency.eq.${normalizedCurrency},source_currency.is.null`,
+      )
+      .not('bridge_transfer_id', 'is', null)
+      .limit(1)
+      .maybeSingle();
+
+    if (conflicting) {
+      const shortId = conflicting.id.slice(0, 8);
+      throw new BadRequestException(
+        `Ya tienes un expediente pendiente de depósito (${shortId}) ` +
+          `que utiliza la misma dirección de recepción ` +
+          `(${normalizedCurrency} en ${normalizedNetwork}). ` +
+          `Completa o cancela ese expediente antes de crear uno nuevo.`,
+      );
+    }
+  }
+
+  // ═══════════════════════════════════════════════
   //  WALLET RAMP ORDERS (CATEGORY: wallet_ramp)
   // ═══════════════════════════════════════════════
 
@@ -979,6 +1031,13 @@ export class PaymentOrdersService {
 
     // ── Resolver fuente del PSAV según token destino ──
     const psavSource = resolvePsavCryptoSource(resolvedFiatBoDest);
+
+    // ── Bloqueo preventivo: evitar colisión de liquidation address ──
+    await this.assertNoConflictingOnRampOrder(
+      userId,
+      psavSource.currency,
+      psavSource.payment_rail,
+    );
 
     // ── Convertir montos BOB → USDC (estimado interno, no se envía a Bridge) ──
     // Con flexible_amount Bridge acepta cualquier monto; usamos el estimado solo para
@@ -1182,6 +1241,13 @@ export class PaymentOrdersService {
         `El monto mínimo para ${resolvedSourceCurrency.toUpperCase()} en ${resolvedSourceNetwork} es ${minAmount}.`,
       );
     }
+
+    // ── Bloqueo preventivo: evitar colisión de liquidation address ──
+    await this.assertNoConflictingOnRampOrder(
+      userId,
+      resolvedSourceCurrency,
+      resolvedSourceNetwork,
+    );
 
     // 1. Llamada a Bridge Transfer API
     // Pre-generar UUID para la orden — se reutiliza como idempotency key
