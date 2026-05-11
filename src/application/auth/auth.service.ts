@@ -26,8 +26,11 @@ export class AuthService {
    * El trigger `handle_new_user` crea automáticamente el perfil en `profiles`.
    */
   async register(dto: RegisterDto): Promise<AuthResponseDto> {
-    // ─── Verificar si el email ya existe en Supabase Auth ───
-    // Buscar directamente por email en vez de cargar toda la lista de usuarios.
+    // ─── El usuario ya fue creado en Supabase Auth por el frontend ───
+    // Este endpoint solo se encarga de verificar que existe y asegurar
+    // que el perfil (profiles) tenga full_name y datos iniciales.
+
+    // Buscar el usuario recién creado por email
     const { data: existingUsers } = await this.supabase.auth.admin.listUsers({
       page: 1,
       perPage: 1,
@@ -35,63 +38,32 @@ export class AuthService {
       filter: `email.eq.${dto.email.toLowerCase()}`,
     });
 
-    // Fallback robusto: buscar en la lista paginada si la API de filtro no está disponible
     const users =
-      (existingUsers as { users?: { email?: string }[] })?.users ?? [];
-    const emailExists = users.some(
+      (existingUsers as { users?: { id: string; email?: string }[] })?.users ?? [];
+    const existingUser = users.find(
       (u) => u.email?.toLowerCase() === dto.email.toLowerCase(),
     );
 
-    // También verificar en la tabla profiles (por si el trigger ya creó el perfil)
+    if (!existingUser) {
+      // Si no encontramos al usuario, puede que aún no se haya propagado
+      // o que el signup en Supabase haya fallado silenciosamente.
+      throw new ConflictException(
+        'No se encontró la cuenta en el sistema de autenticación. Por favor, intenta registrarte nuevamente.',
+      );
+    }
+
+    // Verificar si ya tiene un perfil completo (evitar duplicados)
     const { data: existingProfile } = await this.supabase
       .from('profiles')
-      .select('id')
-      .ilike('email', dto.email)
+      .select('id, full_name')
+      .eq('id', existingUser.id)
       .maybeSingle();
 
-    if (emailExists || existingProfile) {
-      throw new ConflictException(
-        'Ya existe una cuenta con este email. Si no completaste tu registro, intenta iniciar sesión o recuperar tu contraseña.',
-      );
-    }
-
-    // Crear usuario en Supabase Auth
-    const { data, error } = await this.supabase.auth.admin.createUser({
-      email: dto.email,
-      password: dto.password,
-      email_confirm: true, // Auto-confirmar para flujo del backend
-      user_metadata: {
-        full_name: dto.full_name,
-      },
-    });
-
-    if (error) {
-      this.logger.error(`Error creando usuario: ${error.message}`);
-      throw new ConflictException(error.message ?? 'Error al crear la cuenta');
-    }
-
-    // Actualizar full_name en profiles (el trigger solo inserta email y role)
-    await this.supabase
-      .from('profiles')
-      .update({ full_name: dto.full_name })
-      .eq('id', data.user.id);
-
-    // Generar tokens para el usuario recién creado
-    const { data: session, error: signInError } =
-      await this.supabase.auth.admin.generateLink({
-        type: 'magiclink',
-        email: dto.email,
-      });
-
-    // Si no podemos generar sesión, retornamos sin tokens
-    // El usuario podrá hacer login después
-    if (signInError || !session) {
-      this.logger.warn(
-        `Usuario creado pero no se pudo generar sesión: ${signInError?.message}`,
-      );
+    if (existingProfile && existingProfile.full_name) {
+      // El perfil ya está completo — posible llamada duplicada
       return {
-        user_id: data.user.id,
-        email: data.user.email ?? dto.email,
+        user_id: existingUser.id,
+        email: existingUser.email ?? dto.email,
         access_token: '',
         refresh_token: '',
         expires_in: 0,
@@ -99,10 +71,16 @@ export class AuthService {
       };
     }
 
+    // Actualizar full_name en profiles (el trigger handle_new_user ya insertó el registro base)
+    await this.supabase
+      .from('profiles')
+      .update({ full_name: dto.full_name })
+      .eq('id', existingUser.id);
+
     return {
-      user_id: data.user.id,
-      email: data.user.email ?? dto.email,
-      access_token: '', // El frontend usará signInWithPassword para obtener tokens
+      user_id: existingUser.id,
+      email: existingUser.email ?? dto.email,
+      access_token: '',
       refresh_token: '',
       expires_in: 0,
       onboarding_status: 'pending',
