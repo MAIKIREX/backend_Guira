@@ -2613,7 +2613,7 @@ export class PaymentOrdersService {
     const { data: order } = await this.supabase
       .from('payment_orders')
       .select(
-        'id, user_id, status, flow_type, amount, fee_amount, currency, wallet_id',
+        'id, user_id, status, flow_type, amount, fee_amount, currency, wallet_id, bridge_transfer_id',
       )
       .eq('id', orderId)
       .eq('user_id', userId)
@@ -2626,6 +2626,32 @@ export class PaymentOrdersService {
       throw new BadRequestException(
         `No se puede cancelar una orden en estado "${order.status}"`,
       );
+    }
+
+    // 0. Cancelar el transfer en Bridge (si existe y está en awaiting_funds)
+    // Bridge solo permite DELETE cuando el transfer está en awaiting_funds.
+    // Si falla (transfer ya procesado, Bridge caído, etc.) no bloqueamos
+    // la cancelación local — el usuario no debe quedar atrapado.
+    if (order.bridge_transfer_id) {
+      try {
+        await this.bridgeApi.delete(
+          `/v0/transfers/${order.bridge_transfer_id}`,
+        );
+        this.logger.log(
+          `🗑️ Transfer Bridge cancelado: ${order.bridge_transfer_id} (orden ${orderId})`,
+        );
+      } catch (err: any) {
+        // No lanzar — la cancelación en Guira debe proseguir
+        this.logger.warn(
+          `⚠️ No se pudo cancelar transfer Bridge ${order.bridge_transfer_id}: ${err?.message ?? err}`,
+        );
+      }
+
+      // Actualizar estado en bridge_transfers local
+      await this.supabase
+        .from('bridge_transfers')
+        .update({ status: 'cancelled', bridge_state: 'canceled' })
+        .eq('bridge_transfer_id', order.bridge_transfer_id);
     }
 
     // 1. Manejar ledger entries 'pending' de esta orden
