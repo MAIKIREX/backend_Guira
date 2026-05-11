@@ -263,7 +263,7 @@ export const BRIDGE_RAMP_OFF_ROUTES: Record<
   },
   usdt: {
     ethereum: { usdt: 20 },
-    solana:   { usdt: 20 },
+    solana:   { usdt: 5 },
     tron:     { usdt: 5 },
   },
   usdb: {
