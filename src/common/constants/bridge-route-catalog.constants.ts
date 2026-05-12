@@ -78,19 +78,25 @@ export const FIAT_BO_EXCLUDED_SOURCE_CURRENCIES: readonly string[] = [];
 
 /**
  * Resuelve la red y moneda de origen del PSAV para fiat_bo_to_bridge_wallet.
- * Etapa 2 — cada divisa destino tiene red origen propia.
+ * Cada divisa destino tiene red origen propia:
  *
- * destino usdb  → tempo/usdb
- * resto         → ethereum/{misma moneda}  (usdc, usdt, pyusd, eurc)
+ * usdb          → tempo/usdb
+ * usdc          → solana/usdc
+ * eurc          → solana/eurc
+ * resto         → ethereum/{misma moneda}  (usdt, pyusd)
  */
 export function resolvePsavCryptoSource(destCurrency: string): {
   payment_rail: string;
   currency: string;
 } {
-  if (destCurrency.toLowerCase() === 'usdb') {
+  const dest = destCurrency.toLowerCase();
+  if (dest === 'usdb') {
     return { payment_rail: 'tempo', currency: 'usdb' };
   }
-  return { payment_rail: 'ethereum', currency: destCurrency.toLowerCase() };
+  if (dest === 'usdc' || dest === 'eurc') {
+    return { payment_rail: 'solana', currency: dest };
+  }
+  return { payment_rail: 'ethereum', currency: dest };
 }
 
 /** Dado una red, retorna las monedas de origen válidas */
