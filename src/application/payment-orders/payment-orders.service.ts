@@ -264,12 +264,6 @@ export class PaymentOrdersService {
   ) {
     await this.validateRateLimit(userId);
 
-    // Bloqueo exclusivo: solo un expediente activo a la vez en los 5 servicios
-    const exclusiveInterbankFlows: string[] = ['bolivia_to_world', 'bolivia_to_wallet', 'wallet_to_wallet'];
-    if (exclusiveInterbankFlows.includes(dto.flow_type)) {
-      await this.assertNoActiveExclusiveOrder(userId);
-    }
-
     // Resolver la moneda de entrada para normalizar límites a USD
     let inputCurrency = 'USD';
     switch (dto.flow_type) {
@@ -866,65 +860,12 @@ export class PaymentOrdersService {
   }
 
   // ═══════════════════════════════════════════════
-  //  BLOQUEO EXCLUSIVO: UN SOLO EXPEDIENTE ACTIVO
+  //  COMPATIBILIDAD: BLOQUEO EXCLUSIVO DESACTIVADO
   // ═══════════════════════════════════════════════
 
   /**
-   * Lista de flow_types que participan en el bloqueo exclusivo.
-   * Mientras exista un expediente activo (no terminal) en cualquiera
-   * de estos flows, el usuario no puede crear otro.
-   */
-  private static readonly EXCLUSIVE_FLOW_TYPES = [
-    'bolivia_to_world',
-    'bolivia_to_wallet',
-    'wallet_to_wallet',
-    'fiat_bo_to_bridge_wallet',
-    'crypto_to_bridge_wallet',
-  ] as const;
-
-  private static readonly TERMINAL_STATUSES = [
-    'completed',
-    'failed',
-    'cancelled',
-    'refunded',
-  ] as const;
-
-  /**
-   * Verifica que el usuario no tenga un expediente activo en los
-   * 5 servicios exclusivos. Si lo tiene, lanza BadRequestException
-   * con el ID corto del expediente bloqueante.
-   */
-  private async assertNoActiveExclusiveOrder(
-    userId: string,
-  ): Promise<void> {
-    const { data: active } = await this.supabase
-      .from('payment_orders')
-      .select('id, flow_type, status, created_at')
-      .eq('user_id', userId)
-      .in('flow_type', [...PaymentOrdersService.EXCLUSIVE_FLOW_TYPES])
-      .not(
-        'status',
-        'in',
-        `(${PaymentOrdersService.TERMINAL_STATUSES.join(',')})`,
-      )
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (active) {
-      const shortId = active.id.slice(0, 8);
-      const flowLabel = active.flow_type.replace(/_/g, ' ');
-      throw new BadRequestException(
-        `Ya tienes un expediente activo (${shortId}) en el servicio "${flowLabel}" ` +
-          `con estado "${active.status}". ` +
-          `Completa o cancela ese expediente antes de crear uno nuevo en estos servicios.`,
-      );
-    }
-  }
-
-  /**
-   * Consulta pública: ¿el usuario tiene un expediente exclusivo activo?
-   * Usado por el frontend para mostrar un banner y deshabilitar la creación.
+   * Endpoint legado para clientes antiguos.
+   * El bloqueo general entre los 5 servicios fue desactivado.
    */
   async getActiveExclusiveOrder(
     userId: string,
@@ -937,23 +878,8 @@ export class PaymentOrdersService {
       created_at: string;
     };
   }> {
-    const { data: active } = await this.supabase
-      .from('payment_orders')
-      .select('id, flow_type, status, created_at')
-      .eq('user_id', userId)
-      .in('flow_type', [...PaymentOrdersService.EXCLUSIVE_FLOW_TYPES])
-      .not(
-        'status',
-        'in',
-        `(${PaymentOrdersService.TERMINAL_STATUSES.join(',')})`,
-      )
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    return active
-      ? { has_active: true, active_order: active }
-      : { has_active: false };
+    void userId;
+    return { has_active: false };
   }
 
   // ═══════════════════════════════════════════════
@@ -1018,12 +944,6 @@ export class PaymentOrdersService {
     reviewContext?: { clientReason: string; documentUrl?: string },
   ) {
     await this.validateRateLimit(userId);
-
-    // Bloqueo exclusivo: solo un expediente activo a la vez en los 5 servicios
-    const exclusiveRampFlows: string[] = ['fiat_bo_to_bridge_wallet', 'crypto_to_bridge_wallet'];
-    if (exclusiveRampFlows.includes(dto.flow_type)) {
-      await this.assertNoActiveExclusiveOrder(userId);
-    }
 
     // Resolver la moneda de entrada para normalizar límites a USD
     let inputCurrency = 'USD';
@@ -3779,11 +3699,6 @@ export class PaymentOrdersService {
 
   // Versión de createInterbankOrder que omite el check de límite máximo.
   private async createInterbankOrderBypassLimit(userId: string, dto: CreateInterbankOrderDto) {
-    // Bloqueo exclusivo también aplica desde revisiones aprobadas
-    const exclusiveInterbankFlows: string[] = ['bolivia_to_world', 'bolivia_to_wallet', 'wallet_to_wallet'];
-    if (exclusiveInterbankFlows.includes(dto.flow_type)) {
-      await this.assertNoActiveExclusiveOrder(userId);
-    }
     switch (dto.flow_type) {
       case InterbankFlowType.BOLIVIA_TO_WORLD:
         return this.createBoliviaToWorld(userId, dto);
@@ -3802,11 +3717,6 @@ export class PaymentOrdersService {
 
   // Versión de createWalletRampOrder que omite el check de límite máximo.
   private async createWalletRampOrderBypassLimit(userId: string, dto: CreateWalletRampOrderDto) {
-    // Bloqueo exclusivo también aplica desde revisiones aprobadas
-    const exclusiveRampFlows: string[] = ['fiat_bo_to_bridge_wallet', 'crypto_to_bridge_wallet'];
-    if (exclusiveRampFlows.includes(dto.flow_type)) {
-      await this.assertNoActiveExclusiveOrder(userId);
-    }
     switch (dto.flow_type) {
       case WalletRampFlowType.FIAT_BO_TO_BRIDGE_WALLET:
         return this.createFiatBoToBridgeWallet(userId, dto);
