@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import {
@@ -42,6 +43,17 @@ export class SuppliersController {
   @ApiOperation({ summary: 'Listar proveedores activos' })
   findAll(@CurrentUser() user: AuthenticatedUser) {
     return this.suppliersService.findAll(user.id);
+  }
+
+  @Get('check-duplicate')
+  @ApiOperation({ summary: 'Consultar rails ya registrados para un email' })
+  @ApiResponse({ status: 200, description: 'Rails usados por el email dado' })
+  checkDuplicate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('email') email: string,
+  ) {
+    if (!email) return { exists: false, usedRails: [], usedNetworks: [] };
+    return this.suppliersService.getExistingRailsForEmail(user.id, email);
   }
 
   @Get(':id')

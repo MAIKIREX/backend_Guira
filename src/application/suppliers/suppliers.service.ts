@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
@@ -33,9 +34,85 @@ export class SuppliersService {
     private readonly bridgeService: BridgeService,
   ) {}
 
+  /** Devuelve los rails ya registrados por un email para un usuario. */
+  async getExistingRailsForEmail(userId: string, email: string): Promise<{
+    exists: boolean;
+    supplierName?: string;
+    usedRails: string[];
+    usedNetworks: string[];
+  }> {
+    const { data } = await this.supabase
+      .from('suppliers')
+      .select('name, payment_rail, bank_details')
+      .eq('user_id', userId)
+      .eq('contact_email', email)
+      .eq('is_active', true);
+
+    if (!data || data.length === 0) {
+      return { exists: false, usedRails: [], usedNetworks: [] };
+    }
+
+    const usedRails = data
+      .filter((s) => s.payment_rail !== 'crypto')
+      .map((s) => s.payment_rail as string);
+
+    const usedNetworks = data
+      .filter((s) => s.payment_rail === 'crypto')
+      .map((s) => (s.bank_details as Record<string, string>)?.wallet_network)
+      .filter(Boolean) as string[];
+
+    return {
+      exists: true,
+      supplierName: data[0].name as string,
+      usedRails,
+      usedNetworks,
+    };
+  }
+
   /** Crea un proveedor para el usuario. */
   async create(userId: string, dto: CreateSupplierDto) {
     const isFiat = dto.payment_rail !== 'crypto';
+
+    // ── Verificar unicidad antes de llamar a Bridge ──────────────────
+    // Para fiat: un proveedor activo por (user_id, email, payment_rail)
+    // Para crypto: un proveedor activo por (user_id, email, wallet_network)
+    if (dto.contact_email) {
+      if (isFiat) {
+        const { data: existing } = await this.supabase
+          .from('suppliers')
+          .select('id, name')
+          .eq('user_id', userId)
+          .eq('contact_email', dto.contact_email)
+          .eq('payment_rail', dto.payment_rail)
+          .eq('is_active', true)
+          .maybeSingle();
+
+        if (existing) {
+          throw new ConflictException(
+            `El contacto "${dto.contact_email}" ya tiene una cuenta ${dto.payment_rail.toUpperCase()} registrada ` +
+              `(proveedor: "${(existing as any).name}"). Usa "Añadir método" en la agenda para agregar otro rail.`,
+          );
+        }
+      } else {
+        const walletNetwork = dto.wallet_network?.toLowerCase() ?? 'solana';
+        const { data: existing } = await this.supabase
+          .from('suppliers')
+          .select('id, name')
+          .eq('user_id', userId)
+          .eq('contact_email', dto.contact_email)
+          .eq('payment_rail', 'crypto')
+          .eq('is_active', true)
+          .filter('bank_details->>wallet_network', 'eq', walletNetwork)
+          .maybeSingle();
+
+        if (existing) {
+          throw new ConflictException(
+            `El contacto "${dto.contact_email}" ya tiene una dirección en la red ${walletNetwork} ` +
+              `(proveedor: "${(existing as any).name}"). Usa "Añadir método" para registrar otra red.`,
+          );
+        }
+      }
+    }
 
     let bridge_external_account_id: string | null = null;
     let bridge_liquidation_address_id: string | null = null;
@@ -196,7 +273,14 @@ export class SuppliersService {
       .select()
       .single();
 
-    if (error) throw new BadRequestException(error.message);
+    if (error) {
+      if (error.code === '23505') {
+        throw new ConflictException(
+          'Proveedor duplicado: ya existe un proveedor activo con este email y método de pago.',
+        );
+      }
+      throw new BadRequestException(error.message);
+    }
     return data;
   }
 
