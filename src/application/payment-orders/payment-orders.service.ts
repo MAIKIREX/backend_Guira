@@ -490,6 +490,13 @@ export class PaymentOrdersService {
       );
     }
 
+    // Bloqueo preventivo: evitar colision de liquidation address.
+    await this.assertNoConflictingBridgeDepositOrder(
+      userId,
+      dto.source_currency!,
+      dto.source_network!,
+    );
+
     const feePercent = await this.feesService.getFeePercent(
       userId,
       'interbank_w2w',
@@ -898,7 +905,7 @@ export class PaymentOrdersService {
    * Cubre TODAS las monedas (USDC, USDT, EURC, PYUSD, USDB) y redes
    * (ethereum, solana, polygon, tron, stellar, base, etc.).
    */
-  private async assertNoConflictingOnRampOrder(
+  private async assertNoConflictingBridgeDepositOrder(
     userId: string,
     sourceCurrency: string,
     sourceNetwork: string,
@@ -914,6 +921,7 @@ export class PaymentOrdersService {
       .in('flow_type', [
         'fiat_bo_to_bridge_wallet',
         'crypto_to_bridge_wallet',
+        'wallet_to_wallet',
       ])
       .eq('source_network', normalizedNetwork)
       .or(
@@ -1056,7 +1064,7 @@ export class PaymentOrdersService {
     const psavSource = resolvePsavCryptoSource(resolvedFiatBoDest);
 
     // ── Bloqueo preventivo: evitar colisión de liquidation address ──
-    await this.assertNoConflictingOnRampOrder(
+    await this.assertNoConflictingBridgeDepositOrder(
       userId,
       psavSource.currency,
       psavSource.payment_rail,
@@ -1266,7 +1274,7 @@ export class PaymentOrdersService {
     }
 
     // ── Bloqueo preventivo: evitar colisión de liquidation address ──
-    await this.assertNoConflictingOnRampOrder(
+    await this.assertNoConflictingBridgeDepositOrder(
       userId,
       resolvedSourceCurrency,
       resolvedSourceNetwork,
