@@ -336,6 +336,14 @@ export class PaymentOrdersService {
       throw new NotFoundException('Cuenta externa de destino no encontrada');
     }
 
+    // Bloquear si ya existe un expediente activo hacia la misma divisa destino
+    const destinationCurrency =
+      dto.destination_currency ?? extAccount.currency;
+    await this.assertNoConflictingBoliviaToWorldOrder(
+      userId,
+      destinationCurrency,
+    );
+
     // Obtener el número completo del JSON bank_details en la tabla 'suppliers'
     // y validar que el proveedor tenga una liquidation address configurada
     const { data: supplier } = await this.supabase
@@ -389,7 +397,7 @@ export class PaymentOrdersService {
         fee_amount,
         net_amount,
         destination_type: 'external_account',
-        destination_currency: dto.destination_currency ?? extAccount.currency,
+        destination_currency: destinationCurrency,
         external_account_id: dto.external_account_id,
         supplier_id: dto.supplier_id ?? null,
         destination_bank_name: extAccount.bank_name,
@@ -892,6 +900,43 @@ export class PaymentOrdersService {
   // ═══════════════════════════════════════════════
   //  BLOQUEO PREVENTIVO: COLISIÓN DE LIQUIDATION ADDRESS
   // ═══════════════════════════════════════════════
+
+  /**
+   * Verifica que el usuario no tenga ya un expediente bolivia_to_world
+   * activo hacia la misma divisa de destino.
+   *
+   * Se permite un solo expediente activo por divisa: un expediente en USD
+   * no bloquea crear uno en BRL o MXN, pero sí bloquea un segundo en USD.
+   *
+   * Estados considerados "activos": waiting_deposit, deposit_received,
+   * processing. Los estados terminales (completed, failed, cancelled) no
+   * bloquean.
+   */
+  private async assertNoConflictingBoliviaToWorldOrder(
+    userId: string,
+    destinationCurrency: string,
+  ): Promise<void> {
+    const normalizedCurrency = destinationCurrency.toUpperCase();
+
+    const { data: conflicting } = await this.supabase
+      .from('payment_orders')
+      .select('id, destination_currency, status, created_at')
+      .eq('user_id', userId)
+      .eq('flow_type', 'bolivia_to_world')
+      .eq('destination_currency', normalizedCurrency)
+      .in('status', ['waiting_deposit', 'deposit_received', 'processing'])
+      .limit(1)
+      .maybeSingle();
+
+    if (conflicting) {
+      const shortId = conflicting.id.slice(0, 8);
+      throw new BadRequestException(
+        `Ya tienes un expediente activo (${shortId}) hacia ${normalizedCurrency}. ` +
+          `Debes completar o cancelar ese expediente antes de crear uno nuevo ` +
+          `hacia la misma divisa.`,
+      );
+    }
+  }
 
   /**
    * Verifica que el usuario no tenga otra orden on-ramp activa que
