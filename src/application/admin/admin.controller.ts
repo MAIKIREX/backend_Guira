@@ -26,7 +26,7 @@ import { RolesGuard } from '../../core/guards/roles.guard';
 import { Roles } from '../../core/decorators/roles.decorator';
 import { CreateSettingDto, UpdateSettingDto } from './dto/admin.dto';
 
-// ── SETTINGS PUBLICOS (Sin Auth) ───────────────────────────────────
+// ── SETTINGS PÚBLICOS (Require auth, retorna solo settings con is_public=true) ──
 
 @ApiTags('Settings')
 @Controller('settings')

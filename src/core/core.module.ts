@@ -5,6 +5,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { CoreConfigModule } from './config/config.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { SupabaseAuthGuard } from './guards/supabase-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 import { PdfModule } from './pdf/pdf.module';
 
 @Module({
@@ -31,6 +32,13 @@ import { PdfModule } from './pdf/pdf.module';
     {
       provide: APP_GUARD,
       useClass: SupabaseAuthGuard,
+    },
+    // Guard global: verificación de roles — si el handler tiene @Roles(),
+    // se valida que el usuario tenga el rol requerido.
+    // Si no tiene @Roles(), permite acceso a cualquier usuario autenticado.
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
   ],
 })

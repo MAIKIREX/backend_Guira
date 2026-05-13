@@ -12,6 +12,7 @@ import {
   StreamableFile,
   BadRequestException,
   NotFoundException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,6 +22,7 @@ import {
 } from '@nestjs/swagger';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import { Roles } from '../../core/decorators/roles.decorator';
+import { RolesGuard } from '../../core/guards/roles.guard';
 import { Public, type AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
 import { PaymentOrdersService } from './payment-orders.service';
 import { OrderReviewService } from './order-review.service';
@@ -420,6 +422,7 @@ export class PaymentOrdersController {
 @ApiTags('Admin - Payment Orders')
 @ApiBearerAuth('supabase-jwt')
 @Controller('admin/payment-orders')
+@UseGuards(RolesGuard)
 export class AdminPaymentOrdersController {
   constructor(
     private readonly paymentOrdersService: PaymentOrdersService,
