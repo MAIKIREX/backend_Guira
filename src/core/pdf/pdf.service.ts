@@ -259,7 +259,7 @@ export class PdfService {
     }
 
     // ── On-ramps: fiat/crypto → bridge_wallet ────────────
-    else if (['fiat_bo_to_bridge_wallet', 'fiat_us_to_bridge_wallet', 'crypto_to_bridge_wallet'].includes(ft)) {
+    else if (['fiat_bo_to_bridge_wallet', 'crypto_to_bridge_wallet'].includes(ft)) {
       rows.push(
         this.row('Billetera Destino', this.toDisplay(clientWallet?.address)),
         this.row('Red Destino', this.toDisplay(clientWallet?.network)),
@@ -355,7 +355,7 @@ export class PdfService {
     if ([
       'crypto_to_bridge_wallet', 'bridge_wallet_to_crypto',
       'wallet_to_wallet', 'bolivia_to_wallet',
-      'fiat_bo_to_bridge_wallet', 'fiat_us_to_bridge_wallet',
+      'fiat_bo_to_bridge_wallet',
     ].includes(order.flow_type)) {
       // FIX: Do NOT fallback to order.currency — it can be 'BOB' for bolivia_to_wallet
       // which is the fiat origin, not the stablecoin destination.

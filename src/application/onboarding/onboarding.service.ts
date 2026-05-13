@@ -234,6 +234,7 @@ export class OnboardingService {
         updated_at: new Date().toISOString(),
         observations: null,
         field_observations: {},
+        previous_data: null,
       })
       .eq('id', app.id)
       .select()

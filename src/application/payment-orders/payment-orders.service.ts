@@ -1011,7 +1011,6 @@ export class PaymentOrdersService {
       case WalletRampFlowType.WALLET_TO_FIAT:
         inputCurrency = dto.source_currency?.toUpperCase() ?? 'USDC';
         break;
-      // FIAT_US_TO_BRIDGE_WALLET → USD (default)
     }
 
     const limitCheck = await this.checkAmountLimits(dto.amount, dto.flow_type, inputCurrency, userId);
@@ -1042,8 +1041,6 @@ export class PaymentOrdersService {
         return this.createFiatBoToBridgeWallet(userId, dto);
       case WalletRampFlowType.CRYPTO_TO_BRIDGE_WALLET:
         return this.createCryptoToBridgeWallet(userId, dto);
-      case WalletRampFlowType.FIAT_US_TO_BRIDGE_WALLET:
-        return this.createFiatUsToBridgeWallet(userId, dto);
       case WalletRampFlowType.BRIDGE_WALLET_TO_FIAT_BO:
         return this.createBridgeWalletToFiatBo(userId, dto);
       case WalletRampFlowType.BRIDGE_WALLET_TO_CRYPTO:
@@ -1443,84 +1440,6 @@ export class PaymentOrdersService {
 
     this.logger.log(
       `📋 Orden crypto_to_bridge_wallet: ${order.id} — flexible_amount (fee_percent: ${feePercent}%)`,
-    );
-    return order;
-  }
-
-  /**
-   * 2.3 Fiat US → Wallet Bridge (Virtual Account)
-   * Wire/ACH → Bridge Virtual Account → wallet Bridge
-   */
-  private async createFiatUsToBridgeWallet(
-    userId: string,
-    dto: CreateWalletRampOrderDto,
-  ) {
-    const wallet = await this.getUserWallet(userId);
-
-    // Obtener y validar instrucciones del VA
-    if (!dto.virtual_account_id) {
-      throw new BadRequestException(
-        'virtual_account_id es requerido para el flujo fiat_us_to_bridge_wallet',
-      );
-    }
-
-    const { data: va, error: vaError } = await this.supabase
-      .from('bridge_virtual_accounts')
-      .select('*')
-      .eq('id', dto.virtual_account_id)
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .single();
-
-    if (vaError || !va) {
-      throw new BadRequestException(
-        'Virtual Account no encontrada, inactiva o no pertenece al usuario',
-      );
-    }
-
-    const depositInstructions: Record<string, unknown> = {
-      type: 'virtual_account',
-      label: `Cuenta bancaria VA (${va.source_currency?.toUpperCase() ?? 'USD'})`,
-      account_name: va.account_name,
-      beneficiary_name: va.beneficiary_name,
-      account_number: va.account_number,
-      routing_number: va.routing_number,
-      bank_name: va.bank_name,
-      source_currency: va.source_currency,
-    };
-
-    const { fee_amount, net_amount } = await this.feesService.calculateFee(
-      userId,
-      'ramp_on_fiat_us',
-      'bridge',
-      dto.amount,
-    );
-
-    const { data: order, error } = await this.supabase
-      .from('payment_orders')
-      .insert({
-        user_id: userId,
-        wallet_id: wallet.id,
-        flow_type: 'fiat_us_to_bridge_wallet',
-        flow_category: 'wallet_ramp',
-        requires_psav: false,
-        amount: dto.amount,
-        currency: 'USD',
-        fee_amount,
-        net_amount,
-        destination_type: 'bridge_wallet',
-        destination_currency: dto.destination_currency ?? 'usdc',
-        bridge_source_deposit_instructions: depositInstructions,
-        notes: dto.notes,
-        status: 'waiting_deposit',
-      })
-      .select()
-      .single();
-
-    if (error) throw new BadRequestException(error.message);
-
-    this.logger.log(
-      `📋 Orden fiat_us_to_bridge_wallet: ${order.id} — $${dto.amount} USD`,
     );
     return order;
   }
@@ -3775,8 +3694,6 @@ export class PaymentOrdersService {
         return this.createFiatBoToBridgeWallet(userId, dto);
       case WalletRampFlowType.CRYPTO_TO_BRIDGE_WALLET:
         return this.createCryptoToBridgeWallet(userId, dto);
-      case WalletRampFlowType.FIAT_US_TO_BRIDGE_WALLET:
-        return this.createFiatUsToBridgeWallet(userId, dto);
       case WalletRampFlowType.BRIDGE_WALLET_TO_FIAT_BO:
         return this.createBridgeWalletToFiatBo(userId, dto);
       case WalletRampFlowType.BRIDGE_WALLET_TO_CRYPTO:

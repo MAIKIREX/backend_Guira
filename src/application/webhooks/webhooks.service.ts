@@ -1643,7 +1643,6 @@ export class WebhooksService {
         // crear uno settled directamente para que el trigger actualice balances
         const onRampFlows = [
           'crypto_to_bridge_wallet',
-          'fiat_us_to_bridge_wallet',
           'fiat_bo_to_bridge_wallet',
         ];
         if (
@@ -2453,6 +2452,32 @@ export class WebhooksService {
           checkObj.status !== 'passed'
         ) {
           issues.push(`${checkObj.type ?? 'check'}: ${checkObj.status}`);
+        }
+      }
+    }
+
+    // Formato 5: endorsements[*].requirements.issues[]
+    // Bridge coloca las razones de rechazo (ej. duplicate_customer_detected)
+    // dentro de cada endorsement, no en el top-level del event_object.
+    if (Array.isArray(eventObject.endorsements)) {
+      for (const endorsement of eventObject.endorsements) {
+        const endObj = endorsement as Record<string, unknown>;
+        const requirements = endObj.requirements as
+          | Record<string, unknown>
+          | undefined;
+        if (requirements && Array.isArray(requirements.issues)) {
+          for (const issue of requirements.issues) {
+            if (typeof issue === 'string' && !issues.includes(issue)) {
+              issues.push(issue);
+            } else if (typeof issue === 'object' && issue !== null) {
+              const issueObj = issue as Record<string, unknown>;
+              const msg = (issueObj.message ??
+                issueObj.type ??
+                issueObj.code ??
+                JSON.stringify(issue)) as string;
+              if (!issues.includes(msg)) issues.push(msg);
+            }
+          }
         }
       }
     }

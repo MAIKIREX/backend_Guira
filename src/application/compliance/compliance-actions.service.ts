@@ -467,7 +467,23 @@ export class ComplianceActionsService {
       `Bridge rechazó cuenta para user ${userId} — issues: ${issues.join(', ')}`,
     );
 
-    // 1. Actualizar kyc/kyb application
+    // 1. Idempotency Check & Profile Data
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('onboarding_status, full_name, email')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (!profile) return;
+
+    if (profile.onboarding_status === 'bridge_rejected') {
+      this.logger.log(
+        `Usuario ${userId} ya estaba marcado como bridge_rejected. Ignorando webhook duplicado.`,
+      );
+      return;
+    }
+
+    // 2. Actualizar kyc/kyb application
     const { data: kycApp } = await this.supabase
       .from('kyc_applications')
       .select('id')
@@ -518,13 +534,7 @@ export class ComplianceActionsService {
       .in('role', ['staff', 'admin', 'super_admin'])
       .eq('is_active', true);
 
-    const { data: profile } = await this.supabase
-      .from('profiles')
-      .select('full_name, email')
-      .eq('id', userId)
-      .maybeSingle();
-
-    const clientName = profile?.full_name ?? profile?.email ?? userId;
+    const clientName = profile.full_name ?? profile.email ?? userId;
 
     for (const staff of staffUsers ?? []) {
       await this.supabase.from('notifications').insert({
@@ -766,11 +776,14 @@ export class ComplianceActionsService {
       const actionsMsg = requiredActions?.length
         ? `\n\nAcciones requeridas: ${requiredActions.join(', ')}`
         : '';
+      const fieldsMsg = fieldObservations && Object.keys(fieldObservations).length > 0
+        ? `\n\nCampos a corregir: ${Object.keys(fieldObservations).join(', ')}`
+        : '';
       await this.supabase.from('notifications').insert({
         user_id: userIdNotified,
         type: 'alert',
         title: 'Se requieren correcciones',
-        message: `Su expediente necesita correcciones. ${reason}${actionsMsg}`,
+        message: `Su expediente necesita correcciones. ${reason}${actionsMsg}${fieldsMsg}`,
       });
     }
 

@@ -30,7 +30,6 @@ export const WALLET_TO_FIAT_ALLOWED_NETWORKS = [
 export enum WalletRampFlowType {
   FIAT_BO_TO_BRIDGE_WALLET = 'fiat_bo_to_bridge_wallet',
   CRYPTO_TO_BRIDGE_WALLET = 'crypto_to_bridge_wallet',
-  FIAT_US_TO_BRIDGE_WALLET = 'fiat_us_to_bridge_wallet',
   BRIDGE_WALLET_TO_FIAT_BO = 'bridge_wallet_to_fiat_bo',
   BRIDGE_WALLET_TO_CRYPTO = 'bridge_wallet_to_crypto',
   BRIDGE_WALLET_TO_FIAT_US = 'bridge_wallet_to_fiat_us',
@@ -48,17 +47,10 @@ export class CreateWalletRampOrderDto {
   @Min(0.01)
   amount: number;
 
-  // ── wallet_id: requerido para la mayoría de flujos rampa ──
+  // ── wallet_id: requerido para todos los flujos rampa ──
   @ApiPropertyOptional()
-  @ValidateIf((o) => o.flow_type !== 'fiat_us_to_bridge_wallet')
   @IsUUID()
   wallet_id?: string;
-
-  // ── virtual_account_id: solo fiat_us_to_bridge_wallet ──
-  @ApiPropertyOptional()
-  @ValidateIf((o) => o.flow_type === 'fiat_us_to_bridge_wallet')
-  @IsUUID()
-  virtual_account_id?: string;
 
   // ── destino crypto (bridge_wallet_to_crypto) ──
   @ApiPropertyOptional()
