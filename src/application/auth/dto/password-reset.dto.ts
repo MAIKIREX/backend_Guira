@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, IsStrongPassword } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ForgotPasswordDto {
@@ -14,11 +14,24 @@ export class ForgotPasswordDto {
 export class ResetPasswordDto {
   @ApiProperty({
     example: 'NewSecurePass123!',
-    description: 'Nueva contraseña del usuario (mínimo 8 caracteres)',
+    description:
+      'Nueva contraseña (mínimo 8 caracteres, 1 mayúscula, 1 minúscula, 1 número)',
     minLength: 8,
   })
   @IsString()
   @IsNotEmpty({ message: 'La nueva contraseña es requerida' })
-  @MinLength(8, { message: 'La contraseña debe tener al menos 8 caracteres' })
+  @IsStrongPassword(
+    {
+      minLength: 8,
+      minLowercase: 1,
+      minUppercase: 1,
+      minNumbers: 1,
+      minSymbols: 0, // No exigimos símbolo para evitar fricción excesiva
+    },
+    {
+      message:
+        'La contraseña debe tener al menos 8 caracteres, 1 mayúscula, 1 minúscula y 1 número',
+    },
+  )
   new_password: string;
 }

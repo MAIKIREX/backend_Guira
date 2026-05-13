@@ -61,32 +61,37 @@ async function bootstrap() {
 
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
 
-  // Swagger — accesible en /{prefix}/docs
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Guira API')
-    .setDescription('API de la plataforma financiera Guira')
-    .setVersion('2.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description:
-          'Token JWT de Supabase Auth (Authorization: Bearer <token>)',
-      },
-      'supabase-jwt',
-    )
-    .build();
-
-  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('docs', app, swaggerDocument, {
-    useGlobalPrefix: true,
-    swaggerOptions: { persistAuthorization: true },
-    jsonDocumentUrl: 'swagger/json',
-  });
-
   // Render inyecta PORT automáticamente; default 3000 para producción
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
+
+  // Swagger — solo disponible en desarrollo y staging (no en producción)
+  // En producción, /api/docs y /api/swagger/json devuelven 404.
+  if (process.env.NODE_ENV !== 'production') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Guira API')
+      .setDescription('API de la plataforma financiera Guira')
+      .setVersion('2.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description:
+            'Token JWT de Supabase Auth (Authorization: Bearer <token>)',
+        },
+        'supabase-jwt',
+      )
+      .build();
+
+    const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('docs', app, swaggerDocument, {
+      useGlobalPrefix: true,
+      swaggerOptions: { persistAuthorization: true },
+      jsonDocumentUrl: 'swagger/json',
+    });
+
+    console.log(`📚 Swagger docs: http://localhost:${port}/${prefix}/docs`);
+  }
 
   // Habilitar cierre limpio (Graceful Shutdown)
   app.enableShutdownHooks();
@@ -95,6 +100,6 @@ async function bootstrap() {
   console.log(
     `🚀 Guira API running on port ${port} with prefix /${prefix} (0.0.0.0)`,
   );
-  console.log(`📚 Swagger docs: http://localhost:${port}/${prefix}/docs`);
 }
 bootstrap();
+
