@@ -333,6 +333,32 @@ export class WebhooksService {
         this.logger.log(`VA desactivada: ${payload?.event_object_id ?? 'unknown'}`);
         break;
 
+      // Bridge envía el sub-tipo de actividad dentro del payload (event_object.type)
+      // en lugar de diferenciarlo en el event_type top-level. Estos dos casos
+      // extraen el sub-tipo y re-despachan al handler específico correspondiente.
+      case 'virtual_account.activity.created':
+      case 'virtual_account.activity.updated': {
+        const vaObj = (payload.event_object ??
+          (payload.data as Record<string, unknown>)?.object) as
+          | Record<string, unknown>
+          | undefined;
+        const vaSubType = vaObj?.type as string | undefined;
+        if (vaSubType) {
+          this.logger.log(
+            `VA activity ${eventType} → re-dispatch como virtual_account.activity.${vaSubType}`,
+          );
+          await this.dispatchEvent(
+            `virtual_account.activity.${vaSubType}`,
+            payload,
+          );
+        } else {
+          this.logger.warn(
+            `virtual_account.activity sin sub-tipo en payload — ignorado`,
+          );
+        }
+        break;
+      }
+
       // ── Liquidation ───────────────────────────────────────────────────────────
       case 'liquidation_address.payment_completed':
         await this.handleLiquidationPayment(payload);
