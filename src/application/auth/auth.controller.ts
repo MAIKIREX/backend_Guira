@@ -20,6 +20,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/auth-response.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
+import { OAuthCallbackDto } from './dto/oauth-callback.dto';
 import { Public } from '../../core/guards/supabase-auth.guard';
 import type { AuthenticatedUser } from '../../core/guards/supabase-auth.guard';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
@@ -167,5 +168,28 @@ export class AuthController {
   ) {
     const context = this.authService.extractRequestContext(req);
     return this.authService.resetPassword(user.id, dto, context);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // OAuth Callback (Corrección G1: auditoría + G3: perfil)
+  // ─────────────────────────────────────────────────────────────
+
+  @Post('oauth-callback')
+  @ApiBearerAuth('supabase-jwt')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Notificar login OAuth',
+    description:
+      'Llamado desde el frontend tras exchangeCodeForSession. Registra el evento de login OAuth en la tabla de auditoría y asegura que el perfil tenga full_name.',
+  })
+  @ApiResponse({ status: 200, description: 'Callback procesado' })
+  @ApiResponse({ status: 401, description: 'Token inválido' })
+  async oauthCallback(
+    @Body() dto: OAuthCallbackDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    const context = this.authService.extractRequestContext(req);
+    return this.authService.oauthCallback(user.id, dto.provider, context);
   }
 }

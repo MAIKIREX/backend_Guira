@@ -22,6 +22,7 @@ import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
 type AuthEventType =
   | 'login_success'
   | 'login_failed'
+  | 'oauth_login'
   | 'register_success'
   | 'register_duplicate'
   | 'logout'
@@ -448,5 +449,70 @@ export class AuthService {
     });
 
     return { message: 'Contraseña actualizada exitosamente' };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // OAuth Callback (Corrección G1 + G3: Auditoría + perfil)
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * Registra un evento de login OAuth y asegura que el perfil del usuario
+   * tenga full_name poblado (Google provee el nombre en user_metadata).
+   * Este endpoint es llamado desde /auth/callback tras exchangeCodeForSession.
+   */
+  async oauthCallback(
+    userId: string,
+    provider: string,
+    context: { ip_address: string; user_agent: string },
+  ): Promise<{ message: string }> {
+    // Registrar evento de login OAuth
+    await this.logAuthEvent({
+      event_type: 'oauth_login',
+      user_id: userId,
+      ip_address: context.ip_address,
+      user_agent: context.user_agent,
+      metadata: { provider },
+    });
+
+    // Corrección G3: Verificar que el perfil tenga full_name
+    // Si el trigger handle_new_user no lo capturó, lo obtenemos
+    // del user_metadata de Supabase Auth (Google provee 'full_name' o 'name').
+    try {
+      const { data: profile } = await this.supabase
+        .from('profiles')
+        .select('id, full_name')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (profile && !profile.full_name) {
+        // Obtener nombre del metadata de Supabase Auth
+        const { data: authUser } =
+          await this.supabase.auth.admin.getUserById(userId);
+
+        const fullName =
+          authUser?.user?.user_metadata?.full_name ??
+          authUser?.user?.user_metadata?.name ??
+          authUser?.user?.email?.split('@')[0] ??
+          null;
+
+        if (fullName) {
+          await this.supabase
+            .from('profiles')
+            .update({ full_name: fullName })
+            .eq('id', userId);
+
+          this.logger.log(
+            `OAuth profile updated: ${userId} → full_name="${fullName}" (provider=${provider})`,
+          );
+        }
+      }
+    } catch (err) {
+      // Best-effort: no bloqueamos el login por un error de perfil
+      this.logger.warn(
+        `Error actualizando perfil post-OAuth para ${userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    return { message: 'OAuth callback procesado' };
   }
 }
