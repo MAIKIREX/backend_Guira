@@ -140,18 +140,22 @@ export class WebhooksService {
       // re-serializado desde JSON (no coincide byte a byte con el original de Bridge).
       const signatureVerified = event.signature_verified as boolean;
 
-      if (
-        !signatureVerified &&
-        this.config.get('app.nodeEnv') === 'production'
-      ) {
+      if (!signatureVerified) {
+        if (this.config.get('app.nodeEnv') === 'production') {
+          this.logger.warn(
+            `❌ Firma inválida en evento ${id} — ignorado en producción`,
+          );
+          await this.supabase
+            .from('webhook_events')
+            .update({ status: 'ignored' })
+            .eq('id', id);
+          return;
+        }
+        // En no-producción se permite continuar para facilitar el testing,
+        // pero se registra explícitamente para no pasar desapercibido.
         this.logger.warn(
-          `❌ Firma inválida en evento ${id} — ignorado en producción`,
+          `⚠️  Firma NO verificada en evento ${id} — procesando solo porque NODE_ENV=${this.config.get('app.nodeEnv')}`,
         );
-        await this.supabase
-          .from('webhook_events')
-          .update({ status: 'ignored' })
-          .eq('id', id);
-        return;
       }
 
       // Despachar
