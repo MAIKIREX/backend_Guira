@@ -143,7 +143,7 @@ export class ProfilesService {
     let query = this.supabase
       .from('profiles')
       .select(
-        'id, email, full_name, role, onboarding_status, is_active, is_frozen, created_at',
+        'id, email, full_name, role, onboarding_status, is_active, is_frozen, created_at, avatar_url, metadata',
         { count: 'exact' },
       )
       .eq('onboarding_status', filters?.onboarding_status ?? 'approved')
