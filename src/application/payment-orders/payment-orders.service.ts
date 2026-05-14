@@ -1619,7 +1619,7 @@ export class PaymentOrdersService {
           to_address: psavAccount.crypto_address,
         },
         amount: dto.amount.toFixed(2),
-        developer_fee: fee_amount.toFixed(2),
+        ...(fee_amount > 0 && { developer_fee: fee_amount.toFixed(2) }),
         client_reference_id: order.id,
       };
 
@@ -1842,7 +1842,7 @@ export class PaymentOrdersService {
           to_address: dto.destination_address,
         },
         amount: dto.amount.toFixed(2),
-        developer_fee: fee_amount.toFixed(2),
+        ...(fee_amount > 0 && { developer_fee: fee_amount.toFixed(2) }),
         client_reference_id: order.id,
       };
 
@@ -2096,7 +2096,7 @@ export class PaymentOrdersService {
             external_account_id: extAccount.bridge_external_account_id,
           },
           amount: dto.amount.toFixed(2),
-          developer_fee: fee_amount.toFixed(2),
+          ...(fee_amount > 0 && { developer_fee: fee_amount.toFixed(2) }),
           client_reference_id: order.id,
         },
         idempotencyKey,
