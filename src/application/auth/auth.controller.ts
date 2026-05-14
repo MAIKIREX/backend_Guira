@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -13,7 +14,9 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { AuthService } from './auth.service';
+import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/auth-response.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
@@ -27,6 +30,31 @@ import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  // ─────────────────────────────────────────────────────────────
+  // Login (Hallazgo 4: login con rate limiting + logging backend)
+  // ─────────────────────────────────────────────────────────────
+
+  @Post('login')
+  @Public()
+  @UseGuards(RateLimitGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Iniciar sesión',
+    description:
+      'Autentica al usuario con email y contraseña. Aplica rate limiting y registra eventos de autenticación.',
+  })
+  @ApiResponse({ status: 200, description: 'Sesión iniciada exitosamente' })
+  @ApiResponse({ status: 401, description: 'Credenciales inválidas' })
+  @ApiResponse({ status: 429, description: 'Demasiados intentos' })
+  async login(@Body() dto: LoginDto, @Req() req: Request) {
+    const context = this.authService.extractRequestContext(req);
+    return this.authService.login(dto, context);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Register
+  // ─────────────────────────────────────────────────────────────
+
   @Post('register')
   @Public()
   @UseGuards(RateLimitGuard)
@@ -39,9 +67,14 @@ export class AuthController {
   @ApiResponse({ status: 201, description: 'Usuario creado exitosamente' })
   @ApiResponse({ status: 409, description: 'Email ya registrado' })
   @ApiResponse({ status: 429, description: 'Demasiados intentos' })
-  async register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  async register(@Body() dto: RegisterDto, @Req() req: Request) {
+    const context = this.authService.extractRequestContext(req);
+    return this.authService.register(dto, context);
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Get Me
+  // ─────────────────────────────────────────────────────────────
 
   @Get('me')
   @ApiBearerAuth('supabase-jwt')
@@ -56,6 +89,10 @@ export class AuthController {
     return this.authService.getMe(user.id);
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Refresh Token
+  // ─────────────────────────────────────────────────────────────
+
   @Post('refresh')
   @Public()
   @UseGuards(RateLimitGuard)
@@ -67,9 +104,14 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Token renovado' })
   @ApiResponse({ status: 401, description: 'Refresh token inválido' })
   @ApiResponse({ status: 429, description: 'Demasiados intentos' })
-  async refresh(@Body() dto: RefreshTokenDto) {
-    return this.authService.refreshToken(dto.refresh_token);
+  async refresh(@Body() dto: RefreshTokenDto, @Req() req: Request) {
+    const context = this.authService.extractRequestContext(req);
+    return this.authService.refreshToken(dto.refresh_token, context);
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Logout
+  // ─────────────────────────────────────────────────────────────
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
@@ -79,9 +121,14 @@ export class AuthController {
     description: 'Invalida la sesión del usuario en Supabase Auth.',
   })
   @ApiResponse({ status: 200, description: 'Sesión cerrada' })
-  async logout(@CurrentUser() user: AuthenticatedUser) {
-    return this.authService.logout(user.id);
+  async logout(@CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
+    const context = this.authService.extractRequestContext(req);
+    return this.authService.logout(user.id, context);
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Forgot Password
+  // ─────────────────────────────────────────────────────────────
 
   @Post('forgot-password')
   @Public()
@@ -94,9 +141,14 @@ export class AuthController {
   })
   @ApiResponse({ status: 200, description: 'Correo enviado (si existe)' })
   @ApiResponse({ status: 429, description: 'Demasiados intentos' })
-  async forgotPassword(@Body() dto: ForgotPasswordDto) {
-    return this.authService.forgotPassword(dto);
+  async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
+    const context = this.authService.extractRequestContext(req);
+    return this.authService.forgotPassword(dto, context);
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Reset Password
+  // ─────────────────────────────────────────────────────────────
 
   @Post('reset-password')
   @ApiBearerAuth('supabase-jwt')
@@ -111,7 +163,9 @@ export class AuthController {
   async resetPassword(
     @Body() dto: ResetPasswordDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
   ) {
-    return this.authService.resetPassword(user.id, dto);
+    const context = this.authService.extractRequestContext(req);
+    return this.authService.resetPassword(user.id, dto, context);
   }
 }

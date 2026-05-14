@@ -7,11 +7,29 @@ import {
   Logger,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
 import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, MeResponseDto } from './dto/auth-response.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
+
+/**
+ * Tipos de evento de auditoría de autenticación.
+ * Se registran en la tabla `auth_audit_log` y en los logs del servidor.
+ */
+type AuthEventType =
+  | 'login_success'
+  | 'login_failed'
+  | 'register_success'
+  | 'register_duplicate'
+  | 'logout'
+  | 'token_refresh'
+  | 'token_refresh_failed'
+  | 'password_reset_request'
+  | 'password_reset_success'
+  | 'password_reset_failed';
 
 @Injectable()
 export class AuthService {
@@ -19,13 +37,143 @@ export class AuthService {
 
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
+    private readonly configService: ConfigService,
   ) {}
+
+  // ─────────────────────────────────────────────────────────────
+  // Auth Event Logging (Hallazgo 5: Auditoría de eventos)
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * Registra un evento de auditoría de autenticación.
+   * Persiste en la tabla `auth_audit_log` y en los logs del servidor.
+   * Nunca lanza excepciones — los errores se registran como warnings.
+   */
+  private async logAuthEvent(params: {
+    event_type: AuthEventType;
+    user_id?: string | null;
+    email?: string | null;
+    ip_address?: string | null;
+    user_agent?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }): Promise<void> {
+    const { event_type, user_id, email, ip_address, user_agent, metadata } =
+      params;
+
+    // Log estructurado al servidor siempre
+    this.logger.log(
+      `🔐 AUTH_EVENT: ${event_type} | user=${user_id ?? 'unknown'} | email=${email ?? 'n/a'} | ip=${ip_address ?? 'n/a'}`,
+    );
+
+    // Persistir en la tabla auth_audit_log (best-effort)
+    try {
+      await this.supabase.from('auth_audit_log').insert({
+        event_type,
+        user_id: user_id ?? null,
+        email: email ?? null,
+        ip_address: ip_address ?? null,
+        user_agent: user_agent ?? null,
+        metadata: metadata ?? null,
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      // No bloqueamos el flujo de autenticación por un error de logging
+      this.logger.warn(
+        `Error persistiendo auth_audit_log (${event_type}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Extrae IP y User-Agent de un request Express.
+   * Se usa desde el controller para pasar contexto de red al service.
+   */
+  extractRequestContext(request: {
+    headers?: Record<string, string | string[] | undefined>;
+    ip?: string;
+  }): { ip_address: string; user_agent: string } {
+    const headers = request.headers ?? {};
+    const forwarded = headers['x-forwarded-for'];
+    const ip_address =
+      (typeof forwarded === 'string'
+        ? forwarded.split(',')[0]?.trim()
+        : forwarded?.[0]) ??
+      request.ip ??
+      'unknown';
+    const ua = headers['user-agent'];
+    const user_agent = (typeof ua === 'string' ? ua : ua?.[0]) ?? 'unknown';
+    return { ip_address, user_agent };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Login (Hallazgo 4: Login con rate limiting + logging)
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * Autentica un usuario con email y contraseña vía Supabase Auth.
+   * Este endpoint permite aplicar rate limiting, logging de intentos
+   * fallidos y auditoría desde el backend.
+   */
+  async login(
+    dto: LoginDto,
+    context: { ip_address: string; user_agent: string },
+  ): Promise<{
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+    user_id: string;
+  }> {
+    const { data, error } =
+      await this.supabase.auth.signInWithPassword({
+        email: dto.email,
+        password: dto.password,
+      });
+
+    if (error || !data.session) {
+      await this.logAuthEvent({
+        event_type: 'login_failed',
+        email: dto.email,
+        ip_address: context.ip_address,
+        user_agent: context.user_agent,
+        metadata: {
+          error_message: error?.message ?? 'No session returned',
+        },
+      });
+
+      // Mensaje genérico para evitar enumeración de usuarios
+      throw new UnauthorizedException(
+        'Credenciales inválidas. Verifica tu correo y contraseña.',
+      );
+    }
+
+    await this.logAuthEvent({
+      event_type: 'login_success',
+      user_id: data.user.id,
+      email: data.user.email,
+      ip_address: context.ip_address,
+      user_agent: context.user_agent,
+    });
+
+    return {
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      expires_in: data.session.expires_in ?? 3600,
+      user_id: data.user.id,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Register
+  // ─────────────────────────────────────────────────────────────
 
   /**
    * Registra un nuevo usuario en Supabase Auth.
    * El trigger `handle_new_user` crea automáticamente el perfil en `profiles`.
    */
-  async register(dto: RegisterDto): Promise<AuthResponseDto> {
+  async register(
+    dto: RegisterDto,
+    context?: { ip_address: string; user_agent: string },
+  ): Promise<AuthResponseDto> {
     // ─── El usuario ya fue creado en Supabase Auth por el frontend ───
     // Este endpoint solo se encarga de verificar que existe y asegurar
     // que el perfil (profiles) tenga full_name y datos iniciales.
@@ -61,6 +209,14 @@ export class AuthService {
 
     if (existingProfile && existingProfile.full_name) {
       // El perfil ya está completo — posible llamada duplicada
+      await this.logAuthEvent({
+        event_type: 'register_duplicate',
+        user_id: existingUser.id,
+        email: dto.email,
+        ip_address: context?.ip_address,
+        user_agent: context?.user_agent,
+      });
+
       return {
         user_id: existingUser.id,
         email: existingUser.email ?? dto.email,
@@ -77,6 +233,14 @@ export class AuthService {
       .update({ full_name: dto.full_name })
       .eq('id', existingUser.id);
 
+    await this.logAuthEvent({
+      event_type: 'register_success',
+      user_id: existingUser.id,
+      email: dto.email,
+      ip_address: context?.ip_address,
+      user_agent: context?.user_agent,
+    });
+
     return {
       user_id: existingUser.id,
       email: existingUser.email ?? dto.email,
@@ -86,6 +250,10 @@ export class AuthService {
       onboarding_status: 'pending',
     };
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Get Me
+  // ─────────────────────────────────────────────────────────────
 
   /**
    * Retorna el perfil completo del usuario autenticado.
@@ -106,10 +274,17 @@ export class AuthService {
     return data as MeResponseDto;
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Refresh Token
+  // ─────────────────────────────────────────────────────────────
+
   /**
    * Renueva la sesión usando un refresh token.
    */
-  async refreshToken(refreshToken: string): Promise<{
+  async refreshToken(
+    refreshToken: string,
+    context?: { ip_address: string; user_agent: string },
+  ): Promise<{
     access_token: string;
     refresh_token: string;
     expires_in: number;
@@ -119,10 +294,25 @@ export class AuthService {
     });
 
     if (error || !data.session) {
+      await this.logAuthEvent({
+        event_type: 'token_refresh_failed',
+        ip_address: context?.ip_address,
+        user_agent: context?.user_agent,
+        metadata: { error_message: error?.message ?? 'No session returned' },
+      });
+
       throw new UnauthorizedException(
         'Refresh token inválido o expirado. Inicia sesión nuevamente.',
       );
     }
+
+    await this.logAuthEvent({
+      event_type: 'token_refresh',
+      user_id: data.user?.id,
+      email: data.user?.email,
+      ip_address: context?.ip_address,
+      user_agent: context?.user_agent,
+    });
 
     return {
       access_token: data.session.access_token,
@@ -131,10 +321,17 @@ export class AuthService {
     };
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Logout
+  // ─────────────────────────────────────────────────────────────
+
   /**
    * Invalida la sesión del usuario (cierra sesión en Supabase Auth).
    */
-  async logout(userId: string): Promise<{ message: string }> {
+  async logout(
+    userId: string,
+    context?: { ip_address: string; user_agent: string },
+  ): Promise<{ message: string }> {
     const { error } = await this.supabase.auth.admin.signOut(userId);
 
     if (error) {
@@ -144,19 +341,39 @@ export class AuthService {
       // No lanzamos error — el token ya podría estar expirado
     }
 
+    await this.logAuthEvent({
+      event_type: 'logout',
+      user_id: userId,
+      ip_address: context?.ip_address,
+      user_agent: context?.user_agent,
+    });
+
     return { message: 'Sesión cerrada exitosamente' };
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Forgot Password (Hallazgo 6: ConfigService en vez de process.env)
+  // ─────────────────────────────────────────────────────────────
 
   /**
    * Solicita el envío de un correo para restablecer la contraseña.
    */
-  async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
+  async forgotPassword(
+    dto: ForgotPasswordDto,
+    context?: { ip_address: string; user_agent: string },
+  ): Promise<{ message: string }> {
+    // Hallazgo 6: Usar URL_FRONTEND validada via ConfigService en vez de
+    // process.env.FRONTEND_URL sin validar.
+    const frontendUrl =
+      this.configService.get<string>('app.urlFrontend')?.split(',')[0]?.trim() ||
+      'http://localhost:3000';
+
     // Usamos el cliente regular (no admin) para resetPasswordForEmail
     // para que use las plantillas de email configuradas en el proyecto
     const { error } = await this.supabase.auth.resetPasswordForEmail(
       dto.email,
       {
-        redirectTo: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/reset-password`,
+        redirectTo: `${frontendUrl}/recuperar/update`,
       },
     );
 
@@ -169,11 +386,22 @@ export class AuthService {
       // Retornamos éxito de todas formas si no es un error de sistema crítico.
     }
 
+    await this.logAuthEvent({
+      event_type: 'password_reset_request',
+      email: dto.email,
+      ip_address: context?.ip_address,
+      user_agent: context?.user_agent,
+    });
+
     return {
       message:
         'Si el correo está registrado, recibirás instrucciones para restablecer tu contraseña.',
     };
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Reset Password
+  // ─────────────────────────────────────────────────────────────
 
   /**
    * Restablece la contraseña de un usuario asumiendo que ya se autenticó temporalmente
@@ -183,6 +411,7 @@ export class AuthService {
   async resetPassword(
     userId: string,
     dto: ResetPasswordDto,
+    context?: { ip_address: string; user_agent: string },
   ): Promise<{ message: string }> {
     // Usamos updateUser usando la sesión de supabase
     // Dado que estamos en el backend con Guards personalizados, la forma más segura
@@ -197,10 +426,26 @@ export class AuthService {
       this.logger.error(
         `Error reseteando contraseña para ${userId}: ${error.message}`,
       );
+
+      await this.logAuthEvent({
+        event_type: 'password_reset_failed',
+        user_id: userId,
+        ip_address: context?.ip_address,
+        user_agent: context?.user_agent,
+        metadata: { error_message: error.message },
+      });
+
       throw new InternalServerErrorException(
         'No se pudo restablecer la contraseña. Intente nuevamente.',
       );
     }
+
+    await this.logAuthEvent({
+      event_type: 'password_reset_success',
+      user_id: userId,
+      ip_address: context?.ip_address,
+      user_agent: context?.user_agent,
+    });
 
     return { message: 'Contraseña actualizada exitosamente' };
   }

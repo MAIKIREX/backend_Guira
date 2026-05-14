@@ -15,22 +15,22 @@ export class ResetPasswordDto {
   @ApiProperty({
     example: 'NewSecurePass123!',
     description:
-      'Nueva contraseña (mínimo 8 caracteres, 1 mayúscula, 1 minúscula, 1 número)',
-    minLength: 8,
+      'Nueva contraseña (mínimo 12 caracteres, 1 mayúscula, 1 minúscula, 1 número, 1 símbolo)',
+    minLength: 12,
   })
   @IsString()
   @IsNotEmpty({ message: 'La nueva contraseña es requerida' })
   @IsStrongPassword(
     {
-      minLength: 8,
+      minLength: 12,
       minLowercase: 1,
       minUppercase: 1,
       minNumbers: 1,
-      minSymbols: 0, // No exigimos símbolo para evitar fricción excesiva
+      minSymbols: 1,
     },
     {
       message:
-        'La contraseña debe tener al menos 8 caracteres, 1 mayúscula, 1 minúscula y 1 número',
+        'La contraseña debe tener al menos 12 caracteres, 1 mayúscula, 1 minúscula, 1 número y 1 carácter especial',
     },
   )
   new_password: string;

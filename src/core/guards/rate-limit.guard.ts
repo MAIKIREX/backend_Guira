@@ -152,6 +152,8 @@ export class RateLimitGuard implements CanActivate {
     if (url?.includes('register')) return 'register';
     if (url?.includes('refresh')) return 'refresh';
     if (url?.includes('login')) return 'login';
+    if (url?.includes('forgot-password')) return 'forgot_password';
+    if (url?.includes('reset-password')) return 'reset_password';
     return 'auth_generic';
   }
 }
