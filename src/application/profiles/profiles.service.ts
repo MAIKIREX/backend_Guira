@@ -146,15 +146,13 @@ export class ProfilesService {
         'id, email, full_name, role, onboarding_status, is_active, is_frozen, created_at',
         { count: 'exact' },
       )
+      .eq('onboarding_status', filters?.onboarding_status ?? 'approved')
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
     // Aplicar filtros opcionales
     if (filters?.role) {
       query = query.eq('role', filters.role);
-    }
-    if (filters?.onboarding_status) {
-      query = query.eq('onboarding_status', filters.onboarding_status);
     }
     if (filters?.is_frozen !== undefined) {
       query = query.eq('is_frozen', filters.is_frozen);

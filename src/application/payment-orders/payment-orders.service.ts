@@ -2830,7 +2830,7 @@ export class PaymentOrdersService {
 
     let query = this.supabase
       .from('payment_orders')
-      .select(`*`, { count: 'exact' })
+      .select(`*, suppliers(id, name)`, { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
