@@ -1907,7 +1907,7 @@ export class PaymentOrdersService {
         status: 'pending',
         reference_type: 'payment_order',
         reference_id: order.id,
-        bridge_transfer_id: btRow?.id ?? null,
+        bridge_transfer_id: transferId ?? null,
         description: `Off-ramp crypto: ${net_amount} ${sourceCurrency} → ${dto.destination_address}`,
       });
 
@@ -1963,7 +1963,7 @@ export class PaymentOrdersService {
     }
     const { data: supplier } = await this.supabase
       .from('suppliers')
-      .select('id, name, bridge_external_account_id')
+      .select('id, name, bridge_external_account_id, bank_details')
       .eq('id', dto.supplier_id)
       .eq('user_id', userId)
       .single();
@@ -2042,6 +2042,12 @@ export class PaymentOrdersService {
       p_amount: totalNeeded,
     });
 
+    const bankDetails = supplier.bank_details as Record<string, unknown> | null;
+    const rawAccountNumber = bankDetails?.account_number as string | undefined;
+    const destinationAccountNumber = rawAccountNumber
+      ? `****${rawAccountNumber.slice(-4)}`
+      : null;
+
     const { data: order, error } = await this.supabase
       .from('payment_orders')
       .insert({
@@ -2061,6 +2067,9 @@ export class PaymentOrdersService {
         exchange_rate_applied: 1.0,
         external_account_id: extAccount.id,
         supplier_id: supplier.id,
+        destination_bank_name: (bankDetails?.bank_name as string) ?? null,
+        destination_account_holder: supplier.name ?? null,
+        destination_account_number: destinationAccountNumber,
         notes: dto.notes,
         business_purpose: dto.business_purpose,
         supporting_document_url: dto.supporting_document_url,
@@ -2140,7 +2149,7 @@ export class PaymentOrdersService {
         status: 'pending',
         reference_type: 'payment_order',
         reference_id: order.id,
-        bridge_transfer_id: btRow?.id ?? null,
+        bridge_transfer_id: transferId ?? null,
         description: `Off-ramp fiat US: $${net_amount} → cuenta bancaria`,
       });
 

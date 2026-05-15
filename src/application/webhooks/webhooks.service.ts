@@ -19,6 +19,11 @@ interface SinkEventDto {
   bridge_api_version: string | null;
 }
 
+interface WebhookEventContext {
+  webhookEventId: string;
+  providerEventId: string | null;
+}
+
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
@@ -161,7 +166,10 @@ export class WebhooksService {
       // Despachar
       const eventType = event.event_type as string;
       const payload = event.raw_payload as Record<string, unknown>;
-      await this.dispatchEvent(eventType, payload);
+      await this.dispatchEvent(eventType, payload, {
+        webhookEventId: id,
+        providerEventId: (event.provider_event_id as string | null) ?? null,
+      });
 
       // Marcar procesado
       await this.supabase
@@ -204,6 +212,7 @@ export class WebhooksService {
   private async dispatchEvent(
     eventType: string,
     payload: Record<string, unknown>,
+    context?: WebhookEventContext,
   ): Promise<void> {
     // Los event types aquí deben coincidir EXACTAMENTE con los que Bridge envía.
     // Bridge usa event_type en formato "category.verb" o "category.verb.qualifier".
@@ -242,9 +251,9 @@ export class WebhooksService {
         >;
         const state = data?.state as string;
         if (state === 'payment_processed') {
-          await this.handleTransferPaymentProcessed(payload);
+          await this.handleTransferPaymentProcessed(payload, context);
         } else if (state === 'complete' || state === 'completed') {
-          await this.handleTransferComplete(payload);
+          await this.handleTransferComplete(payload, undefined, context);
         } else if (state === 'failed' || state === 'returned') {
           await this.handleTransferFailed(payload);
         } else {
@@ -265,10 +274,10 @@ export class WebhooksService {
       }
       // Alias legacy
       case 'transfer.payment_processed':
-        await this.handleTransferPaymentProcessed(payload);
+        await this.handleTransferPaymentProcessed(payload, context);
         break;
       case 'transfer.complete':
-        await this.handleTransferComplete(payload);
+        await this.handleTransferComplete(payload, undefined, context);
         break;
       case 'transfer.failed':
         await this.handleTransferFailed(payload);
@@ -1490,10 +1499,11 @@ export class WebhooksService {
 
   private async handleTransferPaymentProcessed(
     payload: Record<string, unknown>,
+    context?: WebhookEventContext,
   ): Promise<void> {
     // Redirigido a handleTransferComplete para finalizar automáticamente
     // órdenes de pago, ya que Bridge a menudo frena el ciclo en payment_processed.
-    await this.handleTransferComplete(payload, 'payment_processed');
+    await this.handleTransferComplete(payload, 'payment_processed', context);
   }
 
   // ═══════════════════════════════════════════════
@@ -1504,6 +1514,7 @@ export class WebhooksService {
   private async handleTransferComplete(
     payload: Record<string, unknown>,
     bridgeState: string = 'complete',
+    context?: WebhookEventContext,
   ): Promise<void> {
     const data = (payload?.event_object || payload?.data) as Record<
       string,
@@ -1513,6 +1524,39 @@ export class WebhooksService {
     if (!bridgeTransferId) throw new Error('transfer.complete sin transfer ID');
 
     const receipt = data?.receipt as Record<string, unknown> | undefined;
+    const source = data?.source as Record<string, unknown> | undefined;
+    const receiptFinalAmount = receipt?.final_amount
+      ? parseFloat(receipt.final_amount as string)
+      : null;
+    const receiptExchangeFee = receipt?.exchange_fee
+      ? parseFloat(receipt.exchange_fee as string)
+      : null;
+    const destinationTxHash =
+      (data?.destination_tx_hash as string | undefined) ??
+      (receipt?.destination_tx_hash as string | undefined) ??
+      null;
+    const receiptUrl = (receipt?.url as string | undefined) ?? null;
+    const sourceAddress =
+      (source?.from_address as string | undefined) ??
+      (source?.address as string | undefined) ??
+      null;
+    const sourceNetwork =
+      (source?.payment_rail as string | undefined) ??
+      (source?.network as string | undefined) ??
+      null;
+    const destination = data?.destination as
+      | Record<string, unknown>
+      | undefined;
+    const traceNumber =
+      (destination?.trace_number as string | undefined) ?? null;
+    const destinationAddress =
+      (destination?.to_address as string | undefined) ??
+      (destination?.address as string | undefined) ??
+      null;
+    const destinationNetwork =
+      (destination?.payment_rail as string | undefined) ??
+      (destination?.network as string | undefined) ??
+      null;
 
     // 1. UPDATE bridge_transfers
     // FIX #4: Usar maybeSingle() — si el INSERT de bridge_transfers falló previamente
@@ -1527,7 +1571,7 @@ export class WebhooksService {
         receipt_exchange_fee: receipt?.exchange_fee ?? null,
         receipt_developer_fee: receipt?.developer_fee ?? null,
         receipt_final_amount: receipt?.final_amount ?? null,
-        destination_tx_hash: (data?.destination_tx_hash as string) ?? null,
+        destination_tx_hash: destinationTxHash,
         exchange_rate: receipt?.exchange_rate ?? null,
         bridge_raw_response: data,
         updated_at: new Date().toISOString(),
@@ -1638,10 +1682,21 @@ export class WebhooksService {
           .update({
             status: 'completed',
             completed_at: new Date().toISOString(),
-            tx_hash: (data?.destination_tx_hash as string) ?? null,
-            amount_destination: receipt?.final_amount
-              ? parseFloat(receipt.final_amount as string)
-              : null,
+            tx_hash: destinationTxHash,
+            receipt_url: receiptUrl,
+            provider_reference:
+              traceNumber ?? destinationTxHash ?? context?.providerEventId ?? null,
+            bridge_event_id: context?.providerEventId ?? null,
+            source_address: sourceAddress,
+            source_network: sourceNetwork,
+            destination_address: destinationAddress,
+            destination_network: destinationNetwork,
+            ...(receiptExchangeFee != null
+              ? { exchange_fee: receiptExchangeFee }
+              : {}),
+            ...(receiptFinalAmount != null
+              ? { amount_destination: receiptFinalAmount }
+              : {}),
             // Guardar metadata histórica si fue on-ramp flexible (amount original 0)
             ...(initialAmount === 0 && receipt?.initial_amount
               ? { amount: parseFloat(receipt.initial_amount as string) }
@@ -1654,10 +1709,6 @@ export class WebhooksService {
 
         // Asentar ledger entries vinculadas a la payment_order
         // Si tenemos receipt.final_amount de Bridge, actualizar el monto real recibido
-        const receiptFinalAmount = receipt?.final_amount
-          ? parseFloat(receipt.final_amount as string)
-          : null;
-
         const { data: settledEntries } = await this.supabase
           .from('ledger_entries')
           .update({
