@@ -1052,7 +1052,17 @@ export class WebhooksService {
     const depositId = (data.deposit_id as string) ?? null;
     const vaId = data.virtual_account_id as string;
 
-    this.logger.log(`VA payment_processed: depositId=${depositId} va=${vaId}`);
+    // Extraer campos del receipt para persistirlos en la order
+    const receipt = (data.receipt as Record<string, unknown>) ?? null;
+    const txHash = (data.destination_tx_hash as string) ?? null;
+    const receiptUrl = (receipt?.url as string) ?? null;
+    const bridgeFinalAmount = receipt?.final_amount
+      ? parseFloat(receipt.final_amount as string)
+      : null;
+    const destinationNetwork = (data.destination_payment_rail as string) ?? null;
+    const destinationCurrency = (data.currency as string) ?? null;
+
+    this.logger.log(`VA payment_processed: depositId=${depositId} va=${vaId} tx=${txHash ?? 'n/a'}`);
 
     // Registrar evento
     await this.supabase.from('bridge_virtual_account_events').insert({
@@ -1087,13 +1097,14 @@ export class WebhooksService {
       return;
     }
 
-    const netAmount = parseFloat(String(order.net_amount));
+    // Bridge final_amount es el monto que realmente llega al wallet (autoridad)
+    const creditAmount = bridgeFinalAmount ?? parseFloat(String(order.net_amount));
 
     // Acreditar balance: INSERT ledger_entry settled (trigger actualiza balances)
     await this.supabase.from('ledger_entries').insert({
       wallet_id: order.wallet_id,
       type: 'credit',
-      amount: netAmount,
+      amount: creditAmount,
       currency: order.currency,
       status: 'settled',
       reference_type: 'payment_order',
@@ -1101,13 +1112,19 @@ export class WebhooksService {
       description: `Deposito confirmado via cuenta virtual Bridge`,
     });
 
-    // Marcar order como completada
+    // Marcar order como completada y persistir datos del receipt
     await this.supabase
       .from('payment_orders')
       .update({
         status: 'completed',
         va_deposit_status: 'payment_processed',
         completed_at: new Date().toISOString(),
+        net_amount: creditAmount,
+        amount_destination: creditAmount,
+        destination_currency: destinationCurrency?.toUpperCase() ?? null,
+        destination_network: destinationNetwork ?? null,
+        tx_hash: txHash,
+        receipt_url: receiptUrl,
       })
       .eq('id', order.id);
 
@@ -1116,7 +1133,7 @@ export class WebhooksService {
       user_id: order.user_id,
       type: 'financial',
       title: 'Deposito Confirmado',
-      message: `$${netAmount.toFixed(2)} ${order.currency} acreditados en tu wallet Guira.`,
+      message: `$${creditAmount.toFixed(2)} ${order.currency} acreditados en tu wallet Guira.`,
       reference_type: 'payment_order',
       reference_id: order.id,
     });
@@ -1124,11 +1141,11 @@ export class WebhooksService {
     await this.supabase.from('activity_logs').insert({
       user_id: order.user_id,
       action: 'VA_DEPOSIT_CONFIRMED',
-      description: `Deposito VA confirmado: $${netAmount} acreditados (order ${order.id})`,
+      description: `Deposito VA confirmado: $${creditAmount} acreditados (order ${order.id})`,
     });
 
     this.logger.log(
-      `✅ VA deposito confirmado: $${netAmount} ${order.currency} para user ${order.user_id}`,
+      `✅ VA deposito confirmado: $${creditAmount} ${order.currency} para user ${order.user_id}`,
     );
   }
 
