@@ -145,10 +145,13 @@ export class PdfService {
   // ─── Origin details (per service) ─────────────────────
 
   private buildOriginRows(order: any, metadata: any, clientWallet: any): any[][] {
-    const originCcy = (order.origin_currency ?? order.source_currency ?? order.currency ?? '').toUpperCase();
     const ft = order.flow_type;
+    // fiat_bo_to_bridge_wallet: source_currency stores the stablecoin, not the BOB origin
+    const originCcy = ft === 'fiat_bo_to_bridge_wallet'
+      ? (order.currency ?? '').toUpperCase()
+      : (order.origin_currency ?? order.source_currency ?? order.currency ?? '').toUpperCase();
 
-    // Resolve exchange rate: use stored value, or fallback to 1.00 for stablecoin same-token flows
+    // Resolve exchange rate: fallback to 1.00 label for pure stablecoin flows
     const STABLECOIN_FLOWS = ['bridge_wallet_to_crypto', 'bridge_wallet_to_fiat_us', 'crypto_to_bridge_wallet'];
     let exchangeRateDisplay: string;
     if (order.exchange_rate_applied != null && order.exchange_rate_applied !== 0) {
@@ -165,7 +168,7 @@ export class PdfService {
       this.row('Tipo de Cambio', exchangeRateDisplay),
     ];
 
-    // Off-ramp flows: show source wallet
+    // ── Off-ramp flows: show source Bridge wallet ──────────
     if (['bridge_wallet_to_fiat_bo', 'bridge_wallet_to_fiat_us', 'bridge_wallet_to_crypto'].includes(ft)) {
       rows.push(
         this.row('Billetera Origen', this.toDisplay(clientWallet?.address)),
@@ -173,20 +176,43 @@ export class PdfService {
       );
     }
 
-    // Crypto on-ramp: show source network from order column (NOT metadata)
+    // ── crypto_to_bridge_wallet: network + sender address ──
     if (ft === 'crypto_to_bridge_wallet') {
       rows.push(
         this.row('Red de Depósito', this.toDisplay(
           order.source_network ?? this.readMeta(metadata, 'source_network') ?? order.origin_currency
         )),
       );
+      // source_address = the external crypto wallet that sent funds to Bridge
+      if (order.source_address) {
+        rows.push(this.row('Dirección de Depósito', this.toDisplay(order.source_address)));
+      }
     }
 
-    // Wallet-to-wallet: show source wallet info
+    // ── fiat_bo_to_bridge_wallet: Bridge PSAV intermediate address ──
+    if (ft === 'fiat_bo_to_bridge_wallet') {
+      // source_address = Bridge/PSAV intermediate wallet that converted BOB and sent stablecoin
+      if (order.source_address) {
+        rows.push(this.row('Dirección PSAV Bridge', this.toDisplay(order.source_address)));
+      }
+      if (order.source_network) {
+        rows.push(this.row('Red de Salida Bridge', this.toDisplay(order.source_network)));
+      }
+      // exchange_fee = Bridge's own conversion fee (show only when non-zero)
+      const bridgeFee = Number(order.exchange_fee);
+      if (order.exchange_fee != null && !Number.isNaN(bridgeFee) && bridgeFee !== 0) {
+        rows.push(this.row('Comisión Bridge', `${this.fmtAmount(bridgeFee)} ${order.source_currency ?? ''}`));
+      }
+    }
+
+    // ── wallet_to_wallet: actual sending address from DB ──
     if (ft === 'wallet_to_wallet') {
+      // source_address from DB is the actual sending external wallet (more accurate than clientWallet)
+      const srcAddr = order.source_address ?? clientWallet?.address;
+      const srcNet = order.source_network ?? clientWallet?.network ?? this.readMeta(metadata, 'source_network');
       rows.push(
-        this.row('Red Origen', this.toDisplay(clientWallet?.network ?? this.readMeta(metadata, 'source_network'))),
-        this.row('Billetera Origen', this.toDisplay(clientWallet?.address)),
+        this.row('Red Origen', this.toDisplay(srcNet)),
+        this.row('Billetera Origen', this.toDisplay(srcAddr)),
       );
     }
 
@@ -223,7 +249,6 @@ export class PdfService {
     }
 
     // ── world_to_bolivia ─────────────────────────────────
-    // FIX H1: was falling to generic else — now explicit
     else if (ft === 'world_to_bolivia') {
       rows.push(this.row('Proveedor', this.toDisplay(supplier?.name ?? 'No asignado')));
       const ext = supplier?.external_accounts?.find((a: any) => a.id === order.external_account_id);
@@ -234,7 +259,6 @@ export class PdfService {
           this.row('Titular', this.toDisplay(ext.account_holder_name)),
         );
       } else {
-        // Fallback: try metadata or supplier bank_details for BOB destination
         const bankName = supplier?.bank_details?.bank_name ?? this.readMeta(metadata, 'destination_bank');
         const acctNum = supplier?.bank_details?.account_number ?? this.readMeta(metadata, 'destination_account');
         if (bankName || acctNum) {
@@ -258,52 +282,69 @@ export class PdfService {
       );
     }
 
-    // ── On-ramps: fiat/crypto → bridge_wallet ────────────
-    else if (['fiat_bo_to_bridge_wallet', 'crypto_to_bridge_wallet'].includes(ft)) {
+    // ── On-ramps: fiat/crypto/usd → bridge_wallet ─────────
+    else if (['fiat_bo_to_bridge_wallet', 'crypto_to_bridge_wallet', 'fiat_us_to_bridge_wallet'].includes(ft)) {
       rows.push(
         this.row('Billetera Destino', this.toDisplay(clientWallet?.address)),
         this.row('Red Destino', this.toDisplay(clientWallet?.network)),
       );
     }
 
+    // ── va_deposit (Virtual Account / Cuenta Virtual) ─────
+    else if (ft === 'va_deposit') {
+      const destCcy = (order.destination_currency ?? order.currency ?? 'USDC').toUpperCase();
+      rows.push(
+        this.row('Canal de Depósito', 'Cuenta Virtual (ACH / Wire)'),
+        this.row('Moneda Recibida', destCcy),
+      );
+      if (order.sender_name) {
+        rows.push(this.row('Remitente', this.toDisplay(order.sender_name)));
+      }
+      if (order.va_deposit_status) {
+        rows.push(this.row('Estado del Depósito', this.toDisplay(order.va_deposit_status)));
+      }
+    }
+
     // ── bridge_wallet_to_fiat_bo ─────────────────────────
-    // FIX H2a: was falling to generic else — now shows BOB bank details
     else if (ft === 'bridge_wallet_to_fiat_bo') {
-      const bankName = this.readMeta(metadata, 'destination_bank') || this.readMeta(metadata, 'bank_name');
-      const acctNum = order.destination_address ?? this.readMeta(metadata, 'destination_account') ?? this.readMeta(metadata, 'account_number');
-      const holder = this.readMeta(metadata, 'account_holder') || this.readMeta(metadata, 'beneficiary_name');
+      // Primary source: dedicated columns populated at order creation
+      const bankName = order.destination_bank_name
+        ?? this.readMeta(metadata, 'destination_bank')
+        ?? this.readMeta(metadata, 'bank_name');
+      const acctNum = order.destination_account_number
+        ?? order.destination_address
+        ?? this.readMeta(metadata, 'destination_account');
+      const holder = order.destination_account_holder
+        ?? this.readMeta(metadata, 'account_holder')
+        ?? this.readMeta(metadata, 'beneficiary_name');
       rows.push(
         this.row('Banco Destino', this.toDisplay(bankName)),
         this.row('Cuenta Destino', this.toDisplay(acctNum)),
       );
-      if (holder) rows.push(this.row('Titular', holder));
+      if (holder) rows.push(this.row('Titular', this.toDisplay(holder)));
       rows.push(this.row('Moneda Destino', this.toDisplay(order.destination_currency ?? 'BOB')));
     }
 
     // ── bridge_wallet_to_fiat_us ─────────────────────────
-    // FIX: Read bank details from supplier.bank_details as primary source,
-    // since metadata is never populated for this flow.
     else if (ft === 'bridge_wallet_to_fiat_us') {
-      // 1. Try metadata first (legacy/future-proof)
-      let bankName = this.readMeta(metadata, 'destination_bank') || this.readMeta(metadata, 'bank_name');
-      let acctNum = order.destination_address ?? this.readMeta(metadata, 'destination_account') ?? this.readMeta(metadata, 'account_number');
-      let routing = this.readMeta(metadata, 'routing_number');
-      let holder = this.readMeta(metadata, 'account_holder') || this.readMeta(metadata, 'beneficiary_name');
+      // 1. Try direct order columns
+      let bankName = order.destination_bank_name ?? '';
+      let acctNum = order.destination_account_number ?? order.destination_address ?? '';
+      let routing = '';
+      let holder = order.destination_account_holder ?? '';
 
-      // 2. Fallback: read from supplier.bank_details (ACH data)
+      // 2. Fallback: supplier.bank_details (ACH data)
       if (!bankName && supplier?.bank_details) {
         const ach = (supplier.bank_details as any).ach ?? supplier.bank_details;
         bankName = ach?.bank_name ?? '';
         if (!acctNum) acctNum = ach?.account_number ?? '';
-        if (!routing) routing = ach?.routing_number ?? '';
+        routing = ach?.routing_number ?? '';
         if (!holder) holder = ach?.account_holder_name ?? supplier?.name ?? '';
       }
 
-      // 3. Fallback: read from supplier.external_accounts
+      // 3. Fallback: supplier.external_accounts
       if (!bankName && supplier?.external_accounts?.length) {
-        const ext = supplier.external_accounts.find(
-          (a: any) => a.id === order.external_account_id,
-        );
+        const ext = supplier.external_accounts.find((a: any) => a.id === order.external_account_id);
         if (ext) {
           bankName = ext.bank_name ?? '';
           if (!acctNum) acctNum = ext.account_number ?? '';
@@ -321,7 +362,6 @@ export class PdfService {
     }
 
     // ── bridge_wallet_to_crypto ──────────────────────────
-    // FIX: Read destination_network from order column (NOT metadata)
     else if (ft === 'bridge_wallet_to_crypto') {
       const destAddr = order.destination_address ?? this.readMeta(metadata, 'destination_address');
       const destNet = order.destination_network
@@ -352,14 +392,17 @@ export class PdfService {
   private resolveStablecoin(order: any, metadata: any): string {
     const fromMeta = this.readMeta(metadata, 'stablecoin');
     if (fromMeta) return fromMeta;
+    // On-ramps: stablecoin is the destination
     if ([
       'crypto_to_bridge_wallet', 'bridge_wallet_to_crypto',
       'wallet_to_wallet', 'bolivia_to_wallet',
-      'fiat_bo_to_bridge_wallet',
+      'fiat_bo_to_bridge_wallet', 'fiat_us_to_bridge_wallet',
     ].includes(order.flow_type)) {
-      // FIX: Do NOT fallback to order.currency — it can be 'BOB' for bolivia_to_wallet
-      // which is the fiat origin, not the stablecoin destination.
       return order.destination_currency ?? 'N/D';
+    }
+    // Off-ramps to fiat: stablecoin is the source (stored in currency column)
+    if (['bridge_wallet_to_fiat_bo', 'bridge_wallet_to_fiat_us'].includes(order.flow_type)) {
+      return (order.currency ?? order.source_currency ?? 'N/D').toUpperCase();
     }
     return 'N/D';
   }
@@ -425,13 +468,50 @@ export class PdfService {
       const originRows = this.buildOriginRows(order, metadata, clientWallet);
       const destRows = this.buildDestinationRows(order, metadata, supplier, clientWallet);
 
-      // ── Traceability rows ──
+      // ── Traceability rows ──────────────────────────────
       const traceRows: any[][] = [
         this.row('Categoría', this.toDisplay(rail)),
         this.row('Stablecoin', this.toDisplay(stablecoin)),
         this.row('Ref. Proveedor', this.toDisplay(order.provider_reference ?? this.readMeta(metadata, 'reference'))),
         this.row('Completado', completedRender),
       ];
+
+      // Bridge Transfer ID — all Bridge flows
+      if (order.bridge_transfer_id) {
+        traceRows.push(this.row('ID Transferencia Bridge', this.toDisplay(order.bridge_transfer_id)));
+      }
+
+      // Bridge Deposit ID — va_deposit
+      if (order.deposit_id) {
+        traceRows.push(this.row('ID Depósito Bridge', this.toDisplay(order.deposit_id)));
+      }
+
+      // Destination blockchain tx hash — proof of delivery
+      if (order.tx_hash) {
+        // Manual flows use tx_hash as a staff-entered reference, not a real blockchain hash
+        const isManualRef = ['bridge_wallet_to_fiat_bo', 'bolivia_to_world', 'bolivia_to_wallet'].includes(ft);
+        traceRows.push(this.row(
+          isManualRef ? 'Ref. de Ejecución' : 'Hash Blockchain Destino',
+          this.toDisplay(order.tx_hash),
+        ));
+      }
+
+      // Source blockchain tx hash — proof that client sent funds
+      if (order.source_tx_hash) {
+        traceRows.push(this.row('Hash Blockchain Origen', this.toDisplay(order.source_tx_hash)));
+      }
+
+      // Official Bridge receipt URL — only full https:// URLs (not Supabase storage paths)
+      if (order.receipt_url && String(order.receipt_url).startsWith('http')) {
+        traceRows.push(this.row('Recibo Oficial Bridge', this.toDisplay(order.receipt_url)));
+      }
+
+      // Staff approval date — manual flows that require Guira review
+      if (order.approved_at) {
+        traceRows.push(this.row('Aprobado por Guira el', this.fmtDate(order.approved_at)));
+      }
+
+      // Failure / rejection reason
       const failReason = order.failure_reason ?? this.readMeta(metadata, 'rejection_reason');
       if (failReason) {
         traceRows.push(this.row('Motivo Rechazo', this.toDisplay(failReason), { color: COLORS.destructive }));
@@ -500,7 +580,7 @@ export class PdfService {
         },
         layout: {
           ...borderedLayout,
-          // Add a subtle vertical line between origin and destination
+          // Subtle vertical divider between origin and destination columns
           vLineWidth: (i: number, node: any) => {
             if (i === 0 || i === node.table.widths.length) return 0.6;
             if (i === 2) return 0.4; // center divider
