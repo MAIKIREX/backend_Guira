@@ -1059,6 +1059,14 @@ export class WebhooksService {
     const bridgeFinalAmount = receipt?.final_amount
       ? parseFloat(receipt.final_amount as string)
       : null;
+    // developer_fee_amount en event_object y receipt.developer_fee son equivalentes;
+    // usamos el del receipt como fuente canónica, con fallback al nivel superior.
+    const bridgeDeveloperFee =
+      receipt?.developer_fee != null
+        ? parseFloat(receipt.developer_fee as string)
+        : data.developer_fee_amount != null
+          ? parseFloat(data.developer_fee_amount as string)
+          : null;
     const destinationNetwork = (data.destination_payment_rail as string) ?? null;
     const destinationCurrency = (data.currency as string) ?? null;
 
@@ -1112,13 +1120,16 @@ export class WebhooksService {
       description: `Deposito confirmado via cuenta virtual Bridge`,
     });
 
-    // Marcar order como completada y persistir datos del receipt
+    // Marcar order como completada y persistir datos del receipt.
+    // fee_amount se sobreescribe con el developer_fee real de Bridge: fuente de verdad
+    // para este flujo, ya que el fee se configura por VA y puede diferir del calculo local.
     await this.supabase
       .from('payment_orders')
       .update({
         status: 'completed',
         va_deposit_status: 'payment_processed',
         completed_at: new Date().toISOString(),
+        fee_amount: bridgeDeveloperFee ?? undefined,
         net_amount: creditAmount,
         amount_destination: creditAmount,
         destination_currency: destinationCurrency?.toUpperCase() ?? null,
