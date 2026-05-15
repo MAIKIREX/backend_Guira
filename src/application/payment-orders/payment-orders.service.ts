@@ -1234,7 +1234,7 @@ export class PaymentOrdersService {
       status: 'pending',
       reference_type: 'payment_order',
       reference_id: orderId,
-      bridge_transfer_id: bridgeTransferRow?.id ?? null,
+      bridge_transfer_id: (bridgeTransfer.id as string) ?? null,
       description: `On-ramp BOB: ${dto.amount} BOB → ${netAmountUsdc} ${resolvedFiatBoDest.toUpperCase()} vía PSAV (${psavSource.payment_rail})`,
     });
 
@@ -1672,7 +1672,7 @@ export class PaymentOrdersService {
         status: 'pending',
         reference_type: 'payment_order',
         reference_id: order.id,
-        bridge_transfer_id: btRow?.id ?? null,
+        bridge_transfer_id: transferId ?? null,
         description: `Off-ramp BO: ${net_amount} ${sourceCurrency} → BOB (PSAV)`,
       });
 
@@ -2388,7 +2388,7 @@ export class PaymentOrdersService {
           status: 'pending',
           reference_type: 'payment_order',
           reference_id: order.id,
-          bridge_transfer_id: btRow?.id ?? null,
+          bridge_transfer_id: transferId ?? null,
           description: `Wallet-to-fiat (on-chain): ${dto.amount} ${sourceCurrency} (${dto.source_network}) → ${supplier.name}`,
         });
       } catch (ledgerErr) {
