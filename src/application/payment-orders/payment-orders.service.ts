@@ -1434,7 +1434,7 @@ export class PaymentOrdersService {
       status: 'pending',
       reference_type: 'payment_order',
       reference_id: order.id,
-      bridge_transfer_id: bridgeTransferRow?.id ?? null,
+      bridge_transfer_id: (bridgeTransfer.id as string) ?? null,
       description: `On-ramp crypto: ${net_amount} ${resolvedDestCurrency.toUpperCase()} desde ${dto.source_address ?? 'cualquier dirección'} (${dto.source_network})`,
     });
 

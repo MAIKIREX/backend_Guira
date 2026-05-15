@@ -1557,6 +1557,8 @@ export class WebhooksService {
       (destination?.payment_rail as string | undefined) ??
       (destination?.network as string | undefined) ??
       null;
+    const sourceTxHash =
+      (receipt?.source_tx_hash as string | undefined) ?? null;
 
     // 1. UPDATE bridge_transfers
     // FIX #4: Usar maybeSingle() — si el INSERT de bridge_transfers falló previamente
@@ -1683,6 +1685,7 @@ export class WebhooksService {
             status: 'completed',
             completed_at: new Date().toISOString(),
             tx_hash: destinationTxHash,
+            source_tx_hash: sourceTxHash,
             receipt_url: receiptUrl,
             provider_reference:
               traceNumber ?? destinationTxHash ?? context?.providerEventId ?? null,
@@ -1703,6 +1706,10 @@ export class WebhooksService {
               : {}),
             ...(initialAmount === 0 && receipt?.developer_fee
               ? { fee_amount: parseFloat(receipt.developer_fee as string) }
+              : {}),
+            // net_amount = final_amount real (on-ramp flexible arranca en 0)
+            ...(initialAmount === 0 && receiptFinalAmount != null
+              ? { net_amount: receiptFinalAmount }
               : {}),
           })
           .eq('id', paymentOrder.id);
