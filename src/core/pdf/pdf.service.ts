@@ -26,17 +26,17 @@ const COLORS = {
 
 // Human-readable labels per flow_type
 const FLOW_LABELS: Record<string, string> = {
-  fiat_bo_to_bridge_wallet: 'Depósito BOB → Billetera Bridge',
-  crypto_to_bridge_wallet: 'Depósito Crypto → Billetera Bridge',
-  fiat_us_to_bridge_wallet: 'Depósito USD → Billetera Bridge',
-  bridge_wallet_to_fiat_bo: 'Retiro Bridge → Cuenta BOB',
-  bridge_wallet_to_fiat_us: 'Retiro Bridge → Cuenta USD',
-  bridge_wallet_to_crypto: 'Retiro Bridge → Wallet Crypto',
-  bolivia_to_world: 'Bolivia → Exterior',
-  bolivia_to_wallet: 'Bolivia → Wallet Crypto',
-  wallet_to_wallet: 'Wallet → Wallet (Crypto)',
-  world_to_bolivia: 'Exterior → Bolivia',
-  va_deposit: 'Depósito Cuenta Virtual',
+  fiat_bo_to_bridge_wallet: 'Deposito BOB - Billetera Guira',
+  crypto_to_bridge_wallet: 'Deposito Crypto - Billetera Guira',
+  fiat_us_to_bridge_wallet: 'Deposito USD - Billetera Guira',
+  bridge_wallet_to_fiat_bo: 'Retiro Guira - Cuenta BOB',
+  bridge_wallet_to_fiat_us: 'Retiro Guira - Cuenta USD',
+  bridge_wallet_to_crypto: 'Retiro Guira - Wallet Crypto',
+  bolivia_to_world: 'Bolivia - Exterior',
+  bolivia_to_wallet: 'Bolivia - Wallet Crypto',
+  wallet_to_wallet: 'Wallet - Wallet (Crypto)',
+  world_to_bolivia: 'Exterior - Bolivia',
+  va_deposit: 'Deposito Cuenta Virtual',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -193,15 +193,15 @@ export class PdfService {
     if (ft === 'fiat_bo_to_bridge_wallet') {
       // source_address = Bridge/PSAV intermediate wallet that converted BOB and sent stablecoin
       if (order.source_address) {
-        rows.push(this.row('Dirección PSAV Bridge', this.toDisplay(order.source_address)));
+        rows.push(this.row('Direccion PSAV Guira', this.toDisplay(order.source_address)));
       }
       if (order.source_network) {
-        rows.push(this.row('Red de Salida Bridge', this.toDisplay(order.source_network)));
+        rows.push(this.row('Red de Salida Guira', this.toDisplay(order.source_network)));
       }
       // exchange_fee = Bridge's own conversion fee (show only when non-zero)
       const bridgeFee = Number(order.exchange_fee);
       if (order.exchange_fee != null && !Number.isNaN(bridgeFee) && bridgeFee !== 0) {
-        rows.push(this.row('Comisión Bridge', `${this.fmtAmount(bridgeFee)} ${order.source_currency ?? ''}`));
+        rows.push(this.row('Comision Guira', `${this.fmtAmount(bridgeFee)} ${order.source_currency ?? ''}`));
       }
     }
 
@@ -478,12 +478,12 @@ export class PdfService {
 
       // Bridge Transfer ID — all Bridge flows
       if (order.bridge_transfer_id) {
-        traceRows.push(this.row('ID Transferencia Bridge', this.toDisplay(order.bridge_transfer_id)));
+        traceRows.push(this.row('ID Transferencia Guira', this.toDisplay(order.bridge_transfer_id)));
       }
 
       // Bridge Deposit ID — va_deposit
       if (order.deposit_id) {
-        traceRows.push(this.row('ID Depósito Bridge', this.toDisplay(order.deposit_id)));
+        traceRows.push(this.row('ID Deposito Guira', this.toDisplay(order.deposit_id)));
       }
 
       // Destination blockchain tx hash — proof of delivery
@@ -503,7 +503,7 @@ export class PdfService {
 
       // Official Bridge receipt URL — only full https:// URLs (not Supabase storage paths)
       if (order.receipt_url && String(order.receipt_url).startsWith('http')) {
-        traceRows.push(this.row('Recibo Oficial Bridge', this.toDisplay(order.receipt_url)));
+        traceRows.push(this.row('Recibo Oficial Guira', this.toDisplay(order.receipt_url)));
       }
 
       // Staff approval date — manual flows that require Guira review
