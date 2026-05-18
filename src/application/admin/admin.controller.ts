@@ -24,7 +24,7 @@ import { ReconciliationService } from './reconciliation.service';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import { RolesGuard } from '../../core/guards/roles.guard';
 import { Roles } from '../../core/decorators/roles.decorator';
-import { CreateSettingDto, UpdateSettingDto } from './dto/admin.dto';
+import { CreateSettingDto, UpdateSettingDto, UpdateCurrencySettingDto } from './dto/admin.dto';
 
 // ── SETTINGS PÚBLICOS (Require auth, retorna solo settings con is_public=true) ──
 
@@ -37,6 +37,12 @@ export class PublicSettingsController {
   @ApiOperation({ summary: 'Obtener configuración pública de la app' })
   getPublicSettings() {
     return this.adminService.getPublicSettings();
+  }
+
+  @Get('currencies')
+  @ApiOperation({ summary: 'Obtener divisas activas (requiere auth)' })
+  getActiveCurrencies() {
+    return this.adminService.getActiveCurrencies();
   }
 }
 
@@ -96,6 +102,26 @@ export class AdminController {
     @CurrentUser() user: User,
   ) {
     return this.adminService.updateSetting(key, dto, user.id);
+  }
+
+  // ── CURRENCY SETTINGS ────────────────────────
+
+  @Get('currency-settings')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Listar configuración de divisas' })
+  getCurrencySettings() {
+    return this.adminService.getCurrencySettings();
+  }
+
+  @Patch('currency-settings/:currency')
+  @Roles('admin', 'super_admin')
+  @ApiOperation({ summary: 'Activar o desactivar una divisa' })
+  updateCurrencySetting(
+    @Param('currency') currency: string,
+    @Body() dto: UpdateCurrencySettingDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.adminService.updateCurrencySetting(currency, dto, user.id);
   }
 
   // ── AUDIT LOGS ───────────────────────────────

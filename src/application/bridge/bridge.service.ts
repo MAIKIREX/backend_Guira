@@ -35,9 +35,25 @@ export class BridgeService {
   //  VIRTUAL ACCOUNTS (depósitos entrantes)
   // ═══════════════════════════════════════════════════
 
+  private async assertCurrencyActive(currency: string): Promise<void> {
+    const { data } = await this.supabase
+      .from('currency_settings')
+      .select('is_active')
+      .eq('currency', currency.toLowerCase())
+      .single();
+
+    if (!data || !data.is_active) {
+      throw new BadRequestException(
+        `La divisa ${currency.toUpperCase()} no está habilitada en este momento.`,
+      );
+    }
+  }
+
   /** Crea Virtual Account en Bridge + guarda en DB. */
   async createVirtualAccount(userId: string, dto: CreateVirtualAccountDto) {
     const profile = await this.getVerifiedProfile(userId);
+
+    await this.assertCurrencyActive(dto.destination_currency);
 
     // Validación: no pueden venir ambos destinos a la vez
     if (dto.destination_wallet_id && dto.destination_address) {

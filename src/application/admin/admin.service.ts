@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT } from '../../core/supabase/supabase.module';
-import { UpdateSettingDto, CreateSettingDto } from './dto/admin.dto';
+import { UpdateSettingDto, CreateSettingDto, UpdateCurrencySettingDto } from './dto/admin.dto';
 
 @Injectable()
 export class AdminService {
@@ -93,6 +93,60 @@ export class AdminService {
       table_name: 'app_settings',
       record_id: null,
       new_values: dto,
+      source: 'admin_panel',
+    });
+
+    return data;
+  }
+
+  // ── CURRENCY SETTINGS ─────────────────────────────────────────────
+
+  async getCurrencySettings() {
+    const { data, error } = await this.supabase
+      .from('currency_settings')
+      .select('*')
+      .order('sort_order', { ascending: true });
+
+    if (error) throw new BadRequestException(error.message);
+    return data;
+  }
+
+  async getActiveCurrencies(): Promise<string[]> {
+    const { data, error } = await this.supabase
+      .from('currency_settings')
+      .select('currency')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true });
+
+    if (error) throw new BadRequestException(error.message);
+    return (data ?? []).map((r) => r.currency);
+  }
+
+  async updateCurrencySetting(
+    currency: string,
+    dto: UpdateCurrencySettingDto,
+    actorId: string,
+  ) {
+    const { data, error } = await this.supabase
+      .from('currency_settings')
+      .update({
+        is_active: dto.is_active,
+        updated_by: actorId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('currency', currency)
+      .select()
+      .single();
+
+    if (error || !data) throw new NotFoundException(`Divisa '${currency}' no encontrada`);
+
+    await this.supabase.from('audit_logs').insert({
+      performed_by: actorId,
+      role: 'admin',
+      action: dto.is_active ? 'ENABLE_CURRENCY' : 'DISABLE_CURRENCY',
+      table_name: 'currency_settings',
+      record_id: null,
+      new_values: { currency, is_active: dto.is_active },
       source: 'admin_panel',
     });
 

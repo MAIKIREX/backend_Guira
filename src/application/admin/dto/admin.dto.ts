@@ -21,6 +21,12 @@ export class UpdateSettingDto {
   value: string;
 }
 
+export class UpdateCurrencySettingDto {
+  @ApiProperty()
+  @IsBoolean()
+  is_active: boolean;
+}
+
 export class CreateSettingDto extends UpdateSettingDto {
   @ApiProperty()
   @IsString()

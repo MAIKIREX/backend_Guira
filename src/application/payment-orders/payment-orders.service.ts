@@ -66,6 +66,20 @@ export class PaymentOrdersService {
   //  RATE LIMITS & VALIDATION
   // ═══════════════════════════════════════════════
 
+  private async assertCurrencyActive(currency: string): Promise<void> {
+    const { data } = await this.supabase
+      .from('currency_settings')
+      .select('is_active')
+      .eq('currency', currency.toLowerCase())
+      .single();
+
+    if (!data || !data.is_active) {
+      throw new BadRequestException(
+        `La divisa ${currency.toUpperCase()} no está habilitada en este momento.`,
+      );
+    }
+  }
+
   private async validateRateLimit(userId: string): Promise<void> {
     const { data: setting } = await this.supabase
       .from('app_settings')
@@ -997,6 +1011,13 @@ export class PaymentOrdersService {
     reviewContext?: { clientReason: string; documentUrl?: string },
   ) {
     await this.validateRateLimit(userId);
+
+    // Validar que la divisa principal del flujo esté habilitada
+    const currencyToCheck =
+      dto.destination_currency ?? dto.source_currency;
+    if (currencyToCheck) {
+      await this.assertCurrencyActive(currencyToCheck);
+    }
 
     // Resolver la moneda de entrada para normalizar límites a USD
     let inputCurrency = 'USD';
